@@ -72,9 +72,10 @@ const payrollBodySchema = z.object({
   taxCode: z.string().nullable().optional(),
 })
 
-/** Shared filter builder for the payroll list (search/project/category/month/year/status). */
+/** Shared filter builder for the payroll list (search/client/project/category/month/year/status). */
 function buildWhere(searchParams: URLSearchParams): Prisma.PayrollWhereInput {
   const search = searchParams.get('search')?.trim() ?? ''
+  const clientId = searchParams.get('clientId')?.trim() ?? ''
   const projectId = searchParams.get('projectId')?.trim() ?? ''
   const categoryId = searchParams.get('categoryId')?.trim() ?? ''
   const month = toInt(searchParams.get('month'), 0)
@@ -89,16 +90,22 @@ function buildWhere(searchParams: URLSearchParams): Prisma.PayrollWhereInput {
   }
   if (categoryId) staffConditions.push({ staffCategoryId: categoryId })
 
+  // Project conditions — a client filter narrows to that client's projects;
+  // when both are given, clientId wins the scoping and projectId refines it.
+  const projectConditions: Prisma.ProjectWhereInput[] = []
+  if (clientId) projectConditions.push({ clientId })
+  if (projectId) projectConditions.push({ id: projectId })
+
   return {
     ...(staffConditions.length ? { staff: { AND: staffConditions } } : {}),
-    ...(projectId ? { projectId } : {}),
+    ...(projectConditions.length ? { project: { AND: projectConditions } } : {}),
     ...(month >= 1 && month <= 12 ? { month } : {}),
     ...(year > 0 ? { year } : {}),
     ...(status === 'pending' || status === 'paid' ? { status } : {}),
   }
 }
 
-// GET /api/payrolls?search&projectId&categoryId&month&year&status&page&pageSize
+// GET /api/payrolls?search&clientId&projectId&categoryId&month&year&status&page&pageSize
 export async function GET(req: NextRequest) {
   try {
     const user = await requirePermission('payroll.view')

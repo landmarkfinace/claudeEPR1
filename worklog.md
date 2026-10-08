@@ -1006,3 +1006,33 @@ Stage Summary:
 - The CLIENT RATE is manually typed per worker (always-visible inputs, live totals), stored on the payroll row per month; OT rate optional (defaults to the regular rate). Fallback chain manual → project default → worker rate (⚠ flagged). Bulk "Apply to all" per project.
 - Rates live in Payroll.clientRate/clientOtRate: created payroll rows prefill from the project default, payroll form edits preserve them, and the summary endpoints are the designated editors (payroll.edit permission).
 - Gotchas for future agents: (1) react-hooks v6 rules — no setState inside effects and no ref reads during render; use the render-time "adjust state when a prop changes" pattern (see RateCell prevValue). (2) grep output of schema.prisma can STRIP "[m" (looked like `@@index(onth, year])`) — verify with od/Read before "fixing" it. (3) Reload of the SPA resets to Dashboard — re-navigate for QA. (4) After bulk apply, mounted RateCells sync via the value-prop render pattern (only while not editing).
+
+---
+Task ID: client-filter-payroll (follows the Client Salary Summary task)
+Agent: main (Z.ai Code)
+Task: User request (Bengali): "Create Payroll e ekta client option banaw. Click korle sudu ze client er kace lok kaj kore segulo show korbe. ete kaj easy hbe." — add a CLIENT filter to the Payroll module: clicking a client shows only the workers working for that client.
+
+Work Log:
+- Backend `/api/payrolls/route.ts` (GET): buildWhere now accepts `clientId` — filters `project: { AND: [{ clientId }, { id? }] }` (client scopes, project refines; both given = both applied). Old `{ projectId }` semantics preserved when only projectId is set. No schema change needed (Project.clientId already exists).
+- Frontend `payroll.tsx` (PayrollView):
+  - New `clientFilter` state + `clients` loaded via fetchAllPages('/api/clients') (requireAuth — available to all roles).
+  - "All Clients" FilterSelect FIRST in the filter bar (before Project); clientId passed to BOTH loadList and the CSV export walk; activeCount includes it.
+  - handleClientFilterChange: resets page AND drops a projectFilter that belongs to a different client (project options are narrowed to the selected client's projects via clientProjectOptions memo).
+- Frontend `payroll.tsx` (PayrollFormDialog) — client-aware create flow:
+  - New props clientFilterId/clientFilterName passed from the list; dialog description shows "Client view — {client}: pick from the workers deployed to this client".
+  - Staff combobox scoped: fetches `/api/deployments?assignment=assigned&clientId=X` when a client is active → shows ONLY that client's deployed workers by default, each row displaying their current PROJECT chip + rate; header "N deployed to {client}" with a "Show all staff"/"Deployed only" toggle (41 total vs 14 deployed for Al Waha); badge under the combobox mirrors the scope; empty search message adapts.
+  - handleSelectStaff: picking a worker AUTO-PRESELECTS their current project on that client (deployment.projectId) when the form project is still 'none' — the "kaj easy" convenience.
+  - Project select now GROUPED by client company (SelectGroup + SelectLabel); the active client's group sorts first, "No Client" last.
+- QA (agent-browser as Super Admin, Sept 2026 period):
+  - Client dropdown lists all 8 seeded clients; selecting Al Waha Engineering Group → "Showing 1–8 of 8 payrolls", every row = SABIC Gas Plant Piping Works / Al Waha; Total Net SAR 86,425.20 (API cross-check identical: total 8, net 86425.2).
+  - Project dropdown narrowed to only that client's projects; switching client Hyundai → Al Waha resets a foreign project filter to All (verified JAFURAH→All).
+  - All Clients → full 32 payrolls, net 347,503.65 restored.
+  - Create dialog (client active): "Client view — Al Waha Engineering Group…" description, 14 deployed workers listed with SABIC project chips, toggle → 41 staff, Ajay Verma selection auto-preselected SABIC Gas Plant Piping Works, project select grouped by client with Al Waha first. Cancelled without saving (no test data).
+  - Mobile 390px: no horizontal scroll, client filter collapses behind the Filters toggle (3 applied badge), expanded shows all filters.
+  - Console/page errors clean; lint 0 problems; dev.log shows clientId requests all 200.
+  - VLM visual verification of screenshots: client filter visible+selected, all rows scoped, no layout issues.
+
+Stage Summary:
+- Payroll now has a first-class CLIENT filter: pick a client → the list, totals (gross/deductions/net), pagination and CSV export all scope to that client's workers (payroll rows whose project belongs to the client).
+- Creating payroll from a client-filtered view is streamlined: staff picker defaults to that client's deployed workers (with project chips + show-all toggle), the worker's current project auto-preselects, and the project dropdown is grouped by client.
+- Gotcha: QA login = admin@example.com / password. SPA resets to Dashboard on reload — navigate Staff & Workforce → Payroll. Refs change after each filter action — always re-snapshot before clicking.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Banknote,
+  Building2,
   CalendarClock,
   CalendarDays,
   Check,
@@ -46,7 +47,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -79,7 +82,9 @@ import {
   PAY_TYPE_LABELS,
   type AdvancePayrollPreview,
   type AdvanceStalePayroll,
+  type ClientRow,
   type DeductionType,
+  type DeployedWorker,
   type Paginated,
   type PayrollRow,
   type PayrollStatus,
@@ -196,6 +201,7 @@ export function PayrollView() {
   // Filters — default to the PREVIOUS month (sandbox today: October 2026 → 9/2026)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 350)
+  const [clientFilter, setClientFilter] = useState('all')
   const [projectFilter, setProjectFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState(initialPeriod.month)
@@ -216,6 +222,7 @@ export function PayrollView() {
 
   const [projects, setProjects] = useState<ProjectRow[]>([])
   const [categories, setCategories] = useState<StaffCategory[]>([])
+  const [clients, setClients] = useState<ClientRow[]>([])
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<PayrollRow | null>(null)
@@ -229,6 +236,7 @@ export function PayrollView() {
       const res = await api.get<Paginated<PayrollRow>>(
         `/api/payrolls${qs({
           search: debouncedSearch,
+          clientId: clientFilter === 'all' ? '' : clientFilter,
           projectId: projectFilter === 'all' ? '' : projectFilter,
           categoryId: categoryFilter === 'all' ? '' : categoryFilter,
           month: monthFilter === 'all' ? '' : monthFilter,
@@ -257,7 +265,7 @@ export function PayrollView() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, projectFilter, categoryFilter, monthFilter, yearFilter, statusFilter, page, pageSize])
+  }, [debouncedSearch, clientFilter, projectFilter, categoryFilter, monthFilter, yearFilter, statusFilter, page, pageSize])
 
   // Stale advance detection for the filtered period (concrete month + year only)
   const loadStaleAdvances = useCallback(async () => {
@@ -306,8 +314,11 @@ export function PayrollView() {
     }
   }
 
-  // Filter dropdown data (projects + staff categories)
+  // Filter dropdown data (clients + projects + staff categories)
   useEffect(() => {
+    fetchAllPages<ClientRow>('/api/clients')
+      .then(setClients)
+      .catch(() => {})
     fetchAllPages<ProjectRow>('/api/projects')
       .then(setProjects)
       .catch(() => {})
@@ -323,6 +334,27 @@ export function PayrollView() {
       setPage(1)
     }
   }
+
+  /** Picking a client scopes the whole list to that client's workers — and
+   *  drops a project filter that belongs to a different client. */
+  function handleClientFilterChange(v: string) {
+    setClientFilter(v)
+    setPage(1)
+    if (v !== 'all' && projectFilter !== 'all') {
+      const belongs = projects.some((p) => p.id === projectFilter && p.clientId === v)
+      if (!belongs) setProjectFilter('all')
+    }
+  }
+
+  // Project options narrow to the selected client's projects
+  const clientProjectOptions = useMemo(() => {
+    const list =
+      clientFilter === 'all' ? projects : projects.filter((p) => p.clientId === clientFilter)
+    return list.map((p) => ({ value: p.id, label: p.name }))
+  }, [projects, clientFilter])
+
+  const activeClientName =
+    clientFilter === 'all' ? null : (clients.find((c) => c.id === clientFilter)?.name ?? null)
 
   function openCreate() {
     setEditing(null)
@@ -340,6 +372,7 @@ export function PayrollView() {
         const res = await api.get<Paginated<PayrollRow>>(
           `/api/payrolls${qs({
             search: debouncedSearch,
+            clientId: clientFilter === 'all' ? '' : clientFilter,
             projectId: projectFilter === 'all' ? '' : projectFilter,
             categoryId: categoryFilter === 'all' ? '' : categoryFilter,
             month: monthFilter === 'all' ? '' : monthFilter,
@@ -521,15 +554,22 @@ export function PayrollView() {
           />
         }
         activeCount={
-          [projectFilter, categoryFilter, monthFilter, yearFilter, statusFilter].filter(
+          [clientFilter, projectFilter, categoryFilter, monthFilter, yearFilter, statusFilter].filter(
             (v) => v !== 'all'
           ).length
         }
       >
         <FilterSelect
+          value={clientFilter}
+          onChange={handleClientFilterChange}
+          options={clients.map((c) => ({ value: c.id, label: c.name }))}
+          placeholder="All Clients"
+          className="sm:w-[190px]"
+        />
+        <FilterSelect
           value={projectFilter}
           onChange={changeFilter(setProjectFilter)}
-          options={projects.map((p) => ({ value: p.id, label: p.name }))}
+          options={clientProjectOptions}
           placeholder="All Projects"
           className="sm:w-[170px]"
         />
@@ -922,6 +962,8 @@ export function PayrollView() {
         open={formOpen}
         onOpenChange={setFormOpen}
         editing={editing}
+        clientFilterId={clientFilter !== 'all' ? clientFilter : undefined}
+        clientFilterName={activeClientName}
         onSaved={() => {
           setFormOpen(false)
           void loadList()
@@ -968,11 +1010,16 @@ function PayrollFormDialog({
   open,
   onOpenChange,
   editing,
+  clientFilterId,
+  clientFilterName,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   editing: PayrollRow | null
+  /** Client selected in the payroll list — scopes the staff picker to that client's workers. */
+  clientFilterId?: string
+  clientFilterName?: string | null
   onSaved: () => void
 }) {
   const settings = useAppStore((s) => s.settings)
@@ -986,6 +1033,12 @@ function PayrollFormDialog({
   const [submitting, setSubmitting] = useState(false)
   const [filling, setFilling] = useState(false)
   const [form, setForm] = useState<FormState>(() => defaultForm(defaultPayType))
+
+  // Client scoping — when the list is filtered by a client, the staff picker
+  // defaults to the workers deployed to that client (toggleable).
+  const activeClientId = clientFilterId ?? ''
+  const [deployedWorkers, setDeployedWorkers] = useState<DeployedWorker[]>([])
+  const [showAllStaff, setShowAllStaff] = useState(false)
 
   // Automatic advance deduction preview for the selected staff + period
   const [advancePreview, setAdvancePreview] = useState<AdvancePayrollPreview | null>(null)
@@ -1046,15 +1099,77 @@ function PayrollFormDialog({
     } else {
       setForm(defaultForm(defaultPayType))
     }
+
+    // Reset client scoping and fetch this client's deployed workers
+    setShowAllStaff(false)
+    if (clientFilterId) {
+      fetchAllPages<DeployedWorker>('/api/deployments', {
+        clientId: clientFilterId,
+        assignment: 'assigned',
+      })
+        .then((rows) => {
+          if (!cancelled) setDeployedWorkers(rows)
+        })
+        .catch(() => {
+          if (!cancelled) setDeployedWorkers([])
+        })
+    } else {
+      setDeployedWorkers([])
+    }
     return () => {
       cancelled = true
     }
-  }, [open, editing, defaultPayType])
+  }, [open, editing, defaultPayType, clientFilterId])
 
   const selectedStaff = useMemo(
     () => staffOptions.find((s) => s.id === form.staffId) ?? null,
     [staffOptions, form.staffId]
   )
+
+  // Workers deployed to the active client — each shows their current project
+  const deploymentByStaff = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const w of deployedWorkers) {
+      if (w.projectName && !m.has(w.id)) m.set(w.id, w.projectName)
+    }
+    return m
+  }, [deployedWorkers])
+
+  // Client scope active → only deployed workers (unless toggled to show all)
+  const visibleStaff = useMemo(() => {
+    if (!activeClientId || showAllStaff) return staffOptions
+    const deployed = new Set(deployedWorkers.map((w) => w.id))
+    return staffOptions.filter((s) => deployed.has(s.id))
+  }, [staffOptions, activeClientId, showAllStaff, deployedWorkers])
+
+  // Projects grouped by client company; the active client's group comes first
+  const groupedProjects = useMemo(() => {
+    type Group = { key: string; label: string; mine: boolean; projects: ProjectRow[] }
+    const groups: Group[] = []
+    const byKey = new Map<string, Group>()
+    for (const p of projectOptions) {
+      const key = p.clientId ?? '__none'
+      let g = byKey.get(key)
+      if (!g) {
+        g = {
+          key,
+          label: p.clientName ?? 'No Client',
+          mine: Boolean(activeClientId) && p.clientId === activeClientId,
+          projects: [],
+        }
+        byKey.set(key, g)
+        groups.push(g)
+      }
+      g.projects.push(p)
+    }
+    groups.sort((a, b) => {
+      if (a.mine !== b.mine) return a.mine ? -1 : 1
+      if (a.key === '__none') return 1
+      if (b.key === '__none') return -1
+      return a.label.localeCompare(b.label)
+    })
+    return groups
+  }, [projectOptions, activeClientId])
 
   // Fetch the auto-deduction preview whenever staff + period are set
   useEffect(() => {
@@ -1125,11 +1240,18 @@ function PayrollFormDialog({
 
   function handleSelectStaff(id: string) {
     const staff = staffOptions.find((s) => s.id === id)
+    const deployment = activeClientId
+      ? deployedWorkers.find((w) => w.id === id)
+      : undefined
     setField({
       staffId: id,
       // Auto-fill editable rate snapshots from the staff profile
       hourlyRate: staff ? String(staff.ratePerHour) : form.hourlyRate,
       overtimeRate: staff ? String(staff.overtimeRate) : form.overtimeRate,
+      // Convenience: preselect the worker's current project on this client
+      ...(deployment?.projectId && form.projectId === 'none'
+        ? { projectId: deployment.projectId }
+        : {}),
     })
     setStaffOpen(false)
   }
@@ -1231,7 +1353,9 @@ function PayrollFormDialog({
           <DialogDescription>
             {editing
               ? `Update the payroll for ${editing.staff.fullName} — ${monthName(editing.month)} ${editing.year}. Gross, deductions and net pay are recalculated on save.`
-              : 'Fill hours, rates and deductions. Gross, deductions and net pay are calculated automatically and re-verified by the server.'}
+              : activeClientId
+                ? `Client view — ${clientFilterName}: pick from the workers deployed to this client. Totals are calculated automatically and re-verified by the server.`
+                : 'Fill hours, rates and deductions. Gross, deductions and net pay are calculated automatically and re-verified by the server.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1270,28 +1394,65 @@ function PayrollFormDialog({
                   <Command>
                     <CommandInput placeholder="Search by name or IQAMA" />
                     <CommandList>
-                      <CommandEmpty>No staff found.</CommandEmpty>
-                      <CommandGroup>
-                        {staffOptions.map((s) => (
-                          <CommandItem
-                            key={s.id}
-                            value={`${s.fullName} ${s.iqamaId}`}
-                            onSelect={() => handleSelectStaff(s.id)}
-                          >
-                            <Check
-                              className={cn(
-                                'h-4 w-4',
-                                form.staffId === s.id ? 'opacity-100' : 'opacity-0'
-                              )}
-                            />
+                      <CommandEmpty>
+                        {activeClientId && !showAllStaff
+                          ? `No workers deployed to ${clientFilterName ?? 'this client'} match this search.`
+                          : 'No staff found.'}
+                      </CommandEmpty>
+                      {activeClientId ? (
+                        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                          <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            <Building2 className="h-3 w-3 shrink-0" />
                             <span className="truncate">
-                              {s.fullName} — IQAMA: {s.iqamaId}
+                              {deployedWorkers.length} deployed to{' '}
+                              <span className="font-medium text-foreground">
+                                {clientFilterName ?? 'this client'}
+                              </span>
                             </span>
-                            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-                              {formatNumber(s.ratePerHour)}/hr
-                            </span>
-                          </CommandItem>
-                        ))}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 shrink-0 px-2 text-[11px]"
+                            onClick={() => setShowAllStaff((v) => !v)}
+                          >
+                            {showAllStaff ? 'Deployed only' : 'Show all staff'}
+                          </Button>
+                        </div>
+                      ) : null}
+                      <CommandGroup>
+                        {visibleStaff.map((s) => {
+                          const projectName = deploymentByStaff.get(s.id)
+                          return (
+                            <CommandItem
+                              key={s.id}
+                              value={`${s.fullName} ${s.iqamaId}`}
+                              onSelect={() => handleSelectStaff(s.id)}
+                            >
+                              <Check
+                                className={cn(
+                                  'h-4 w-4',
+                                  form.staffId === s.id ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                              <span className="truncate">
+                                {s.fullName} — IQAMA: {s.iqamaId}
+                              </span>
+                              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                                {projectName ? (
+                                  <span
+                                    className="max-w-[110px] truncate rounded-sm bg-muted px-1.5 py-0.5"
+                                    title={projectName}
+                                  >
+                                    {projectName}
+                                  </span>
+                                ) : null}
+                                <span className="tabular-nums">{formatNumber(s.ratePerHour)}/hr</span>
+                              </span>
+                            </CommandItem>
+                          )
+                        })}
                       </CommandGroup>
                     </CommandList>
                   </Command>
@@ -1299,6 +1460,16 @@ function PayrollFormDialog({
               </Popover>
               <div className="flex flex-wrap items-center gap-2">
                 {rateBadge}
+                {activeClientId && !editing ? (
+                  <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-0.5 text-xs text-muted-foreground">
+                    <Building2 className="h-3 w-3 shrink-0" />
+                    <span className="truncate">
+                      {showAllStaff
+                        ? 'Showing all staff'
+                        : `${visibleStaff.length} worker${visibleStaff.length === 1 ? '' : 's'} deployed to ${clientFilterName ?? 'this client'}`}
+                    </span>
+                  </span>
+                ) : null}
                 {editing ? (
                   <span className="text-xs text-muted-foreground">
                     Staff member is locked when editing an existing payroll.
@@ -1308,7 +1479,15 @@ function PayrollFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Project (optional)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Project (optional)</Label>
+                {activeClientId ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Building2 className="h-3 w-3" />
+                    {clientFilterName} projects first
+                  </span>
+                ) : null}
+              </div>
               <Select
                 value={form.projectId}
                 onValueChange={(v) => setField({ projectId: v })}
@@ -1318,10 +1497,17 @@ function PayrollFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Project</SelectItem>
-                  {projectOptions.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
+                  {groupedProjects.map((g) => (
+                    <SelectGroup key={g.key}>
+                      <SelectLabel className="text-xs font-medium text-muted-foreground">
+                        {g.label}
+                      </SelectLabel>
+                      {g.projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
