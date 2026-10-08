@@ -127,6 +127,7 @@ model Staff {
   attendances Attendance[]
   payrolls    Payroll[]
   advances    WorkerAdvance[]
+  expenses    Transaction[]    @relation("ExpenseSpender")
 
   @@index([staffCategoryId])
   @@index([status])
@@ -233,12 +234,25 @@ model Transaction {
   payroll               Payroll?            @relation(fields: [payrollId], references: [id], onDelete: Cascade)
   advancePayment        WorkerAdvance?      @relation("AdvancePayment")
   advanceRecoveries     PayrollAdvanceDeduction[]
+  // ---- Worker expense tracking (Expense List) ----
+  // WHO made the expense (worker name + IQAMA come from the Staff record)
+  spenderStaffId        String?
+  spender               Staff?              @relation("ExpenseSpender", fields: [spenderStaffId], references: [id], onDelete: SetNull)
+  // Which month the expense BELONGS to (defaults to the transaction date)
+  expenseMonth          Int? // 1-12
+  expenseYear           Int?
+  // Attached bill receipt (stored on disk under uploads/receipts, served via API)
+  receiptExt            String? // jpg | png | webp | pdf
+  receiptName           String? // original filename
+  receiptSize           Int? // bytes
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
   @@index([type, transactionDate])
   @@index([projectId])
   @@index([transactionCategoryId])
+  @@index([spenderStaffId])
+  @@index([expenseYear, expenseMonth])
 }
 
 // Worker salary advance (money given to a worker, recovered via payroll deductions)

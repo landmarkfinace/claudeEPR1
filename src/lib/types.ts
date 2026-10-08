@@ -482,6 +482,15 @@ export type TransactionRow = {
   project: { id: string; name: string } | null
   operator: { id: string; name: string } | null
   payrollId: string | null
+  /** WHO made the expense (worker) — name + IQAMA come from the staff record */
+  spender: { id: string; fullName: string; iqamaId: string } | null
+  /** Month (1-12) / year the expense belongs to (mirrors transactionDate by default) */
+  expenseMonth: number | null
+  expenseYear: number | null
+  /** Attached bill receipt (served from /api/transactions/[id]/receipt) */
+  receiptName: string | null
+  receiptExt: string | null
+  receiptSize: number | null
 }
 
 export type UserRow = {
@@ -492,6 +501,35 @@ export type UserRow = {
   isActive: boolean
   createdAt: string
   role: { id: string; name: string } | null
+}
+
+/** One month's aggregate for a spender in the worker expense statement */
+export type ExpenseStatementMonth = {
+  month: number
+  count: number
+  total: number
+  receipts: number
+}
+
+/** Per-spender block of the yearly worker expense statement */
+export type ExpenseStatementSpender = {
+  spender: { id: string; fullName: string; iqamaId: string; position: string | null }
+  months: ExpenseStatementMonth[]
+  totalCount: number
+  total: number
+  receipts: number
+}
+
+/** GET /api/transactions/expense-statement?year — who spent how much each month */
+export type ExpenseStatement = {
+  year: number
+  grandTotal: number
+  spenders: ExpenseStatementSpender[]
+  unassigned: {
+    months: ExpenseStatementMonth[]
+    totalCount: number
+    total: number
+  }
 }
 
 export type AppSettings = {

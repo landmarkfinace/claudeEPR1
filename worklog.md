@@ -1036,3 +1036,44 @@ Stage Summary:
 - Payroll now has a first-class CLIENT filter: pick a client → the list, totals (gross/deductions/net), pagination and CSV export all scope to that client's workers (payroll rows whose project belongs to the client).
 - Creating payroll from a client-filtered view is streamlined: staff picker defaults to that client's deployed workers (with project chips + show-all toggle), the worker's current project auto-preselects, and the project dropdown is grouped by client.
 - Gotcha: QA login = admin@example.com / password. SPA resets to Dashboard on reload — navigate Staff & Workforce → Payroll. Refs change after each filter action — always re-snapshot before clicking.
+
+---
+Task ID: expense-list-worker-tracking
+Agent: main (Z.ai Code)
+Task: User request (Bengali): "Expense List ke emn vabe banaw ze expense korce tar name and iqama number thakbe and month. bill recept uplode kora zabe. ke koto taka expense korece tar every month statement print kora zabe ba total dekha zabe" — rebuild the Expense List with the spender's name + IQAMA + month on every entry, bill receipt upload, and per-worker monthly totals printable as a statement.
+
+Work Log:
+- Schema (prisma/schema.prisma): Transaction += spenderStaffId/spender (Staff relation "ExpenseSpender", SetNull), expenseMonth/expenseYear (month the expense BELONGS to), receiptExt/receiptName/receiptSize (bill receipt metadata) + indexes [spenderStaffId], [expenseYear, expenseMonth]. Staff += expenses back-relation. `bun run db:push` + dev-server restart (known gotcha).
+- Backfill (scripts/backfill-expense-month.ts, bun): derived expenseMonth/expenseYear from transactionDate for all 47 pre-existing expense rows so old data appears in month filters/statements.
+- Types: TransactionRow += spender {id, fullName, iqamaId} | null, expenseMonth/expenseYear, receiptName/receiptExt/receiptSize; NEW ExpenseStatement / ExpenseStatementSpender / ExpenseStatementMonth (with per-month receipts count).
+- API /api/transactions (GET/POST) + /api/transactions/[id] (GET/PUT/DELETE):
+  - txInclude += spender; mapTransaction serializes the new fields.
+  - GET filters += spenderId (id | 'none' → unassigned/company), expenseMonth, expenseYear; search now also matches spender fullName/IQAMA.
+  - POST/PUT schema += spenderStaffId/expenseMonth/expenseYear (nullable optional); validation checks the staff exists (not deleted); month/year default from transactionDate when omitted; PUT preserves receipt* columns (owned by the receipt endpoint).
+  - DELETE now also removes the receipt file from disk (uploads/receipts/{id}.{ext}).
+- NEW /api/transactions/[id]/receipt (GET stream / POST upload / DELETE remove): files stored on disk under <project>/uploads/receipts, served ONLY through the authenticated GET (Content-Type + inline disposition, cookies ride along for <img>/iframe); upload = multipart FormData, JPG/PNG/WebP/PDF only, ≤ 5 MB, replace removes the old file first; payroll-linked rows rejected (409); activity-logged.
+- NEW /api/transactions/expense-statement?year[&spenderId]: groups expenses by spender × month (null month/year falls back to transactionDate), returns spenders sorted by total + unassigned bucket + grandTotal; per-month count/total/receipts.
+- Frontend — expense-list.tsx REBUILT as a standalone view (income-list.tsx / TransactionsListView untouched → zero income regression):
+  - Filters: All Workers (+'Company (No Worker)'), Month, Year, Category, Project + search (also matches worker name/IQAMA); CSV export includes Spender/IQAMA/Expense Month/Receipt columns.
+  - Form: "Spent By (Worker)" searchable combobox (name + IQAMA + position, "Company expense (no worker)" option, rose IQAMA badge), Expense Month/Year selects that auto-follow the DATE until manually changed (touch refs reset per dialog), Bill Receipt file input (create uploads after save; edit shows the attached file with View/Replace/Remove).
+  - Table (desktop): Transaction | Spent By (avatar+name+IQAMA) | Category | Month | Amount | Project | Receipt (paperclip → preview dialog / upload icon → direct file picker) | Date | Actions; mobile cards with the same info.
+  - Receipt preview dialog: <img> for images, <iframe> for PDFs, Open in New Tab, Replace, Remove; row-level quick upload via a hidden file input.
+  - "Worker Expense Statement" card: year selector + 12-month matrix per worker (Jan..Dec + Year Total, current month highlighted, Company/No Worker + Grand Total rows) + per-worker Print + Print All; mobile = spender cards with month chips.
+- NEW print component expense-statement-print.tsx: single worker → A4 PORTRAIT letterhead statement (worker identity, month rows with entries/receipts/total, YEAR TOTAL, amount in words, Prepared/Approved/Received-By signatures); all workers → A4 LANDSCAPE matrix (workers × months + Company row + grand total). Uses usePageRule like the other prints.
+- BUG FOUND & FIXED DURING QA: frontend sent spenderId='all' raw → API filtered spenderStaffId='all' → empty list. Now 'all' is stripped in qs() (both list + CSV walk).
+- QA (agent-browser, Super Admin):
+  - Backfilled data renders: 47 company expenses, statement matrix monthly totals + grand SAR 880,207.65 (2026); list "Showing 1–10 of 47".
+  - Created "Safety boots purchase — Abdul Kareem" SAR 350.50, worker Abdul Kareem (IQAMA 2471889915, badge verified), month SEPTEMBER while date = Oct 8 (independent month proven), receipt test-bill-receipt.png (53 KB) uploaded on save → paperclip button, preview dialog <img> naturalWidth 720 (file served through the authed API), Replace/Remove present.
+  - Statement updated live: Abdul Kareem Sep = 350.50; Sep grand 319,181.65 → 319,532.15; year grand → 880,558.15 (math exact).
+  - Per-worker print dialog: identity + month row + YEAR TOTAL + signatures (A4 portrait); Print All matrix (A4 landscape, Company row + grand total).
+  - Filters: Abdul Kareem → 1 record; Company (No Worker) → 47; Reset → 48→(after QA delete) 47.
+  - Delete flow: test row deleted via UI confirm → 47 records; API round-trip (create → upload qa.png → GET receipt 200 → DELETE 200) left uploads/receipts EMPTY (disk cleanup verified — earlier leftover was a stale compiled route).
+  - Income List regression: 19 records, renders fine. Mobile 390px: no horizontal scroll, statement cards + transaction cards with spender/IQAMA.
+  - lint 0 problems; console/page errors clean; dev.log clean; VLM visual check passed (Receipt column presence confirmed via DOM: 9 columns, 4 upload icons + 5 locked dashes).
+  - QA data RESTORED: test expenses deleted, uploads/receipts empty, 47 expenses as before.
+
+Stage Summary:
+- Expense List is now worker-centric: every entry shows WHO spent it (name + IQAMA), the MONTH it belongs to, and can carry the original BILL RECEIPT (JPG/PNG/WebP/PDF ≤ 5 MB) — uploadable at creation, from the table row, or from the preview dialog; receipts live on disk and stream only through the authenticated API.
+- "ke koto taka expense korece tar every month": the Worker Expense Statement card gives the per-worker × per-month totals for any year (Company/unassigned bucket included) and prints as a branded A4 statement — single worker (portrait, with signature lines incl. Received By the worker) or everyone (landscape matrix).
+- Income list untouched (separate view). Payroll/advance-created expenses keep working; they simply appear in the Company bucket until a spender is set.
+- Gotchas: (1) qs() strips only EMPTY strings — 'all' must be mapped to '' explicitly. (2) After editing an API route, give the dev server a moment to recompile before QA-ing that route (stale module served an old DELETE). (3) ok() returns the payload UNWRAPPED (no {data} envelope) — top-level fields. (4) db:push requires a dev-server restart.

@@ -2,6 +2,8 @@
 // Payroll-linked transactions cannot be edited or deleted here (409 → use Payroll module).
 import { NextRequest } from 'next/server'
 import type { NextResponse } from 'next/server'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { db } from '@/lib/db'
@@ -22,10 +24,14 @@ import {
 const PAYROLL_LINKED_MSG =
   'This transaction is linked to a payroll and must be managed from the Payroll module.'
 
+/** Project-root receipts directory (kept in sync with the receipt route). */
+const RECEIPTS_DIR = path.join(process.cwd(), 'uploads', 'receipts')
+
 const txInclude = {
   transactionCategory: { select: { id: true, name: true, type: true } },
   project: { select: { id: true, name: true } },
   operator: { select: { id: true, name: true } },
+  spender: { select: { id: true, fullName: true, iqamaId: true } },
 } satisfies Prisma.TransactionInclude
 
 type TxWithRelations = Prisma.TransactionGetPayload<{ include: typeof txInclude }>
@@ -46,6 +52,12 @@ function mapTransaction(tx: TxWithRelations): TransactionRow {
     project: tx.project ? { id: tx.project.id, name: tx.project.name } : null,
     operator: tx.operator ? { id: tx.operator.id, name: tx.operator.name } : null,
     payrollId: tx.payrollId,
+    spender: tx.spender ? { id: tx.spender.id, fullName: tx.spender.fullName, iqamaId: tx.spender.iqamaId } : null,
+    expenseMonth: tx.expenseMonth,
+    expenseYear: tx.expenseYear,
+    receiptName: tx.receiptName,
+    receiptExt: tx.receiptExt,
+    receiptSize: tx.receiptSize,
   }
 }
 
@@ -58,6 +70,10 @@ const transactionSchema = z.object({
   operatorUserId: z.string().nullable().optional(),
   transactionDate: z.string().min(1, 'Transaction date is required'),
   description: z.string().nullable().optional(),
+  // ---- worker expense tracking (Expense List) ----
+  spenderStaffId: z.string().nullable().optional(),
+  expenseMonth: z.coerce.number().int().min(1, 'Month must be 1-12').max(12, 'Month must be 1-12').nullable().optional(),
+  expenseYear: z.coerce.number().int().min(1900, 'Year is out of range').max(2200, 'Year is out of range').nullable().optional(),
 })
 
 type TransactionInput = z.infer<typeof transactionSchema>
@@ -71,6 +87,9 @@ type ValidatedTransaction = {
   operatorUserId: string
   transactionDate: Date
   description: string | null
+  spenderStaffId: string | null
+  expenseMonth: number | null
+  expenseYear: number | null
 }
 
 /** Shared body validation — returns clean values or an error response. */
@@ -104,6 +123,22 @@ async function validateTransactionBody(
   const transactionDate = parseDate(body.transactionDate)
   if (!transactionDate) return badRequest('Invalid transaction date')
 
+  // Worker expense tracking — validate the spender and default the month/year
+  // from the transaction date when the caller does not specify them.
+  let spenderStaffId: string | null = null
+  if (body.spenderStaffId) {
+    const spender = await db.staff.findFirst({
+      where: { id: body.spenderStaffId, deletedAt: null },
+      select: { id: true },
+    })
+    if (!spender) return badRequest('Selected worker does not exist')
+    spenderStaffId = body.spenderStaffId
+  }
+  const expenseMonth =
+    body.expenseMonth ?? (body.type === 'expense' ? transactionDate.getMonth() + 1 : null)
+  const expenseYear =
+    body.expenseYear ?? (body.type === 'expense' ? transactionDate.getFullYear() : null)
+
   return {
     type: body.type,
     title,
@@ -113,6 +148,9 @@ async function validateTransactionBody(
     operatorUserId,
     transactionDate,
     description: body.description?.trim() || null,
+    spenderStaffId,
+    expenseMonth,
+    expenseYear,
   }
 }
 
@@ -165,7 +203,13 @@ export async function PUT(
 
     const updated = await db.transaction.update({
       where: { id },
-      data: values,
+      data: {
+        ...values,
+        // Receipt metadata is owned by the receipt endpoint — never touched here
+        receiptExt: existing.receiptExt,
+        receiptName: existing.receiptName,
+        receiptSize: existing.receiptSize,
+      },
       include: txInclude,
     })
     await logActivity({
@@ -194,6 +238,10 @@ export async function DELETE(
     if (!existing) return notFound('Transaction not found')
     if (existing.payrollId) return conflict(PAYROLL_LINKED_MSG)
 
+    // Remove the attached bill receipt file (best-effort) along with the row
+    if (existing.receiptExt) {
+      await fs.rm(path.join(RECEIPTS_DIR, `${id}.${existing.receiptExt}`), { force: true })
+    }
     await db.transaction.delete({ where: { id } })
     await logActivity({
       user: auth,
