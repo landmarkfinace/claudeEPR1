@@ -72,6 +72,7 @@ import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/fi
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
 import { printWithPageRule } from '@/components/app/print/print-page-rule'
+import { AdvanceReceiptDialog } from '@/components/app/print/advance-receipt'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { api, qs } from '@/lib/api-client'
@@ -184,6 +185,7 @@ export function AdvancesView() {
   const [ledgerStaffId, setLedgerStaffId] = useState<string | null>(null)
   const [ledgerLabel, setLedgerLabel] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [receipt, setReceipt] = useState<AdvanceRow | null>(null)
 
   const yearOptions = useMemo(() => {
     const y = new Date().getFullYear()
@@ -274,10 +276,12 @@ export function AdvancesView() {
     }
   }
 
-  function handleSaved() {
+  function handleSaved(created: AdvanceRow | null) {
     setFormOpen(false)
     void loadList()
     void loadSummary()
+    // Auto-open the printable receipt right after a NEW advance is recorded
+    if (created) setReceipt(created)
   }
 
   async function handleExportCsv() {
@@ -370,7 +374,13 @@ export function AdvancesView() {
         title="Worker Advances"
         description="Salary advances given to workers & automatic payroll recovery"
       >
-        <Button variant="outline" size="sm" className="h-9 print-hidden" onClick={handlePrint}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 print-hidden"
+          onClick={handlePrint}
+          disabled={loading || rows.length === 0}
+        >
           <Printer className="mr-2 h-4 w-4" />
           Print PDF
         </Button>
@@ -391,24 +401,6 @@ export function AdvancesView() {
           </Button>
         ) : null}
       </PageHeader>
-
-      {/* Print-only header (visible only in print output) */}
-      <div className="hidden print:block">
-        <h1 className="text-lg font-bold">Worker Advances</h1>
-        <p className="text-xs text-neutral-600">
-          {settings.companyName} · Generated{' '}
-          {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          {activeFilterCount > 0
-            ? ` · Filter: ${
-                monthFilter !== 'all' ? `${monthName(Number(monthFilter))} ` : ''
-              }${yearFilter !== 'all' ? yearFilter : ''}${
-                statusFilter !== 'all' ? ` · ${statusFilter.replace('_', ' ')}` : ''
-              }`
-            : ' · All records'}
-          {' · Outstanding: '}
-          {formatMoney(totals.outstanding, currency)}
-        </p>
-      </div>
 
       {/* Stat cards */}
       {summary ? (
@@ -447,10 +439,32 @@ export function AdvancesView() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3 print:hidden">
+      {/* Printable content — print-only heading + advances table (A4 landscape) */}
+      <div className="print-area print-landscape">
+        {/* Print-only header (visible only in print output) */}
+        <div className="hidden print:block">
+          <h1 className="text-lg font-bold">Worker Advances</h1>
+          <p className="text-xs text-neutral-600">
+            {settings.companyName} · Generated{' '}
+            {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {activeFilterCount > 0
+              ? ` · Filter: ${
+                  monthFilter !== 'all' ? `${monthName(Number(monthFilter))} ` : ''
+                }${yearFilter !== 'all' ? yearFilter : ''}${
+                  statusFilter !== 'all' ? ` · ${statusFilter.replace('_', ' ')}` : ''
+                }`
+              : ' · All records'}
+            {' · Outstanding: '}
+            {formatMoney(totals.outstanding, currency)}
+          </p>
+        </div>
+
+        {/* Screen layout: filters + table + monthly summary */}
+        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3 print:block">
         {/* Filters + table */}
         <div className="space-y-4 lg:col-span-2">
           <SectionCard className="p-4 sm:p-6">
+            <div className="print:hidden">
             <FilterBar
               search={<SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search worker, IQAMA or reference…" />}
               activeCount={activeFilterCount}
@@ -488,8 +502,9 @@ export function AdvancesView() {
                 emptyLabel="All projects"
               />
             </FilterBar>
+            </div>
 
-            <div className="mt-4">
+            <div className="mt-4 print:mt-0">
               {loading ? (
                 <TableSkeleton rows={6} />
               ) : rows.length === 0 ? (
@@ -578,6 +593,16 @@ export function AdvancesView() {
                               </TableCell>
                               <TableCell className="px-4 py-2.5 print:hidden">
                                 <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setReceipt(r)}
+                                    title="Print advance receipt"
+                                  >
+                                    <ReceiptText className="h-4 w-4" />
+                                    <span className="sr-only">Print receipt for {r.staff.fullName}</span>
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -679,6 +704,10 @@ export function AdvancesView() {
                             </div>
                           </div>
                           <div className="mt-3 flex items-center justify-end gap-1 border-t pt-2">
+                            <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={() => setReceipt(r)}>
+                              <ReceiptText className="h-3.5 w-3.5" />
+                              Receipt
+                            </Button>
                             <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={() => {
                               setLedgerStaffId(r.staff.id)
                               setLedgerLabel(`${r.staff.fullName} — IQAMA ${r.staff.iqamaId}`)
@@ -735,7 +764,7 @@ export function AdvancesView() {
         </div>
 
         {/* Monthly summary side panel */}
-        <SectionCard className="h-fit p-4 sm:p-6">
+        <SectionCard className="h-fit p-4 sm:p-6 print:hidden">
           <div className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">Monthly Summary</h3>
@@ -776,6 +805,7 @@ export function AdvancesView() {
             </div>
           )}
         </SectionCard>
+        </div>
       </div>
 
       {/* Create / edit dialog */}
@@ -795,6 +825,13 @@ export function AdvancesView() {
         staffId={ledgerStaffId}
         staffLabel={ledgerLabel}
         onOpenChange={(o) => !o && setLedgerStaffId(null)}
+      />
+
+      {/* Advance payment receipt (print / save as PDF) */}
+      <AdvanceReceiptDialog
+        advance={receipt}
+        open={Boolean(receipt)}
+        onOpenChange={(o) => !o && setReceipt(null)}
       />
 
       {/* Mobile FAB */}
@@ -847,7 +884,8 @@ function AdvanceFormDialog({
   onOpenChange: (open: boolean) => void
   editing: AdvanceRow | null
   currency: string
-  onSaved: () => void
+  /** receives the created row (create only) so the caller can open the receipt */
+  onSaved: (created: AdvanceRow | null) => void
 }) {
   const [staffOptions, setStaffOptions] = useState<StaffRow[]>([])
   const [optionsLoading, setOptionsLoading] = useState(false)
@@ -960,9 +998,9 @@ function AdvanceFormDialog({
       toast.success(
         editing
           ? `Advance updated — ${formatMoney(res.amount, currency)}`
-          : `Advance recorded — ${formatMoney(res.amount, currency)} for ${res.staff.fullName}`
+          : `Advance recorded — ${formatMoney(res.amount, currency)} for ${res.staff.fullName}. Receipt is ready to print.`
       )
-      onSaved()
+      onSaved(editing ? null : res)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save advance')
     } finally {

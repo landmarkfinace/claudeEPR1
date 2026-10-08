@@ -1077,3 +1077,35 @@ Stage Summary:
 - "ke koto taka expense korece tar every month": the Worker Expense Statement card gives the per-worker × per-month totals for any year (Company/unassigned bucket included) and prints as a branded A4 statement — single worker (portrait, with signature lines incl. Received By the worker) or everyone (landscape matrix).
 - Income list untouched (separate view). Payroll/advance-created expenses keep working; they simply appear in the Company bucket until a spender is set.
 - Gotchas: (1) qs() strips only EMPTY strings — 'all' must be mapped to '' explicitly. (2) After editing an API route, give the dev server a moment to recompile before QA-ing that route (stale module served an old DELETE). (3) ok() returns the payload UNWRAPPED (no {data} envelope) — top-level fields. (4) db:push requires a dev-server restart.
+
+---
+Task ID: advances-print-receipt
+Agent: main (Z.ai Code)
+Task: User request (Bengali): "Worker Advances e print hoi na. ar add koro ze worker ke advance debo tar name recipt pdf banbe" — (1) FIX printing in Worker Advances (it produced blank output), (2) ADD a printable Advance Payment Receipt (PDF) with the worker's name when an advance is given.
+
+Work Log:
+- ROOT CAUSE of "print hoi na": advances.tsx had NO `.print-area` wrapper — globals.css `@media print { body * { visibility: hidden } }` (which makes only `.print-area` subtrees visible) blanked the whole page; additionally the grid wrapping the table itself carried `print:hidden`, so even the table was display:none in print.
+- advances.tsx restructure (screen order unchanged: PageHeader → stat cards → filters/table/summary):
+  - NEW wrapper `<div className="print-area print-landscape">` around the print-only heading + the filters/table/summary grid (same pattern as salary-summary.tsx). The print-only "Worker Advances" heading block moved INSIDE it.
+  - Grid gets `print:block` (no 3-col squeeze in print); FilterBar wrapped in `print:hidden`; Monthly Summary card gets `print:hidden`; table content div `print:mt-0`.
+  - Print PDF button now `disabled={loading || rows.length === 0}` (avoids printing an empty state).
+- NEW src/components/app/print/advance-receipt.tsx:
+  - `AdvanceReceiptDialog` — full-screen dialog (same shell as SalarySlipDialog) with `usePageRule('size: A4 portrait; margin: 12mm;')`, Close + "Print / Save as PDF" toolbar (print-hidden), scrollable preview.
+  - `AdvanceReceiptDocument` — branded A4 portrait receipt: letterhead (logo/company/contact, navy rule + gold accent), "ADVANCE RECEIPT" badge + Receipt No (advanceRef) + Issue date + rotated status stamp (PENDING RECOVERY / PARTIALLY RECOVERED / RECOVERED), worker info grid (Name, IQAMA, Position, Date Given, Payment Method, Reference), navy TOTAL ADVANCE PAID bar, amount in words (local toWords/amountInWords copy), Salary Recovery Schedule table (amount, recovery start, installment plan + last installment, recovered so far, remaining), Worker Acknowledgment paragraph (name + IQAMA + amount + deduction agreement), signature blocks RECEIVED BY (worker, emphasized) / PREPARED BY (current user, Accounts) / APPROVED BY (settings.authorizedSignatory), computer-generated footer.
+- advances.tsx wiring:
+  - `receipt` state + `AdvanceReceiptDialog` rendered (open while receipt != null).
+  - Receipt button on every row: desktop Actions cell (ReceiptText icon, first action) + mobile card action ("Receipt").
+  - AdvanceFormDialog.onSaved signature → `(created: AdvanceRow | null) => void`; create passes the API response row, edit passes null. handleSaved AUTO-OPENS the receipt dialog right after recording a NEW advance ("Receipt is ready to print." toast).
+- globals.css `@media print` additions (dark-mode print safety for inline print areas): `.print-area .text-muted-foreground { color: #525252 !important }`, `.print-area .bg-card { background: #ffffff !important }`.
+- QA (agent-browser as Super Admin, live data — 1 advance row exists: Alamin Hossain SAR 2,000):
+  - PRINT FIX VERIFIED with `agent-browser pdf`: output contains the print heading (company, generated date, Outstanding SAR 2,000.00) + full table (ADV-KQJ7HY, Alamin Hossain, IQAMA 2471889934, amount, given date, Cash, deduction month) — previously this exact action yielded a blank PDF.
+  - Receipt per row: button opens dialog — verified all sections via innerText (letterhead, Receipt No, worker name/IQAMA/position, amount bar, "SAR Two Thousand Only", schedule rows, acknowledgment sentence, 3 signatures with names). `agent-browser pdf` of the open dialog → 1 page containing ONLY the receipt.
+  - AUTO-OPEN after create: recorded test advance Abdul Kareem SAR 150.75 → receipt dialog auto-opened with ADV-GG14S3 instantly; then deleted via UI confirm (linked expense removed too — dev.log shows Transaction+WorkerAdvance DELETEs) → list back to 1 record. Data restored.
+  - VLM visual checks: receipt top (letterhead/worker/amount bar confirmed) + scrolled bottom (schedule table, acknowledgment, 3 signature blocks with ruled lines, clean layout, no overlap). Mobile 390px (device iPhone 13): no horizontal scroll, stat cards stacked, advance renders as card, mobile-cards element present; desktop viewport restored after.
+  - lint 0 problems; tsc: no errors in touched files (3 pre-existing errors elsewhere: skills/* + clients/salary-summary/rates route — carried, unrelated). No console errors, no failed API calls, dev.log all 200.
+
+Stage Summary:
+- Worker Advances "Print PDF" now actually prints: A4 landscape report with branded heading, filters meta and the full advances table (actions column, avatars, filters, stat cards and monthly summary are excluded from print).
+- Every advance has a printable Advance Payment Receipt (A4 portrait): worker name + IQAMA + amount (also in words) + payment method + recovery schedule + signed acknowledgment. Reachable from the row's Receipt button (desktop & mobile) and AUTO-OPENS right after recording a new advance so it can be printed/signed immediately.
+- Print CSS got dark-mode safety rules so inline print areas stay readable when printing from dark theme.
+- QA data restored (test advance deleted). Gotchas: agent-browser `pdf <path>` is the reliable way to verify print output; `find text 'Close'` sometimes fails — snapshot + click by ref instead; typing into a dialog Command input requires focusing `[cmdk-input]` via eval first.

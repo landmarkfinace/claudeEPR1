@@ -262,6 +262,14 @@
   .no-print-shadow {
     box-shadow: none !important;
   }
+  /* Dark-mode print safety: keep muted text & card surfaces readable on white
+     paper when printing an inline (non-dialog) print-area view */
+  .print-area .text-muted-foreground {
+    color: #525252 !important;
+  }
+  .print-area .bg-card {
+    background: #ffffff !important;
+  }
   /* Print tfoot once (not repeated on every page break) */
   .print-area tfoot {
     display: table-row-group;
