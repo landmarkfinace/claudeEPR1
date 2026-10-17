@@ -815,7 +815,9 @@ export function VatReturnExpenseView() {
                     <TableHead className="text-right">With VAT</TableHead>
                     <TableHead className="text-right">Without VAT</TableHead>
                     <TableHead className="text-right">VAT ({vatPercentLabel}%)</TableHead>
-                    <TableHead className="w-[100px] text-right">Actions</TableHead>
+                    {canEdit || canDelete ? (
+                      <TableHead className="w-[100px] text-right">Actions</TableHead>
+                    ) : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -863,30 +865,32 @@ export function VatReturnExpenseView() {
                       <TableCell className="text-right font-semibold tabular-nums text-amber-700 dark:text-amber-400">
                         {money(row.vatAmount)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-0.5">
-                          {canEdit ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => openEdit(row)}
-                              aria-label={`Edit bill ${row.billNumber}`}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          ) : null}
-                          {canDelete ? (
-                            <ConfirmDelete
-                              onConfirm={() => void handleDelete(row)}
-                              title="Delete VAT bill?"
-                              description={`Bill ${row.billNumber} (${money(row.amountWithVat)}, VAT ${money(
-                                row.vatAmount
-                              )}) will be permanently removed.`}
-                            />
-                          ) : null}
-                        </div>
-                      </TableCell>
+                      {canEdit || canDelete ? (
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-0.5">
+                            {canEdit ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => openEdit(row)}
+                                aria-label={`Edit bill ${row.billNumber}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {canDelete ? (
+                              <ConfirmDelete
+                                onConfirm={() => void handleDelete(row)}
+                                title="Delete VAT bill?"
+                                description={`Bill ${row.billNumber} (${money(row.amountWithVat)}, VAT ${money(
+                                  row.vatAmount
+                                )}) will be permanently removed.`}
+                              />
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -927,7 +931,8 @@ export function VatReturnExpenseView() {
                     <span className="text-xs tabular-nums text-muted-foreground">
                       Without VAT: {money(row.amountWithoutVat)}
                     </span>
-                    <div className="flex items-center gap-0.5">
+                    {canEdit || canDelete ? (
+                      <div className="flex items-center gap-0.5">
                       {canEdit ? (
                         <Button
                           variant="ghost"
@@ -946,7 +951,8 @@ export function VatReturnExpenseView() {
                           description={`Bill ${row.billNumber} (${money(row.amountWithVat)}) will be permanently removed.`}
                         />
                       ) : null}
-                    </div>
+                      </div>
+                    ) : null}
                   </div>
                 </li>
               ))}

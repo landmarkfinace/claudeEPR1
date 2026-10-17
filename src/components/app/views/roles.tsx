@@ -5,7 +5,7 @@ import { Loader2, Lock, Pencil, Plus, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api-client'
 import { useAppStore, can } from '@/lib/store'
-import { ALL_PERMISSIONS, MODULES } from '@/lib/permissions'
+import { ALL_PERMISSIONS, BASELINE_PERMISSIONS, MODULES } from '@/lib/permissions'
 import type { Role } from '@/lib/types'
 import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
@@ -388,7 +388,10 @@ export function RolesView() {
             <div className="grid gap-3">
               {MODULES.map((m) => {
                 const modulePerms = m.actions.map((a) => `${m.module}.${a}`)
-                const selectedCount = modulePerms.filter((p) => form.selected.has(p)).length
+                // Baseline permissions (e.g. vat.view) count as always selected
+                const selectedCount = modulePerms.filter(
+                  (p) => form.selected.has(p) || BASELINE_PERMISSIONS.has(p)
+                ).length
                 const allSelected = selectedCount === modulePerms.length
                 return (
                   <div key={m.module} className="rounded-lg border p-3">
@@ -409,19 +412,27 @@ export function RolesView() {
                     <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                       {m.actions.map((a) => {
                         const perm = `${m.module}.${a}`
-                        const checked = form.fullAccess || form.selected.has(perm)
+                        const isBaseline = BASELINE_PERMISSIONS.has(perm)
+                        const checked = form.fullAccess || form.selected.has(perm) || isBaseline
                         return (
                           <label
                             key={perm}
-                            className="flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors hover:bg-muted/60 has-[[data-state=checked]]:border-primary/50"
+                            className={
+                              'flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors hover:bg-muted/60' +
+                              (checked ? ' has-[[data-state=checked]]:border-primary/50' : '') +
+                              (isBaseline ? ' cursor-default bg-muted/40' : '')
+                            }
                           >
                             <Checkbox
                               checked={checked}
-                              disabled={form.fullAccess}
+                              disabled={form.fullAccess || isBaseline}
                               onCheckedChange={(v) => togglePermission(perm, v === true)}
                               aria-label={`${m.label}: ${m.actionLabels[a] ?? a}`}
                             />
-                            <span className="truncate">{m.actionLabels[a] ?? a}</span>
+                            <span className="truncate">
+                              {m.actionLabels[a] ?? a}
+                              {isBaseline && <span className="ml-1 text-[11px] font-medium text-muted-foreground">· all users</span>}
+                            </span>
                           </label>
                         )
                       })}
@@ -432,7 +443,8 @@ export function RolesView() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              A role with no permissions is view-only — users can sign in but cannot open modules.
+              VAT Return Expense viewing is available to every signed-in user. A role with no
+              permissions is view-only — users can sign in but cannot open other modules.
             </p>
           </div>
 

@@ -1,5 +1,6 @@
 // Global client state (zustand): current user, settings, active view
 import { create } from 'zustand'
+import { BASELINE_PERMISSIONS } from '@/lib/permissions'
 import type { AppSettings, SessionUser, ViewKey } from '@/lib/types'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -72,6 +73,8 @@ export function can(
   user: SessionUser | null,
   permission: string
 ): boolean {
+  // Baseline permissions (e.g. vat.view) apply to every signed-in user
+  if (user && BASELINE_PERMISSIONS.has(permission)) return true
   const perms = user?.role?.permissions ?? []
   return perms.includes('*') || perms.includes(permission)
 }

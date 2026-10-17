@@ -4,6 +4,7 @@ import { randomBytes, scrypt as _scrypt, timingSafeEqual } from 'crypto'
 import { promisify } from 'util'
 import { cookies } from 'next/headers'
 import { db } from '@/lib/db'
+import { BASELINE_PERMISSIONS } from '@/lib/permissions'
 import type { SessionUser } from '@/lib/types'
 
 const scrypt = promisify(_scrypt) as (
@@ -97,6 +98,8 @@ export function hasPermission(
   permission: string
 ): boolean {
   if (!user) return false
+  // Baseline permissions (e.g. vat.view) apply to every signed-in user
+  if (BASELINE_PERMISSIONS.has(permission)) return true
   const perms = user.role?.permissions ?? []
   if (perms.includes('*')) return true
   return perms.includes(permission)
