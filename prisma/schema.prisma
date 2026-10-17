@@ -21,6 +21,7 @@ model User {
 
   sessions             Session[]
   operatedTransactions Transaction[] @relation("Operator")
+  vatBills             VatExpenseBill[] @relation("VatBillCreator")
 }
 
 model Session {
@@ -296,6 +297,37 @@ model PayrollAdvanceDeduction {
 
   @@unique([payrollId, advanceId])
   @@index([advanceId])
+}
+
+// VAT Return Expense — supplier bills that carry Saudi VAT (default 15%,
+// configurable via the `vatRate` Setting). The user types ONLY amountWithVat;
+// the two breakdown amounts are computed server-side on every write:
+//   amountWithoutVat = round2(amountWithVat / (1 + vatRateSnapshot))
+//   vatAmount        = round2(amountWithVat - amountWithoutVat)
+// vatRateSnapshot preserves the rate that was in effect when the bill was
+// saved so historical quarters stay correct if the setting is ever changed.
+model VatExpenseBill {
+  id                String    @id @default(cuid())
+  billDate          DateTime
+  billNumber        String    @unique
+  supplierName      String?
+  supplierVatNumber String?
+  description       String?
+  // The ONLY user-entered amount (bill grand total including VAT)
+  amountWithVat     Float
+  // Auto-calculated breakdown (server-side, never trusted from the client)
+  amountWithoutVat  Float
+  vatAmount         Float
+  // Rate fraction applied when the row was written (0.15 = Saudi standard)
+  vatRateSnapshot   Float     @default(0.15)
+  // Audit: who entered the bill
+  createdById       String?
+  createdBy         User?     @relation("VatBillCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([billDate])
+  @@index([billNumber])
 }
 
 model ActivityLog {

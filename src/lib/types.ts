@@ -542,6 +542,8 @@ export type AppSettings = {
   defaultPayType: PayType
   authorizedSignatory: string
   signatoryTitle: string
+  /** VAT rate in PERCENT for the VAT Return Expense module (15 = 15% Saudi standard) */
+  vatRate: number
 }
 
 export type ActivityRow = {
@@ -620,6 +622,80 @@ export type CategoryBreakdown = {
   grossPay: number
   deductions: number
   totalAmount: number
+}
+
+// ---------------------------------------------------------------------------
+// VAT Return Expense
+// ---------------------------------------------------------------------------
+
+/** One supplier bill carrying VAT (GET/POST /api/vat-bills) */
+export type VatBillRow = {
+  id: string
+  billDate: string
+  billNumber: string
+  supplierName: string | null
+  supplierVatNumber: string | null
+  description: string | null
+  amountWithVat: number
+  amountWithoutVat: number
+  vatAmount: number
+  /** Rate fraction applied when the row was saved (0.15 = 15%) */
+  vatRateSnapshot: number
+  createdBy: { id: string; name: string } | null
+  createdAt: string
+}
+
+/** Totals block returned with the bills list */
+export type VatBillTotals = {
+  count: number
+  withVat: number
+  withoutVat: number
+  vat: number
+}
+
+/** One month line of the month-by-month / quarter tables */
+export type VatMonthLine = {
+  month: number // 1-12
+  count: number
+  withVat: number
+  withoutVat: number
+  vat: number
+}
+
+/** One quarter (Q1 Jan–Mar … Q4 Oct–Dec) with its 3 month lines + grand total */
+export type VatQuarterLine = {
+  quarter: number // 1-4
+  months: VatMonthLine[]
+  count: number
+  withVat: number
+  withoutVat: number
+  vat: number
+}
+
+/** GET /api/vat-bills/summary — everything the monthly + quarterly cards need */
+export type VatSummaryData = {
+  year: number
+  /** Selected month (1-12) the header cards are computed for */
+  month: number
+  /** VAT rate FRACTION in effect (0.15) */
+  vatRate: number
+  /** Distinct years that have bills (for the dropdowns, current year always present) */
+  years: number[]
+  /** Selected month totals (zeroed when no bills) */
+  monthTotals: VatBillTotals
+  /** 12 month lines for the selected year (all months present, zeroed when empty) */
+  monthly: VatMonthLine[]
+  /** Selected year grand totals */
+  yearTotals: VatBillTotals
+  /** All four quarters of the selected year */
+  quarters: VatQuarterLine[]
+  /** Which quarter is currently in progress (1-4, server "today") */
+  currentQuarter: number
+  currentYear: number
+  /** Last day of the current quarter (ISO) — null outside the current year */
+  quarterEndDate: string | null
+  /** ZATCA-style filing deadline: last day of the month FOLLOWING quarter end (ISO) */
+  filingDeadline: string | null
 }
 
 export type Paginated<T> = {
@@ -703,6 +779,7 @@ export type ViewKey =
   | 'expense-list'
   | 'accounts-summary'
   | 'transaction-categories'
+  | 'vat-return-expense'
   | 'roles'
   | 'users'
   | 'settings'

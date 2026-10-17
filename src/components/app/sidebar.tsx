@@ -28,6 +28,7 @@ import {
   Building2,
   Network,
   ReceiptText,
+  BadgePercent,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -117,6 +118,7 @@ const MENU: MenuGroup[] = [
           { view: 'transaction-categories', label: 'Categories', icon: Tags, perm: 'accounts.view' },
         ],
       },
+      { view: 'vat-return-expense', label: 'VAT Return Expense', icon: BadgePercent, perm: 'vat.view' },
     ],
   },
   {

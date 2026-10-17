@@ -17,6 +17,7 @@ import { IncomeListView } from './income-list'
 import { ExpenseListView } from './expense-list'
 import { AccountsSummaryView } from './accounts-summary'
 import { TransactionCategoriesView } from './transaction-categories'
+import { VatReturnExpenseView } from './vat-return-expense'
 import { RolesView } from './roles'
 import { UsersView } from './users'
 import { SettingsView } from './settings'
@@ -57,6 +58,8 @@ export function ViewRouter() {
       return <AccountsSummaryView />
     case 'transaction-categories':
       return <TransactionCategoriesView />
+    case 'vat-return-expense':
+      return <VatReturnExpenseView />
     case 'roles':
       return <RolesView />
     case 'users':

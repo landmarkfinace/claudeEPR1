@@ -22,6 +22,7 @@ const GO_SHORTCUTS: { key: string; view: ViewKey; label: string; perm: string }[
   { key: 't', view: 'salary-sheet', label: 'Salary Sheet', perm: 'payroll.view' },
   { key: 'i', view: 'income-list', label: 'Income List', perm: 'accounts.view' },
   { key: 'e', view: 'expense-list', label: 'Expense List', perm: 'accounts.view' },
+  { key: 'v', view: 'vat-return-expense', label: 'VAT Return Expense', perm: 'vat.view' },
   { key: 'r', view: 'accounts-summary', label: 'Accounts Summary', perm: 'accounts.view' },
 ]
 

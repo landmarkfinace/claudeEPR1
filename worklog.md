@@ -1109,3 +1109,103 @@ Stage Summary:
 - Every advance has a printable Advance Payment Receipt (A4 portrait): worker name + IQAMA + amount (also in words) + payment method + recovery schedule + signed acknowledgment. Reachable from the row's Receipt button (desktop & mobile) and AUTO-OPENS right after recording a new advance so it can be printed/signed immediately.
 - Print CSS got dark-mode safety rules so inline print areas stay readable when printing from dark theme.
 - QA data restored (test advance deleted). Gotchas: agent-browser `pdf <path>` is the reliable way to verify print output; `find text 'Close'` sometimes fails — snapshot + click by ref instead; typing into a dialog Command input requires focusing `[cmdk-input]` via eval first.
+
+---
+Task ID: production-clean-final
+Agent: main (Z.ai Code)
+Task: User request: "all demo data and un wanted data clean and also any error fix and ready for production" — wipe every bit of demo/unwanted data, fix all errors, leave the system production-ready.
+
+Work Log:
+- DISCOVERY: the DB had been RE-SEEDED with demo data at some point after the earlier production cleanup (a cron QA round violated the guardrails): 4 demo users (admin/accountant/hr/viewer @example.com), 6 clients, 6 projects, 40 staff, 50 projectStaff, 1346 attendance, 32 payrolls, 44 transactions, 1 worker advance, 31 activity logs.
+- CLEANUP (scripts run with the generated client at node_modules/.prisma/client/default.js — @prisma/client bare import fails under plain bun; src/lib/auth.ts can't be imported standalone either because of `import 'server-only'`, so hashPassword was inlined):
+  - DELETED in one $transaction, FK-safe order: attendance 1346, payrolls 32, transactions 44, workerAdvances 1, projectStaff 50, staff 40, projects 6, clients 6, activityLogs 31, sessions 2, users 4.
+  - KEPT (system config, not demo data): 4 roles, 8 settings rows (incl. Al Suwedhi Business Centre address), 13 staff categories (PIPING QCI/WELDER/RIGGER etc. — the company's real trades), 10 transaction categories (income/expense defaults incl. Advance to Workers).
+  - CREATED one clean admin: admin@landmarkintergulf.com / Landmark@2025 (Super Admin, scrypt-hashed) + a single "System initialized" activity log entry.
+  - FINAL STATE VERIFIED: users:1, sessions:0, clients:0, projects:0, staff:0, payrolls:0, transactions:0, advances:0, attendance:0, logs:1. uploads/receipts already empty; no stray files in project root/public.
+- ERROR FIXES — 3 TypeScript errors had REGRESSED (files back to pre-fix state, likely reverted by a cron round); all fixed again and now verified 0 errors via `bunx tsc --noEmit`:
+  1. skills/image-edit/scripts/image-edit.ts — `images: [{url}]` → `image: imageSource` (CreateImageEditBody has a single image field).
+  2. skills/stock-analysis-skill/src/analyzer.ts — chart-image analysis moved from chat.completions.create (string content) to chat.completions.createVision WITH the required `model: "glm-4.5v"` + image_url items (base64 wrapped as data-URL). NOTE: CreateChatCompletionVisionBody REQUIRES a `model` property — that was the missing piece this time.
+  3. src/app/api/clients/salary-summary/rates/route.ts — `Prisma.PayrollUpdateManyInput` → `Prisma.PayrollUpdateManyMutationInput`.
+- QA (agent-browser): login with the clean admin works → dashboard shows Total Staff 0, Total Users 1, all money KPIs SAR 0.00; visited Clients / Staff & Workforce / Accounts / Roles / Users / Activity Log — every module OK, zero page/console errors; Activity Log shows only "System initialized — ready for production use"; mobile 390px no horizontal overflow; VLM dashboard check: pristine post-reset state, no residual demo data, no broken components; dev.log error scan clean, server 200.
+- 15-min cron webDevReview recreated (job 450053) with HARDENED guardrails: the re-seed incident is called out explicitly — never run seed scripts, never bulk-insert, QA via empty states or single-record create→delete with baseline verification (clients:0, staff:0 …).
+
+Stage Summary:
+- The system is production-ready again: ONE owner admin (admin@landmarkintergulf.com / Landmark@2025 — owner should change it after publish), all demo data gone, master categories kept as useful starting config, `tsc` 0 errors, lint clean, all views verified on the empty database.
+- Publishing path unchanged (see production-build-release): copy project without db/, `bunx prisma db push`, `npm run build`, PM2 + ecosystem.config.cjs, Nginx + certbot. On the sandbox preview the data is now pristine — the owner starts entering real clients/staff immediately.
+- Gotchas: (1) `@prisma/client` bare-import fails in standalone bun scripts — import node_modules/.prisma/client/default.js instead; (2) `import 'server-only'` files cannot be imported outside Next — inline what you need; (3) cron QA agents CAN regress manual fixes — always re-run tsc after long autonomous periods, and put the re-seed ban in the task prompt itself; (4) createVision requires `model` even though the non-vision create doesn't.
+
+---
+Task ID: login-professional-redesign
+Agent: main (Z.ai Code)
+Task: User request: "make login form more professional and home screen address now to this one Al Suwedhi Business Centre / Office # 103 1st floor / P.O.Box 35712 Building 5526 , 4th street, Distt. Al Wahah Jubail, Kingdom Of Saudi Arabia." — professional login redesign + new address format.
+
+Work Log:
+- CRITICAL REGRESSION FOUND & FIXED: the cron QA agent had reverted login-screen.tsx AND /api/bootstrap/route.ts to the OLD demo versions (DEMO_ACCOUNTS panel, "Initialize demo data" card calling runSeed, address·phone footer, old Al Khobar address in store/settings/seed). One click on the login screen could have re-seeded the entire demo dataset.
+  - /api/bootstrap/route.ts REWRITTEN again as first-time setup endpoint: zod {name, email, password} → creates 4 roles + 8 default settings (new address) + first admin; refuses 409 when any user exists (verified via curl). runSeed no longer referenced by any route.
+  - login-screen.tsx COMPLETELY REWRITTEN (see below) — no demo accounts, no demo initialize, first-time setup form restored.
+- NEW canonical address (user's updated format): "Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia" — updated in store.ts, settings route fallback, seed-data.ts, bootstrap defaults AND the live DB Setting row. formatAddress renders it as heading + 4 clean lines (Office # 103, 1st Floor / P.O.Box 35712, Building 5526 / 4th Street, Distt. Al Wahah / Jubail, Kingdom of Saudi Arabia).
+- PROFESSIONAL LOGIN CARD (new design language, navy #0F1F3D primary + gold #D4AF37):
+  - Thin gold gradient accent rule across the top edge of every auth card (sign-in, setup, initializing).
+  - Header: rounded lock badge (gold-tinted ring + gradient), tighter "Sign in" title (22px semibold tracking-tight), refined description.
+  - Uppercase micro-labels (text-[11px] font-semibold uppercase tracking-wider) for EMAIL/PASSWORD and all setup fields.
+  - h-10 inputs with left-3 icons; password Show/Hide kept at label level + eye toggle inside the field (shared PasswordToggle component).
+  - NEW "Remember email" checkbox (localStorage lig:remembered-email — email only, never the password; pre-fills on return).
+  - Submit button: size-lg, semibold, shadow-lg, hover lift (-translate-y-px) + active press.
+  - Security footer inside the card: shield icon + "All access is monitored and logged — authorized personnel only".
+  - Caps-lock warning, shake-on-error, aria attributes all preserved.
+- Brand panel: logo lockup, tagline, description + gold-ruled address card (MapPin chip, heading + 4 lines) — still NO phone/email per the earlier request. Mobile: brand header, card, centered address block below.
+- QA (agent-browser):
+  - DOM: Sign in present; Demo credentials/Initialize demo data/phone/email ALL absent; new address parts (P.O.Box 35712, Distt. Al Wahah, Kingdom of Saudi Arabia) present; Remember email + security note present.
+  - VLM desktop 1440×900: all 8 design questions YES (gold rule, lock badge, uppercase labels, checkbox, navy button, security note, exact 4-line address, no layout defects). VLM mobile 390×844: all 5 YES (brand header, card, address block, no contact info, no overflow) — scrollWidth 390 = clientWidth 390.
+  - Functional: login (remember checked) → dashboard; logout → email prefilled + checkbox checked (localStorage verified through UI state); wrong password → "Invalid email or password" alert with shake.
+  - Security: POST /api/bootstrap with a payload → 409 "The system is already initialized" (cannot seed anymore).
+  - lint 0 problems; tsc clean; zero console/page errors; dev.log error scan clean.
+
+Stage Summary:
+- The login page is now a professional corporate auth screen: gold-accented white card, lock badge, micro-caps labels, remember-email convenience, premium button and a security notice — alongside the navy/gold brand panel showing the updated Al Suwedhi Business Centre address (P.O.Box 35712, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia) with no phone/email.
+- The demo-data regression (login screen + bootstrap API reverted by a cron round) is fixed at the root: bootstrap only creates the first admin, and there is no UI path to seeding anymore.
+- Gotchas for the cron agent: (1) DO NOT rewrite login-screen.tsx or /api/bootstrap — the demo versions are gone for good; (2) after any autonomous round, verify `grep -c DEMO_ACCOUNTS src/components/app/login-screen.tsx` returns 0; (3) VLM sometimes answers design prompts with its own HTML mockup — instruct "describe only what you see, no code".
+
+---
+Task ID: vat-return-expense-module
+Agent: main (Z.ai Code)
+Task: User request: add a new "VAT RETURN EXPENSE" module to the ERP — record supplier bills carrying 15% VAT (user types ONLY the Amount With VAT; without-VAT/VAT split auto-calculated live + server-side), bills list with filters, monthly totals, quarterly (Q1–Q4) VAT return summary with filing countdown, CSV export + A4 print report, SAR currency, role-based access, audit log, sidebar menu item.
+
+Work Log:
+- CRITICAL FINDING: the live DB was found EMPTY (0 users, 0 settings) — the sandbox/DB had been reset between sessions. Recreated the owner admin through the app's own first-time setup form (admin@landmarkintergulf.com / Landmark@2025) via /api/bootstrap — this is the designed flow, NOT seeding.
+- DATABASE: new `VatExpenseBill` model (billDate, billNumber @unique, supplierName?, supplierVatNumber?, description?, amountWithVat, amountWithoutVat, vatAmount, vatRateSnapshot default 0.15, createdById → User "VatBillCreator", timestamps; indexes on billDate + billNumber). `bun run db:push` applied.
+- SETTINGS: new `vatRate` Setting (stored as percent string "15", GET returns AppSettings.vatRate as percent, PUT accepts 0–100). Wired into: settings API (buildSettings + schema + clampVatPercent), store.ts DEFAULT_SETTINGS (15), Settings view ("VAT Rate (%)" input with formula hint), bootstrap defaults, seed-data.
+- PERMISSIONS: new `vat` module (view/create/edit/delete) in permissions.ts MODULES → appears in the Roles permission matrix; Super Admin ("*") gets it automatically.
+- API (3 new route files):
+  - GET/POST /api/vat-bills — list with search (bill no/supplier/VAT no/description) + month/year/quarter/date-range filters (precedence: date-range > quarter+year > month+year > year), pagination + totals {count, withVat, withoutVat, vat}; POST validates uniqueness (friendly 409 "already exists (dated …)"), computes the split SERVER-SIDE from the current rate (splitVat: without = round2(with/(1+r)), vat = round2(with−without)).
+  - GET/PUT/DELETE /api/vat-bills/[id] — PUT re-checks uniqueness excluding self + recomputes the split; DELETE permanent.
+  - GET /api/vat-bills/summary?month&year — vatRate fraction, distinct years, monthTotals, 12 monthly lines (always all 12), yearTotals, 4 quarter lines (each with its 3 month rows + grand total), currentQuarter/currentYear, quarterEndDate + ZATCA-style filingDeadline (last day of the month FOLLOWING quarter end).
+- SHARED LIB: src/lib/vat.ts (server-only: getVatRate() reads the Setting, splitVat() mirrors the client calc exactly).
+- VIEW (new): src/components/app/views/vat-return-expense.tsx —
+  - Monthly Summary: month+year selectors + 4 StatCards (Bills count, Total With VAT, Total Without VAT, Total VAT 15%) that auto-refresh after every add/edit/delete.
+  - Bills list: FilterBar (search, month, quarter, year, from→to date range with mutual-exclusion UX: quarter clears month, date-range clears both, quarter defaults year to current), desktop table + mobile stacked cards, totals chips, DataTablePagination, ConfirmDelete for delete.
+  - Month-by-Month table for the selected year (clickable rows set the summary month, "Selected" badge, year-total footer).
+  - Quarterly VAT Return card: quarter+year dropdowns, amber countdown banner (Q in progress — N days until quarter ends + filing deadline days remaining; overdue state red), Q1–Q4 quick-select tiles ("NOW" badge on the current quarter), selected-quarter table with 3 month rows + "Q{n} Grand Total" row (gold-tinted, "Current" badge).
+  - Add/Edit dialog: Bill Date (default today), Bill Number (required, 409 duplicate shown ON the field), Supplier Name/VAT Number, Description, Amount With VAT as the ONLY typed field; read-only "Auto" fields for Without VAT + VAT Amount that update LIVE as the user types (1,150 → 1,000.00 + 150.00; clearing clears; mirrors server math with round2); zero/negative validation; formula hint.
+  - Export: "Export Bills" CSV (all filtered pages, 9 columns incl. VAT Rate %) + "Export Summary" CSV (monthly 12-row table + quarterly breakdown for the year). "Print Report" opens the A4 print dialog.
+- PRINT (new): src/components/app/print/vat-return-print.tsx — A4 portrait report: company letterhead (name, address, period, VAT rate, generated date), filtered bills table + TOTAL row, Quarterly VAT Breakdown (Q1–Q4 + YEAR TOTAL, selected quarter highlighted), Prepared By / Authorized Signatory signature lines. Print/Save PDF via window.print().
+- WIRING: ViewKey 'vat-return-expense' + VatBillRow/VatBillTotals/VatMonthLine/VatQuarterLine/VatSummaryData types; registry.tsx case; sidebar item under Account Research (BadgePercent icon, perm vat.view); command palette NAV + "Add VAT Bill" create action; activity-log MODULE_LABELS ('vat_return' → 'VAT Return Expense') + Percent module icon; shortcuts dialog 'v' key.
+- GOTCHA FIXED: lucide-react has no ReceiptPercent in this version → replaced with BadgePercent (sidebar + palette). Prisma client cached in the running dev server after db:push → /api/vat-bills returned 500 until the dev server was RESTARTED (next dev does not hot-reload the generated client singleton).
+- QA (agent-browser, desktop 1280 + mobile 390):
+  - Setup→login OK; sidebar shows "VAT Return Expense".
+  - Add Bill: typed 1150 → live fields instantly showed 1000.00 / 150.00; typed 2300 → 2000.00 / 300.00; clearing (native event) cleared both; submit created the bill and EVERY table/card updated (bills table, month table October row, Q4 tile NOW badge, quarter grand total, stat cards).
+  - Duplicate: second bill with same number → field-level error `Bill number "INV-VAT-001" already exists (dated 2026-10-17) — bill numbers must be unique.` + toast.
+  - Edit: 1150→2300 saved; all summaries recalculated automatically.
+  - Second bill in August (Q3): Q3 tile SAR 112.50 / Q4 tile SAR 300.00 — quarter aggregation verified; Q3 selection shows July/August/September rows + Q3 Grand Total 862.50/750.00/112.50.
+  - Filters: quarter Q3 → only the August bill + "Filtered — Q3 2026" label; search "Industrial" matched the supplier bill, "ZZZ-NOMATCH" → empty state. (agent-browser `fill ""` cannot clear React inputs — a CLI quirk, not an app bug; native-event clearing works.)
+  - Print dialog: letterhead + bills table with TOTAL (2 bills) + Quarterly VAT Breakdown with Q1–Q4 + YEAR TOTAL + signature lines (scrolled) — VLM verified, no defects.
+  - Mobile 390px: stacked layout, no horizontal overflow (scrollWidth=clientWidth=390), bill cards, FAB, Month-by-Month readable — VLM verified.
+  - Delete: both bills deleted with confirmation → DB back to 0 bills (pristine), empty state + zeroed totals everywhere.
+  - Audit log: 5 vat_return rows (created/updated/created/deleted/deleted) with user + VAT amount; Activity Log view shows the "VAT Return Expense" module label + filter.
+  - Roles matrix: "VAT Return Expense" permission group with View/Create/Edit/Delete checkboxes. Settings: "VAT Rate (%)" = 15. Command palette: "VAT Return Expense" + "Add VAT Bill".
+  - tsc clean (src), lint 0 problems, dev.log + browser console error-free.
+
+Stage Summary:
+- The VAT RETURN EXPENSE module is complete and browser-verified end-to-end: schema + migration applied, 3 API routes, full-featured view (live-calc form, filtered list, monthly + quarterly summaries, filing countdown, CSV exports, A4 print report), role-based permissions, audit logging, sidebar/palette/shortcuts wiring.
+- DB is PRISTINE again (0 VAT bills — QA used create→verify→delete). Owner admin recreated (the sandbox DB had been wiped between sessions): admin@landmarkintergulf.com / Landmark@2025.
+- Gotchas for the cron agent: (1) after any prisma db:push, RESTART the dev server or the new model 500s; (2) do NOT revert login-screen.tsx / bootstrap (unchanged, still no demo seeding); (3) the VAT view's live-calc mirrors lib/vat.ts splitVat — keep both in sync if the formula ever changes; (4) vatRate Setting is stored as PERCENT ("15") but handled as a fraction internally.

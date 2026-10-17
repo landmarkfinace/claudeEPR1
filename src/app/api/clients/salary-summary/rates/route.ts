@@ -63,7 +63,7 @@ export async function PUT(req: NextRequest) {
         : {}),
     }
 
-    const data: Prisma.PayrollUpdateManyInput = { clientRate: input.clientRate }
+    const data: Prisma.PayrollUpdateManyMutationInput = { clientRate: input.clientRate }
     if (input.clientOtRate !== undefined) data.clientOtRate = input.clientOtRate
 
     const result = await db.payroll.updateMany({ where, data })

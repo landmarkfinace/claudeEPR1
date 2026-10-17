@@ -14,6 +14,7 @@ import {
   History,
   Loader2,
   LogIn,
+  Percent,
   Pencil,
   Plus,
   ScrollText,
@@ -52,6 +53,7 @@ const MODULE_LABELS: Record<string, string> = {
   advance: 'Worker Advances',
   transaction: 'Transactions',
   transaction_category: 'Transaction Categories',
+  vat_return: 'VAT Return Expense',
   staff: 'Staff',
   staff_category: 'Staff Categories',
   attendance: 'Attendance',
@@ -142,6 +144,8 @@ function ModuleIcon({ module, className }: { module: string; className?: string 
     case 'transaction':
     case 'transaction_category':
       return <ArrowLeftRight className={className} />
+    case 'vat_return':
+      return <Percent className={className} />
     case 'staff':
     case 'staff_category':
       return <UserPlus className={className} />

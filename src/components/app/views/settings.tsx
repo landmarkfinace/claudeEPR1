@@ -143,6 +143,7 @@ export function SettingsView() {
         defaultPayType: form.defaultPayType,
         authorizedSignatory: form.authorizedSignatory.trim(),
         signatoryTitle: form.signatoryTitle.trim(),
+        vatRate: Number.isFinite(Number(form.vatRate)) ? Number(form.vatRate) : 15,
       })
       setSettings(res.settings)
       setForm(res.settings)
@@ -283,6 +284,27 @@ export function SettingsView() {
             <p className="-mt-2 text-xs text-muted-foreground">
               Printed on every salary slip in the “Approved By” signature block.
             </p>
+
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="vat-rate">VAT Rate (%)</Label>
+                <Input
+                  id="vat-rate"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={form.vatRate}
+                  onChange={(e) => setField('vatRate', Number(e.target.value) as AppSettings['vatRate'])}
+                  placeholder="15"
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Applied in VAT Return Expense — bills are split as Without VAT = With VAT ÷ (1 + rate).
+                </p>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <Label>Company Logo</Label>

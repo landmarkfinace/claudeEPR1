@@ -18,7 +18,9 @@ export const dynamic = 'force-dynamic'
 function buildSettings(map: Record<string, string>) {
   return {
     companyName: map.companyName ?? 'Landmark Inter Gulf',
-    address: map.address ?? 'P.O. Box 34190, Al Khobar 31952, Kingdom of Saudi Arabia',
+    address:
+      map.address ??
+      'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
     phone: map.phone ?? '+966 13 847 2200',
     email: map.email ?? 'info@landmarkintergulf.com',
     logo: map.logo ?? '/logo-mark.png', // default brand ML monogram
@@ -26,7 +28,15 @@ function buildSettings(map: Record<string, string>) {
     defaultPayType: (map.defaultPayType ?? 'bank_transfer') as PayType,
     authorizedSignatory: map.authorizedSignatory ?? '',
     signatoryTitle: map.signatoryTitle ?? 'Authorized Signatory',
+    // VAT rate for the VAT Return Expense module — stored as a PERCENT string ("15")
+    vatRate: clampVatPercent(parseFloat(map.vatRate ?? '')),
   }
+}
+
+/** Sanity-clamp the stored VAT percent to 0–100 (missing/invalid → Saudi standard 15). */
+function clampVatPercent(v: number): number {
+  if (isNaN(v)) return 15
+  return Math.min(100, Math.max(0, v))
 }
 
 async function readSettingsMap(): Promise<Record<string, string>> {
@@ -46,6 +56,8 @@ const settingsSchema = z.object({
   defaultPayType: z.enum(['bank_transfer', 'cash', 'cheque']).optional(),
   authorizedSignatory: z.string().max(120).optional(),
   signatoryTitle: z.string().max(120).optional(),
+  // VAT percent 0–100 (15 = Saudi standard); stored under the `vatRate` key
+  vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(100, 'VAT rate cannot exceed 100').optional(),
 })
 
 export async function GET() {
@@ -89,6 +101,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.signatoryTitle !== undefined) {
       entries.push(['signatoryTitle', body.signatoryTitle])
+    }
+    if (body.vatRate !== undefined) {
+      entries.push(['vatRate', String(clampVatPercent(body.vatRate))])
     }
 
     for (const [key, value] of entries) {

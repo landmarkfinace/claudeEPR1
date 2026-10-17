@@ -4,7 +4,8 @@ import type { AppSettings, SessionUser, ViewKey } from '@/lib/types'
 
 const DEFAULT_SETTINGS: AppSettings = {
   companyName: 'Landmark Inter Gulf',
-  address: 'P.O. Box 34190, Al Khobar 31952, Kingdom of Saudi Arabia',
+  address:
+    'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
   phone: '+966 13 847 2200',
   email: 'info@landmarkintergulf.com',
   logo: '/logo-mark.png', // default brand ML monogram (public/logo-mark.png)
@@ -12,6 +13,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultPayType: 'bank_transfer',
   authorizedSignatory: '',
   signatoryTitle: 'Authorized Signatory',
+  vatRate: 15, // percent — Saudi standard VAT for the VAT Return Expense module
 }
 
 export type ViewIntentPayload = {

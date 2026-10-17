@@ -122,13 +122,15 @@ export async function runSeed(db: PrismaClient): Promise<SeedSummary> {
   // ---------- Settings ----------
   const settings: Record<string, string> = {
     companyName: 'Landmark Inter Gulf',
-    address: 'P.O. Box 34190, Al Khobar 31952, Kingdom of Saudi Arabia',
+    address:
+      'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
     phone: '+966 13 847 2200',
     email: 'info@landmarkintergulf.com',
     currency: 'SAR',
     defaultPayType: 'bank_transfer',
     authorizedSignatory: 'Faisal Al-Otaibi',
     signatoryTitle: 'Finance Manager',
+    vatRate: '15',
   }
   for (const [key, value] of Object.entries(settings)) {
     await db.setting.create({ data: { key, value } })

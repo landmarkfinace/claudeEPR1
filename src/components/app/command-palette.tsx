@@ -17,6 +17,7 @@ import {
   MapPin,
   Network,
   PieChart,
+  BadgePercent,
   ReceiptText,
   ScrollText,
   Settings as SettingsIcon,
@@ -63,6 +64,7 @@ const NAV: NavEntry[] = [
   { view: 'expense-list', label: 'Expense List', icon: TrendingDown, perm: 'accounts.view', keywords: 'spending costs salary expense' },
   { view: 'accounts-summary', label: 'Accounts Summary', icon: PieChart, perm: 'accounts.view', keywords: 'financial statement balance chart' },
   { view: 'transaction-categories', label: 'Transaction Categories', icon: BarChart3, perm: 'accounts.view', keywords: 'income expense classification' },
+  { view: 'vat-return-expense', label: 'VAT Return Expense', icon: BadgePercent, perm: 'vat.view', keywords: 'zatca tax input vat quarterly filing supplier bills 15%' },
   { view: 'roles', label: 'Roles & Permissions', icon: ShieldCheck, perm: 'roles.view', keywords: 'access control rbac' },
   { view: 'users', label: 'Users', icon: UserCog, perm: 'users.view', keywords: 'accounts login team' },
   { view: 'settings', label: 'Settings', icon: SettingsIcon, perm: 'settings.view', keywords: 'company profile logo currency' },
@@ -87,6 +89,7 @@ const ACTIONS: QuickAction[] = [
   { view: 'clients', label: 'New Client', icon: Building2, perm: 'clients.create', keywords: 'add customer company', intent: 'create' },
   { view: 'income-list', label: 'Add Income', icon: TrendingUp, perm: 'accounts.create', keywords: 'new revenue payment received', intent: 'create' },
   { view: 'expense-list', label: 'Add Expense', icon: TrendingDown, perm: 'accounts.create', keywords: 'new cost spending', intent: 'create' },
+  { view: 'vat-return-expense', label: 'Add VAT Bill', icon: BadgePercent, perm: 'vat.create', keywords: 'new vat expense supplier bill input tax 15% quarterly', intent: 'create' },
   { view: 'attendance', label: 'Mark Attendance', icon: CalendarClock, perm: 'attendance.create', keywords: 'check in timesheet hours present', intent: 'create' },
   { view: 'salary-sheet', label: 'Print Salary Sheet', icon: FileSpreadsheet, perm: 'payroll.print', keywords: 'export report landscape paper pdf', intent: 'print' },
 ]
