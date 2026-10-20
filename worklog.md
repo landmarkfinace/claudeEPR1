@@ -1921,3 +1921,31 @@ Stage Summary:
 - Verification artifacts: /tmp/qa_new_preview.png, /tmp/qa_np-1/2.png (printed PDF pages), /tmp/qa_0001_p1/p2*.png.
 - Cron: created fresh 15-min webDevReview job (id 469468) with QA guardrails; 3 older jobs exist but are disabled by exec limits.
 - Open follow-ups if boss asks: (1) hide/remove the money totals box for pure rate cards; (2) continuation-strip client name uses truncate (shows "Al Noor Development Co…" on long names) — could wrap to 2 lines instead; (3) quotation → e-invoice conversion still a next-phase idea.
+
+---
+Task ID: EI-ONEPAGE
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "E-Invoice PDF BA Print hbe A4 one Page." — the E-Invoice PDF must print as ONE nicely-filled A4 page (same treatment the quotations got: kill the blank voids, fill the page).
+
+Work Log:
+- Diagnosed the live preview with pixel measurements + VLM: (1) with NO letterhead artwork uploaded (config letterhead = '') the document still reserved the full 35mm top / 22mm bottom letterhead bands ≈ 15-18% pure blank at the top; (2) the tail (Amount-in-words/bank/totals + signature row) is pinned to the page foot via mt-auto while items tables ended mid-page → ~35-40% dead void in the middle; (3) CDP print-to-PDF confirmed the PDF itself was 1 page but ugly/sparse.
+- Rewrote src/components/app/print/e-invoice-print.tsx pagination from "greedy chunking + whole-tail deferral" to the quotation's FLOW-FILL model:
+  * NEW planPages() → PagePlan[] { items, rowExtraMm, roomy } — greedy chunk, tail-fit check (fresh tail-only page renders FROM THE TOP, not mt-auto), per-page rowExtraMm stretch (STRETCH_SAFE_MM 5, MAX_ROW_STRETCH 8), roomy flag for sparse final pages (ROOMY_SLACK_MM 40, ROOMY_TAIL_DELTA_MM 22 budget for tail+header breathing).
+  * Compact margins when no artwork: topMm/bottomMm = config values ONLY when config.letterhead is set; otherwise 12mm/14mm (reclaims 31mm of blank). Page content padding + footer strip now use the effective margins.
+  * Row stretch renders as explicit <tr height> (CSS height on tr = min-height) — short invoices get taller, airier template-style rows.
+  * ROOMY treatment (sparse docs): taller chevron banner py, meta/ref cells py-1.5→py-2.5, seller/buyer breathing (space-y-1.5 py-2.5), section gaps mt-2→mt-3, tail boxes p-2.5→p-3.5, totals rows py bumps, receiver line mt-9→mt-12, stamp circle h-20→h-24, authorized signature max-h-12→14. QR stays 32mm (ZATCA ≥30mm rule).
+  * Continuation strip now renders on EVERY page ≥ 2 (was items-only; tail-only pages previously started with a bare void).
+  * Recalibrated estimators against real Chrome prints: sellerBuyer base 26→34 (was UNDER-reserving), title 13→8.5, meta 17→11.5, refRow 12→13, thead 9→10, gaps 6→8; row desc chars/line 34/30→42/36 (desc column ≈47 latin chars wide — old value under-filled page 1 by 3-4 rows on multi-page docs).
+- Settings (components/app/settings/e-invoice-settings.tsx): margin hints now explain the compact fallback — "Only used when a letterhead is uploaded — without artwork the invoice prints with a compact 12mm top / 14mm bottom margin so it fits ONE nicely-filled A4 page."
+
+Stage Summary:
+- QA all green:
+  * ALL 7 demo documents (INV-00001…00005 incl. draft-watermarked + P2, CRN-00001, DBN-00001) print as EXACTLY 1 A4 page, zero overflow, content 12mm→276.4mm (fills to the footer zone).
+  * INV-00001 detail: rows stretched to 14.8mm (was 7.3), roomy tail 98.1mm, mid-gap reduced from ~92mm total waste to ~35mm deliberate breathing.
+  * CDP print-to-PDF: 1 page for every demo doc; VLM on the printed page: "fills 90-95%, no clipping/overlap, clean and professional"; draft watermark verified subtle + non-obscuring.
+  * 25-item stress invoice (created via API, then deleted): 2 pages — page 1 holds 19 rows filling to 250mm (91%), page 2 has continuation strip + 6 rows + tail pinned to the foot, "Page 1 of 2 / Page 2 of 2" footers, zero overflow; printed PDF = exactly 2 pages, VLM confirms both fill nicely with no cut rows.
+  * Editor draft preview (unsaved): renders 1 page with DRAFT watermark, no overflow.
+  * Settings E-Invoice section renders the new hints; E-Invoice list KPIs + all rows intact; test doc removed; ZERO console errors; tsc (src) clean; bun run lint clean; dev.log has only transient Fast-Refresh reload notices from live editing (no ⨯/500s).
+- Behavior change to remember: the configured Top/Bottom Margin settings now apply ONLY when a letterhead artwork is uploaded. Without artwork → compact 12/14mm print margins (the hint text in Settings explains this).
+- Verification artifacts: /tmp/ei-onepage.pdf + /tmp/ei-op-1.png (single-page print), /tmp/ei-multipage.pdf + /tmp/ei-mp-1/2.png (25-item flow), /tmp/ei-draft.pdf (watermark), /tmp/ei-new-layout.png, /tmp/ei-final-list.png.
+- Open follow-ups if boss asks: (1) when he uploads his real letterhead artwork, margins revert to the configured 35/22 — re-check fill at that point; (2) quotation → e-invoice conversion still a next-phase idea; (3) server-side direct PDF download.

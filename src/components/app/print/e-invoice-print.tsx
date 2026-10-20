@@ -9,9 +9,14 @@
 //
 // Pagination model mirrors quotation-print.tsx: EXPLICIT A4 pages
 // (210mm × 296.5mm — the 0.5mm slack prevents blank interleaved pages in
-// Chrome's print pipeline), a conservative row-height estimator chunks items
-// across pages, the thead repeats on every page, the bottom split + signature
-// row live on the LAST page only, and each page carries the letterhead
+// Chrome's print pipeline) with FLOW-FILL so the invoice fills ONE A4 page
+// nicely: a conservative row-height estimator chunks items across pages, the
+// thead repeats on every page, each page's leftover room is handed back to its
+// item rows (taller, airier rows), a sparse final page gets the roomier bottom
+// treatment, and the bottom split + signature row live on the LAST page only.
+// Without letterhead artwork the configured 35/22mm bands would be pure blank
+// — the document falls back to compact print margins so a typical invoice
+// prints as a single, well-filled A4 page. Each page carries the letterhead
 // artwork plus a "Page X of Y | صفحة X من Y" footer.
 //
 // The component is purely presentational: the parent (e-invoices view)
@@ -122,6 +127,9 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
 }
 
 // ── Height estimators (conservative — over-estimate = safe page breaks) ─────
+// Calibrated against real Chrome A4 prints of this template (title ≈ 8mm,
+// meta row ≈ 11mm, seller/buyer boxes ≈ 34mm + wrapped address lines, ref row
+// ≈ 13mm, 10-col thead ≈ 10mm, inter-section margins ≈ 8mm).
 function estLines(text: string | null | undefined, charsPerLine: number): number {
   if (!text) return 0
   return text
@@ -130,37 +138,66 @@ function estLines(text: string | null | undefined, charsPerLine: number): number
 }
 
 function rowHeightMm(it: EInvoiceItemRow): number {
+  // Description column ≈ 27.5% × 194mm ≈ 53mm ≈ 47 latin chars at 8.5px —
+  // 42/36 keeps a safety margin against wrap drift (over-estimate = safe
+  // page breaks; the page box clips, so never under-estimate).
   const lines = Math.max(
     1,
-    estLines(it.descriptionEn, 34),
-    estLines(it.descriptionAr, 30),
+    estLines(it.descriptionEn, 42),
+    estLines(it.descriptionAr, 36),
   )
   return 8 + 3.4 * (lines - 1)
 }
 
+// ── Flow-fill pagination constants ───────────────────────────────────────────
+// slack kept in reserve when stretching rows (estimator safety)
+const STRETCH_SAFE_MM = 5
+// per-row stretch cap — keeps the stretched table tasteful
+const MAX_ROW_STRETCH = 8
+// final-page slack above which the tail gets the roomier treatment
+const ROOMY_SLACK_MM = 40
+// extra height the roomy treatment adds (tail padding + header breathing —
+// over-estimate keeps the row-stretch math from over-allocating; the roomy
+// gate ROOMY_SLACK_MM > 40 guarantees this always fits)
+const ROOMY_TAIL_DELTA_MM = 22
+
+/** One explicit A4 page: its item chunk, stretched row height, roominess. */
+type PagePlan = {
+  items: EInvoiceItemRow[]
+  /** extra mm handed to every item row on this page (fills the A4 nicely) */
+  rowExtraMm: number
+  /** sparse final page → roomier bottom sections */
+  roomy: boolean
+}
+
 /**
- * Greedy pagination: chunk items into explicit pages, then verify the tail
- * (bottom split + signature row) fits on the final page — if not, the tail
- * moves to its own page.
+ * Flow-fill pagination:
+ *   1. chunk items across pages (conservative row estimates → safe breaks);
+ *   2. the tail (bottom split + signature row) must fit on the final items
+ *      page — if not, it flows to a fresh page that renders FROM THE TOP;
+ *   3. hand each page's leftover room back to its item rows (capped), so a
+ *      typical invoice fills ONE A4 page instead of ending two-thirds down;
+ *   4. flag a sparse final page so the bottom sections can breathe.
  */
-function paginate(
+function planPages(
   items: EInvoiceItemRow[],
   topMm: number,
   bottomMm: number,
   page1FixedMm: number,
   tailMm: number
-): EInvoiceItemRow[][] {
+): PagePlan[] {
   const availFirst = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - page1FixedMm
   const availRest = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - 9 // continuation strip
-  const pages: EInvoiceItemRow[][] = []
+
+  // 1) greedy chunking
+  const chunks: EInvoiceItemRow[][] = []
   let cur: EInvoiceItemRow[] = []
   let used = 0
   let limit = availFirst
-
   for (const it of items) {
     const h = rowHeightMm(it)
     if (used + h > limit && cur.length > 0) {
-      pages.push(cur)
+      chunks.push(cur)
       cur = []
       used = 0
       limit = availRest
@@ -168,13 +205,34 @@ function paginate(
     cur.push(it)
     used += h
   }
-  pages.push(cur)
+  chunks.push(cur)
 
-  // Tail must fit on the last page — otherwise it moves to a fresh page
-  const lastAvail = pages.length === 1 ? availFirst : availRest
+  // 2) tail must fit on the final items page — otherwise it gets a fresh page
+  const lastAvail = chunks.length === 1 ? availFirst : availRest
   if (used + tailMm > lastAvail) {
-    pages.push([]) // empty items chunk = tail-only page
+    chunks.push([]) // empty items chunk = tail-only page
   }
+
+  // 3) sparse final page → roomier tail (only when the extra height fits)
+  const finIdx = chunks.length - 1
+  const finCap = finIdx === 0 ? availFirst : availRest
+  const finRows = chunks[finIdx].reduce((s, it) => s + rowHeightMm(it), 0)
+  const roomy = finCap - finRows - tailMm > ROOMY_SLACK_MM
+  const tailEffMm = roomy ? tailMm + ROOMY_TAIL_DELTA_MM : tailMm
+
+  // 4) leftover room → taller, airier rows on every items page
+  const pages: PagePlan[] = chunks.map((chunk, i) => {
+    const cap = i === 0 ? availFirst : availRest
+    const rowsMm = chunk.reduce((s, it) => s + rowHeightMm(it), 0)
+    const tailOnPage = i === finIdx ? tailEffMm : 0
+    const slack = cap - rowsMm - tailOnPage
+    const rowExtraMm =
+      chunk.length > 0 && slack > STRETCH_SAFE_MM
+        ? Math.min((slack - STRETCH_SAFE_MM) / chunk.length, MAX_ROW_STRETCH)
+        : 0
+    return { items: chunk, rowExtraMm, roomy: i === finIdx && roomy }
+  })
+
   return pages
 }
 
@@ -349,16 +407,22 @@ export function EInvoiceDocument({
   const money = (n: number) => formatNumber(n)
 
   // ---- pagination ----
+  // Without letterhead artwork the configured 35/22mm bands would be pure
+  // blank — fall back to compact print margins so the invoice fills ONE A4.
+  const hasArtwork = !!config.letterhead
+  const topMm = hasArtwork ? config.topMm : 12
+  const bottomMm = hasArtwork ? config.bottomMm : 14
+
   // Page-1 fixed sections (title + meta + seller/buyer + reference row + thead)
   const sellerBuyerMm =
-    26 +
-    2.8 * estLines(seller.addressEn, 52) +
-    2.4 * estLines(seller.addressAr, 46) +
-    2.8 * estLines(inv.clientAddressEn, 52) +
-    2.4 * estLines(inv.clientAddressAr, 46)
+    34 +
+    2.6 * estLines(seller.addressEn, 52) +
+    2.2 * estLines(seller.addressAr, 46) +
+    2.6 * estLines(inv.clientAddressEn, 52) +
+    2.2 * estLines(inv.clientAddressAr, 46)
   const refRowMm =
-    12 +
-    2.6 *
+    13 +
+    2.4 *
       Math.max(
         estLines(inv.poRef, 18),
         estLines(inv.projectEn, 22),
@@ -368,12 +432,13 @@ export function EInvoiceDocument({
         estLines(inv.paymentMethodEn, 22),
         estLines(inv.paymentMethodAr, 20),
       )
-  const page1FixedMm = 13 + (inv.relatedInvoiceNumber ? 4 : 0) + 17 + sellerBuyerMm + refRowMm + 9 + 6
+  const page1FixedMm =
+    8.5 + (inv.relatedInvoiceNumber ? 4 : 0) + 11.5 + sellerBuyerMm + refRowMm + 10 + 8
 
   // Tail = bottom split + signature row (last page only)
   const tailMm = 48 + 40 + 6
 
-  const pages = paginate(items, config.topMm, config.bottomMm, page1FixedMm, tailMm)
+  const pages = planPages(items, topMm, bottomMm, page1FixedMm, tailMm)
 
   // ---- table cell styles ----
   const th =
@@ -389,8 +454,9 @@ export function EInvoiceDocument({
       className="print-area mx-auto flex w-full flex-col items-center gap-6 bg-transparent [print-color-adjust:exact] [-webkit-print-color-adjust:exact] print:gap-0"
       style={{ fontFamily: DOC_FONT }}
     >
-      {pages.map((chunk, pageIdx) => {
+      {pages.map((plan, pageIdx) => {
         const isLast = pageIdx === pages.length - 1
+        const chunk = plan.items
         return (
           <div
             key={pageIdx}
@@ -435,8 +501,8 @@ export function EInvoiceDocument({
             <div
               className="absolute inset-x-0 top-0 z-10 flex h-full flex-col"
               style={{
-                paddingTop: `${config.topMm}mm`,
-                paddingBottom: `${config.bottomMm + FOOTER_MM}mm`,
+                paddingTop: `${topMm}mm`,
+                paddingBottom: `${bottomMm + FOOTER_MM}mm`,
                 paddingLeft: `${SIDE_PAD_MM}mm`,
                 paddingRight: `${SIDE_PAD_MM}mm`,
               }}
@@ -446,7 +512,7 @@ export function EInvoiceDocument({
                   {/* 1 ─ gold chevron title banner */}
                   <div className="flex justify-center">
                     <div
-                      className="px-14 py-[5px] text-center"
+                      className={`px-14 text-center ${plan.roomy ? 'py-[7px]' : 'py-[5px]'}`}
                       style={{
                         background: `linear-gradient(105deg, ${DARK_GOLD} 0%, ${GOLD} 32%, ${LIGHT_GOLD} 50%, ${GOLD} 68%, ${DARK_GOLD} 100%)`,
                         clipPath:
@@ -478,7 +544,7 @@ export function EInvoiceDocument({
 
                   {/* 2 ─ meta row (4 cells) + status stamp */}
                   <div
-                    className="relative mt-2 grid grid-cols-4 overflow-visible rounded border"
+                    className={`relative grid grid-cols-4 overflow-visible rounded border ${plan.roomy ? 'mt-3' : 'mt-2'}`}
                     style={{ borderColor: BORDER, background: LIGHT_BG }}
                   >
                     <StatusStamp status={inv.status} overdue={inv.overdue} />
@@ -492,7 +558,7 @@ export function EInvoiceDocument({
                     ).map(([en, ar, value, mono]) => (
                       <div
                         key={en}
-                        className="border-r px-1.5 py-1.5 text-center last:border-r-0"
+                        className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
                         style={{ borderColor: BORDER }}
                       >
                         <BiLabel en={en} ar={ar} center />
@@ -507,7 +573,7 @@ export function EInvoiceDocument({
                   </div>
 
                   {/* 3 ─ Seller | Buyer boxes */}
-                  <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className={`grid grid-cols-2 gap-2 ${plan.roomy ? 'mt-3' : 'mt-2'}`}>
                     {(
                       [
                         {
@@ -557,7 +623,7 @@ export function EInvoiceDocument({
                             </span>
                           </p>
                         </div>
-                        <div className="space-y-1 px-2.5 py-1.5">
+                        <div className={`${plan.roomy ? 'space-y-1.5 py-2.5' : 'space-y-1 py-1.5'} px-2.5`}>
                           <p className="text-[10.5px] font-bold leading-snug" style={{ color: NAVY }}>
                             {box.nameEn || '—'}
                           </p>
@@ -598,10 +664,10 @@ export function EInvoiceDocument({
 
                   {/* 4 ─ reference row (4 cells) */}
                   <div
-                    className="mt-2 grid grid-cols-4 rounded border"
+                    className={`grid grid-cols-4 rounded border ${plan.roomy ? 'mt-3' : 'mt-2'}`}
                     style={{ borderColor: BORDER, background: LIGHT_BG }}
                   >
-                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
                       <BiLabel en="P.O. / Contract Ref" ar="رقم أمر الشراء" center />
                       <p className="mt-0.5 break-words text-[9px] font-bold" style={{ color: NAVY }}>
                         {inv.poRef || '—'}
@@ -612,7 +678,7 @@ export function EInvoiceDocument({
                         </p>
                       ) : null}
                     </div>
-                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
                       <BiLabel en="Project" ar="المشروع" center />
                       <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
                         {inv.projectEn || '—'}
@@ -623,7 +689,7 @@ export function EInvoiceDocument({
                         </p>
                       ) : null}
                     </div>
-                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
                       <BiLabel en="Payment Terms" ar="شروط الدفع" center />
                       <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
                         {inv.paymentTermsEn || '—'}
@@ -634,7 +700,7 @@ export function EInvoiceDocument({
                         </p>
                       ) : null}
                     </div>
-                    <div className="px-1.5 py-1.5 text-center">
+                    <div className={`px-1.5 text-center ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}>
                       <BiLabel en="Payment Method" ar="طريقة الدفع" center />
                       <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
                         {inv.paymentMethodEn || '—'}
@@ -648,20 +714,18 @@ export function EInvoiceDocument({
                   </div>
 
                   {/* 5 ─ items table heading spacing */}
-                  <div className="mt-2" />
+                  <div className={plan.roomy ? 'mt-3' : 'mt-2'} />
                 </>
               ) : (
-                /* continuation header on later item pages (tail-only pages skip it) */
-                chunk.length > 0 ? (
-                  <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
-                      {companyName} — {title.en} <span className="font-mono">{inv.invoiceNumber}</span>
-                    </p>
-                    <p className="text-[8.5px] italic" style={{ color: MUTED }}>
-                      continued · <span lang="ar" dir="rtl">تابع</span>
-                    </p>
-                  </div>
-                ) : null
+                /* continuation header on EVERY later page (items or tail-only) */
+                <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
+                    {companyName} — {title.en} <span className="font-mono">{inv.invoiceNumber}</span>
+                  </p>
+                  <p className="text-[8.5px] italic" style={{ color: MUTED }}>
+                    continued · <span lang="ar" dir="rtl">تابع</span>
+                  </p>
+                </div>
               )}
 
               {/* 5 ─ items chunk — thead repeats on every page (tail-only pages skip the table) */}
@@ -723,7 +787,13 @@ export function EInvoiceDocument({
                         <tr
                           key={it.id ?? `${it.sr}-${i}`}
                           className="break-inside-avoid"
-                          style={{ background: i % 2 === 1 ? LIGHT_BG : 'white' }}
+                          style={{
+                            background: i % 2 === 1 ? LIGHT_BG : 'white',
+                            // flow-fill: leftover page room → taller, airier rows
+                            ...(plan.rowExtraMm > 0.4
+                              ? { height: `${rowHeightMm(it) + plan.rowExtraMm}mm` }
+                              : null),
+                          }}
                         >
                           <td className={`${td} text-center tabular-nums`} style={cellBorder}>
                             {it.sr}
@@ -762,13 +832,18 @@ export function EInvoiceDocument({
                 </table>
               ) : null}
 
-              {/* 6 + 7 ─ bottom split + signature row — last page only */}
+              {/* 6 + 7 ─ bottom split + signature row — last page only.
+                  Shares the items page → pinned to the page foot (mt-auto);
+                  fresh tail-only page → flows from the top (no top void). */}
               {isLast ? (
-                <div className="mt-auto flex flex-col">
+                <div className={`${chunk.length > 0 ? 'mt-auto ' : ''}flex flex-col`}>
                   <div className="mt-3 grid grid-cols-5 gap-2.5 break-inside-avoid">
                     {/* ── left column (60%): amount in words + bank details ── */}
-                    <div className="col-span-3 space-y-2">
-                      <div className="rounded border p-2.5" style={{ borderColor: BORDER }}>
+                    <div className={`col-span-3 ${plan.roomy ? 'space-y-2.5' : 'space-y-2'}`}>
+                      <div
+                        className={`rounded border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
+                        style={{ borderColor: BORDER }}
+                      >
                         <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
                           Amount in Words <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl" className="tracking-normal">
@@ -783,7 +858,10 @@ export function EInvoiceDocument({
                         </p>
                       </div>
 
-                      <div className="rounded border p-2.5" style={{ borderColor: BORDER }}>
+                      <div
+                        className={`rounded border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
+                        style={{ borderColor: BORDER }}
+                      >
                         <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
                           Bank Details <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl" className="tracking-normal">
@@ -841,7 +919,7 @@ export function EInvoiceDocument({
                       ).map(([en, ar, value]) => (
                         <div
                           key={en}
-                          className="flex items-center justify-between gap-2 border-b px-2.5 py-[5px] text-[9px]"
+                          className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9px]`}
                           style={{ borderColor: BORDER, background: LIGHT_BG }}
                         >
                           <span className="font-semibold" style={{ color: MUTED }}>
@@ -854,7 +932,7 @@ export function EInvoiceDocument({
                       ))}
                       {/* TOTAL DUE — highlighted row */}
                       <div
-                        className="flex items-center justify-between gap-2 border-b px-2.5 py-[7px]"
+                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[9px]' : 'py-[7px]'}`}
                         style={{ borderColor: BORDER, background: DARK_NAVY }}
                       >
                         <span className="text-[9.5px] font-extrabold uppercase tracking-wide" style={{ color: LIGHT_GOLD }}>
@@ -865,7 +943,7 @@ export function EInvoiceDocument({
                         </span>
                       </div>
                       <div
-                        className="flex items-center justify-between gap-2 border-b px-2.5 py-[5px] text-[9px]"
+                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9px]`}
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <span className="font-semibold" style={{ color: MUTED }}>
@@ -876,7 +954,7 @@ export function EInvoiceDocument({
                         </span>
                       </div>
                       <div
-                        className="flex items-center justify-between gap-2 px-2.5 py-[6px] text-[9.5px]"
+                        className={`flex items-center justify-between gap-2 px-2.5 ${plan.roomy ? 'py-[8px]' : 'py-[6px]'} text-[9.5px]`}
                         style={{ background: LIGHT_BG }}
                       >
                         <span className="font-bold" style={{ color: NAVY }}>
@@ -891,10 +969,10 @@ export function EInvoiceDocument({
 
                   {/* 7 ─ signature row: QR | Receiver | Authorized | Stamp */}
                   <div
-                    className={`mt-3 grid items-end gap-3 ${
+                    className={`mt-3 grid items-end ${plan.roomy ? 'gap-4' : 'gap-3'} ${
                       inv.showReceiverSignature ? 'grid-cols-4' : 'grid-cols-3'
-                    }`}
-                  >
+                    }`
+                  }>
                     {/* ZATCA QR — 32×32mm, pure black/white, no frame inside the quiet zone */}
                     <div className="flex flex-col items-center">
                       {qrDataUrl ? (
@@ -932,7 +1010,7 @@ export function EInvoiceDocument({
                           Receiver Signature <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl">توقيع المستلم</span>
                         </p>
-                        <div className="mt-9 w-full border-t-2" style={{ borderColor: NAVY }} />
+                        <div className={`${plan.roomy ? 'mt-12' : 'mt-9'} w-full border-t-2`} style={{ borderColor: NAVY }} />
                         <p className="mt-1 text-center text-[7px]" style={{ color: MUTED }}>
                           Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl">الاسم والتاريخ</span>
@@ -942,13 +1020,13 @@ export function EInvoiceDocument({
 
                     {/* Authorized signature */}
                     <div className="flex flex-col justify-end">
-                      <div className="flex h-12 items-end justify-center">
+                      <div className={`${plan.roomy ? 'h-14' : 'h-12'} flex items-end justify-center`}>
                         {config.signature ? (
                            
                           <img
                             src={config.signature}
                             alt="Authorized signature"
-                            className="max-h-12 object-contain"
+                            className={`${plan.roomy ? 'max-h-14' : 'max-h-12'} object-contain`}
                           />
                         ) : null}
                       </div>
@@ -966,7 +1044,7 @@ export function EInvoiceDocument({
                     {/* Company stamp */}
                     <div className="flex flex-col items-center justify-end">
                       <div
-                        className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2"
+                        className={`${plan.roomy ? 'h-24 w-24' : 'h-20 w-20'} flex items-center justify-center overflow-hidden rounded-full border-2`}
                         style={{ borderColor: GOLD }}
                       >
                         {config.stamp ? (
@@ -974,7 +1052,7 @@ export function EInvoiceDocument({
                           <img
                             src={config.stamp}
                             alt="Company stamp"
-                            className="h-[70px] w-[70px] object-contain"
+                            className={`${plan.roomy ? 'h-[86px] w-[86px]' : 'h-[70px] w-[70px]'} object-contain`}
                           />
                         ) : (
                           <p
@@ -998,7 +1076,7 @@ export function EInvoiceDocument({
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div
               className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between border-t pt-[1mm] text-[7px]"
-              style={{ bottom: `${config.bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
+              style={{ bottom: `${bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
             >
               <span className="truncate">
                 {companyName} · {inv.invoiceNumber}

@@ -352,7 +352,9 @@ export function EInvoiceSettingsSection() {
                 disabled={!canEdit}
               />
               <p className="text-xs text-muted-foreground">
-                Reserved height of the letterhead&apos;s top band. Default 35.
+                Reserved height of the letterhead&apos;s top band. Only used when a
+                letterhead is uploaded — without artwork the invoice prints with a
+                compact 12mm top margin so it fills one A4 page. Default 35.
               </p>
             </div>
             <div className="space-y-2">
@@ -367,13 +369,17 @@ export function EInvoiceSettingsSection() {
                 disabled={!canEdit}
               />
               <p className="text-xs text-muted-foreground">
-                Reserved height of the bottom band. Default 22.
+                Reserved height of the bottom band. Only used when a letterhead
+                is uploaded — without artwork a compact 14mm bottom margin
+                applies. Default 22.
               </p>
             </div>
           </div>
           <p className="-mt-2 text-xs text-muted-foreground">
             The invoice body starts below the top margin and stops above the bottom one — it never
-            overlaps the letterhead artwork.
+            overlaps the letterhead artwork. With no letterhead uploaded these
+            margins are ignored and the print uses compact margins, so a typical
+            invoice fits ONE nicely-filled A4 page.
           </p>
 
           <div className="grid gap-5 sm:grid-cols-2">
