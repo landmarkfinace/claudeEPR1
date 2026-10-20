@@ -55,6 +55,36 @@ export const MODULES: { module: string; label: string; actions: string[]; action
     actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
   },
   {
+    module: 'quotations',
+    label: 'Quotations',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
+    module: 'invoices',
+    label: 'Invoices',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
+    module: 'namelist',
+    label: 'Name List',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
+    module: 'supplierpo',
+    label: 'Supplier P.O.',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
+    module: 'agreements',
+    label: 'Agreements',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
     module: 'roles',
     label: 'Roles',
     actions: ['view', 'create', 'edit', 'delete'],

@@ -28,6 +28,11 @@ import {
   Building2,
   Network,
   ReceiptText,
+  FileText,
+  BookCheck,
+  Package,
+  FileSignature,
+  BookUser,
   BadgePercent,
 } from 'lucide-react'
 import {
@@ -119,6 +124,16 @@ const MENU: MenuGroup[] = [
         ],
       },
       { view: 'vat-return-expense', label: 'VAT Return Expense', icon: BadgePercent, perm: 'vat.view' },
+    ],
+  },
+  {
+    label: 'Business Documents',
+    items: [
+      { view: 'quotations', label: 'Quotations', icon: FileText, perm: 'quotations.view' },
+      { view: 'invoices', label: 'Invoices', icon: BookCheck, perm: 'invoices.view' },
+      { view: 'supplier-pos', label: 'Supplier P.O.', icon: Package, perm: 'supplierpo.view' },
+      { view: 'agreements', label: 'Agreements', icon: FileSignature, perm: 'agreements.view' },
+      { view: 'name-list', label: 'Name List', icon: BookUser, perm: 'namelist.view' },
     ],
   },
   {

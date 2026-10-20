@@ -65,7 +65,10 @@ model Client {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  projects Project[]
+  projects    Project[]
+  quotations  Quotation[]
+  invoices    Invoice[]
+  agreements  Agreement[]
 
   @@index([status])
 }
@@ -341,4 +344,220 @@ model ActivityLog {
   createdAt   DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUSINESS DOCUMENTS (rebuilt after sandbox rollback)
+// Quotations, Invoices, Name List, Supplier P.O.s, Agreements.
+// All amounts in SAR; VAT rate defaults to the Saudi standard 15% but each
+// document stores its own snapshot (vatRate Float fraction 0.15) plus the
+// computed breakdown so historical documents stay correct.
+// Totals are ALWAYS recomputed server-side from the items — never trusted
+// from the client.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Quotation {
+  id           String        @id @default(cuid())
+  quoteNumber  String        @unique // e.g. QTN-2026-0001
+  clientId     String?
+  client       Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName   String // snapshot / free-text party (for non-registered clients)
+  subject      String?
+  issueDate    DateTime
+  validityDate DateTime?
+  status       String        @default("draft") // draft | sent | accepted | rejected | expired
+  subtotal     Float         @default(0)
+  discount     Float         @default(0)
+  vatRate      Float         @default(0.15)
+  vatAmount    Float         @default(0)
+  total        Float         @default(0)
+  notes        String?
+  terms        String?
+  createdByName String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  items QuotationItem[]
+
+  @@index([issueDate])
+  @@index([status])
+}
+
+model QuotationItem {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  sr          Int       @default(1)
+  description String
+  unit        String?
+  quantity    Float     @default(1)
+  unitPrice   Float     @default(0)
+  lineTotal   Float     @default(0)
+
+  @@index([quotationId])
+}
+
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @unique // e.g. INV-2026-0001
+  clientId      String?
+  client        Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName    String
+  subject       String?
+  issueDate     DateTime
+  dueDate       DateTime?
+  status        String    @default("draft") // draft | issued | paid | cancelled
+  subtotal      Float     @default(0)
+  vatRate       Float     @default(0.15)
+  vatAmount     Float     @default(0)
+  total         Float     @default(0)
+  paidAmount    Float     @default(0)
+  notes         String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items InvoiceItem[]
+
+  @@index([issueDate])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sr          Int      @default(1)
+  description String
+  unit        String?
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  lineTotal   Float    @default(0)
+
+  @@index([invoiceId])
+}
+
+// Simple company/person directory (clients, suppliers, subcontractors, others)
+model NameListEntry {
+  id            String   @id @default(cuid())
+  name          String
+  type          String   @default("client") // client | supplier | subcontractor | other
+  contactPerson String?
+  phone         String?
+  email         String?
+  crNumber      String?
+  vatNumber     String?
+  address       String?
+  city          String?
+  status        String   @default("active") // active | inactive
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([type])
+  @@index([name])
+}
+
+model SupplierPo {
+  id            String    @id @default(cuid())
+  poNumber      String    @unique // e.g. PO-2026-0001
+  supplierName  String
+  supplierPhone String?
+  attention     String?
+  issueDate     DateTime
+  expectedDate  DateTime?
+  status        String    @default("draft") // draft | ordered | received | cancelled
+  subtotal      Float     @default(0)
+  vatRate       Float     @default(0.15)
+  vatAmount     Float     @default(0)
+  total         Float     @default(0)
+  notes         String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items SupplierPoItem[]
+
+  @@index([issueDate])
+  @@index([status])
+}
+
+model SupplierPoItem {
+  id          String     @id @default(cuid())
+  poId        String
+  po          SupplierPo @relation(fields: [poId], references: [id], onDelete: Cascade)
+  sr          Int        @default(1)
+  description String
+  unit        String?
+  quantity    Float      @default(1)
+  unitPrice   Float      @default(0)
+  lineTotal   Float      @default(0)
+
+  @@index([poId])
+}
+
+model Agreement {
+  id           String   @id @default(cuid())
+  refNumber    String   @unique // e.g. AGR-2026-0001
+  title        String
+  partyA       String   @default("Landmark Inter Gulf LLC")
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientName   String // party B
+  type         String   @default("labor_supply") // labor_supply | service | subcontract
+  layoutStyle  String   @default("detailed") // detailed | simple (price-as-per-PO)
+  startDate    DateTime
+  endDate      DateTime?
+  status       String   @default("draft") // draft | final | signed | expired
+  value        Float    @default(0)
+  currency     String   @default("SAR")
+  notes        String?
+  createdByName String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items       AgreementItem[]
+  installments AgreementInstallment[]
+  clauses     AgreementClause[]
+
+  @@index([startDate])
+  @@index([status])
+}
+
+model AgreementItem {
+  id          String    @id @default(cuid())
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  sr          Int       @default(1)
+  description String
+  unit        String?
+  quantity    Float     @default(1)
+  unitPrice   Float     @default(0)
+  lineTotal   Float     @default(0)
+
+  @@index([agreementId])
+}
+
+model AgreementInstallment {
+  id          String    @id @default(cuid())
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  sr          Int       @default(1)
+  label       String
+  dueDate     DateTime?
+  amount      Float     @default(0)
+  paid        Boolean   @default(false)
+
+  @@index([agreementId])
+}
+
+model AgreementClause {
+  id          String    @id @default(cuid())
+  agreementId String
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  sr          Int       @default(1)
+  title       String?
+  body        String
+
+  @@index([agreementId])
 }

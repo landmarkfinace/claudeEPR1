@@ -18,6 +18,11 @@ import { ExpenseListView } from './expense-list'
 import { AccountsSummaryView } from './accounts-summary'
 import { TransactionCategoriesView } from './transaction-categories'
 import { VatReturnExpenseView } from './vat-return-expense'
+import { QuotationsView } from './quotations'
+import { InvoicesView } from './invoices'
+import { NameListView } from './name-list'
+import { SupplierPosView } from './supplier-pos'
+import { AgreementsView } from './agreements'
 import { RolesView } from './roles'
 import { UsersView } from './users'
 import { SettingsView } from './settings'
@@ -60,6 +65,16 @@ export function ViewRouter() {
       return <TransactionCategoriesView />
     case 'vat-return-expense':
       return <VatReturnExpenseView />
+    case 'quotations':
+      return <QuotationsView />
+    case 'invoices':
+      return <InvoicesView />
+    case 'name-list':
+      return <NameListView />
+    case 'supplier-pos':
+      return <SupplierPosView />
+    case 'agreements':
+      return <AgreementsView />
     case 'roles':
       return <RolesView />
     case 'users':

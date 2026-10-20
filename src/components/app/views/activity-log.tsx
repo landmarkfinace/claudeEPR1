@@ -62,6 +62,11 @@ const MODULE_LABELS: Record<string, string> = {
   user: 'Users',
   role: 'Roles',
   settings: 'Settings',
+  quotation: 'Quotations',
+  invoice: 'Invoices',
+  namelist: 'Name List',
+  supplier_po: 'Supplier P.O.',
+  agreement: 'Agreements',
 }
 
 const MODULE_OPTIONS = Object.entries(MODULE_LABELS).map(([value, label]) => ({ value, label }))

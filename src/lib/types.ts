@@ -780,6 +780,11 @@ export type ViewKey =
   | 'accounts-summary'
   | 'transaction-categories'
   | 'vat-return-expense'
+  | 'quotations'
+  | 'invoices'
+  | 'name-list'
+  | 'supplier-pos'
+  | 'agreements'
   | 'roles'
   | 'users'
   | 'settings'
@@ -795,3 +800,137 @@ export const PAY_TYPE_LABELS: Record<PayType, string> = {
   cash: 'Cash',
   cheque: 'Cheque',
 }
+
+// ── Business Documents (Quotations, Invoices, Name List, Supplier P.O., Agreements) ──
+
+/** Shared line-item shape used by quotations, invoices, supplier POs and agreements */
+export type DocItemRow = {
+  id?: string
+  sr: number
+  description: string
+  unit: string | null
+  quantity: number
+  unitPrice: number
+  lineTotal: number
+}
+
+export type QuotationRow = {
+  id: string
+  quoteNumber: string
+  clientId: string | null
+  clientName: string
+  subject: string | null
+  issueDate: string
+  validityDate: string | null
+  status: string
+  subtotal: number
+  discount: number
+  vatRate: number
+  vatAmount: number
+  total: number
+  notes: string | null
+  terms: string | null
+  createdByName: string | null
+  createdAt: string
+  items?: DocItemRow[]
+}
+
+export type InvoiceRow = {
+  id: string
+  invoiceNumber: string
+  clientId: string | null
+  clientName: string
+  subject: string | null
+  issueDate: string
+  dueDate: string | null
+  status: string
+  subtotal: number
+  vatRate: number
+  vatAmount: number
+  total: number
+  paidAmount: number
+  notes: string | null
+  createdByName: string | null
+  createdAt: string
+  items?: DocItemRow[]
+}
+
+export type NameListRow = {
+  id: string
+  name: string
+  type: string
+  contactPerson: string | null
+  phone: string | null
+  email: string | null
+  crNumber: string | null
+  vatNumber: string | null
+  address: string | null
+  city: string | null
+  status: string
+  notes: string | null
+  createdAt: string
+}
+
+export type SupplierPoRow = {
+  id: string
+  poNumber: string
+  supplierName: string
+  supplierPhone: string | null
+  attention: string | null
+  issueDate: string
+  expectedDate: string | null
+  status: string
+  subtotal: number
+  vatRate: number
+  vatAmount: number
+  total: number
+  notes: string | null
+  createdByName: string | null
+  createdAt: string
+  items?: DocItemRow[]
+}
+
+export type AgreementInstallmentRow = {
+  id?: string
+  sr: number
+  label: string
+  dueDate: string | null
+  amount: number
+  paid: boolean
+}
+
+export type AgreementClauseRow = {
+  id?: string
+  sr: number
+  title: string | null
+  body: string
+}
+
+export type AgreementRow = {
+  id: string
+  refNumber: string
+  title: string
+  partyA: string
+  clientId: string | null
+  clientName: string
+  type: string
+  layoutStyle: string
+  startDate: string
+  endDate: string | null
+  status: string
+  value: number
+  currency: string
+  notes: string | null
+  createdByName: string | null
+  createdAt: string
+  items?: DocItemRow[]
+  installments?: AgreementInstallmentRow[]
+  clauses?: AgreementClauseRow[]
+}
+
+export const QUOTATION_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'expired'] as const
+export const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'] as const
+export const SUPPLIER_PO_STATUSES = ['draft', 'ordered', 'received', 'cancelled'] as const
+export const AGREEMENT_STATUSES = ['draft', 'final', 'signed', 'expired'] as const
+export const AGREEMENT_TYPES = ['labor_supply', 'service', 'subcontract'] as const
+export const NAME_LIST_TYPES = ['client', 'supplier', 'subcontractor', 'other'] as const
