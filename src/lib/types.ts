@@ -77,12 +77,22 @@ export type ClientStatus = 'active' | 'inactive'
 export type ClientRow = {
   id: string
   name: string
+  /** Arabic company name — printed bilingually on ZATCA-style invoices */
+  nameAr: string | null
   contactPerson: string | null
   phone: string | null
   email: string | null
   address: string | null
+  /** Arabic address */
+  addressAr: string | null
   city: string | null
   crNumber: string | null
+  /** Saudi VAT registration number (15 digits) — required on B2B tax invoices */
+  vatNumber: string | null
+  bankName: string | null
+  iban: string | null
+  accountNumber: string | null
+  swiftCode: string | null
   status: ClientStatus
   notes: string | null
   createdAt: string
@@ -534,7 +544,10 @@ export type ExpenseStatement = {
 
 export type AppSettings = {
   companyName: string
+  /** Arabic company name — printed bilingually on ZATCA-style invoices */
+  companyNameAr: string
   address: string
+  addressAr: string
   phone: string
   email: string
   logo: string | null
@@ -542,6 +555,14 @@ export type AppSettings = {
   defaultPayType: PayType
   authorizedSignatory: string
   signatoryTitle: string
+  /** Seller VAT registration number — QR tag 2 / UBL PartyTaxScheme CompanyID */
+  vatNumber: string
+  /** Seller commercial registration (CR) number — UBL PartyIdentification */
+  crNumber: string
+  /** Company bank details printed as payment instructions on invoices */
+  bankName: string
+  bankIban: string
+  bankAccountNumber: string
   /** VAT rate in PERCENT for the VAT Return Expense module (15 = 15% Saudi standard) */
   vatRate: number
 }
@@ -844,6 +865,8 @@ export type InvoiceRow = {
   issueDate: string
   dueDate: string | null
   status: string
+  /** standard = B2B tax invoice · simplified = B2C (ZATCA) */
+  invoiceType: string
   subtotal: number
   vatRate: number
   vatAmount: number
@@ -853,6 +876,20 @@ export type InvoiceRow = {
   createdByName: string | null
   createdAt: string
   items?: DocItemRow[]
+}
+
+/** GET /api/invoices/[id]/zatca — ZATCA Phase 1+2 cryptographic stamp */
+export type ZatcaStamp = {
+  uuid: string
+  invoiceHash: string
+  previousHash: string
+  signature: string
+  qrPayload: string
+  qrDataUrl: string
+  publicKeyBase64: string
+  icv: number
+  sellerVatNumber: string
+  warnings: string[]
 }
 
 export type NameListRow = {

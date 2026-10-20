@@ -55,6 +55,8 @@ const invoiceSchema = z.object({
   issueDate: z.string().min(1, 'Issue date is required'),
   dueDate: z.string().nullable().optional(),
   status: z.enum(INVOICE_STATUSES).optional(),
+  // ZATCA document type: standard = B2B tax invoice, simplified = B2C
+  invoiceType: z.enum(['standard', 'simplified']).optional(),
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(1, 'VAT rate cannot exceed 100%').optional(),
   paidAmount: z.coerce.number().min(0, 'Paid amount cannot be negative').optional(),
   notes: z.string().nullable().optional(),
@@ -173,6 +175,7 @@ function mapInvoice(i: {
   issueDate: Date
   dueDate: Date | null
   status: string
+  invoiceType: string
   subtotal: number
   vatRate: number
   vatAmount: number
@@ -191,6 +194,7 @@ function mapInvoice(i: {
     issueDate: i.issueDate.toISOString(),
     dueDate: i.dueDate ? i.dueDate.toISOString() : null,
     status: i.status,
+    invoiceType: i.invoiceType,
     subtotal: round2(i.subtotal),
     vatRate: i.vatRate,
     vatAmount: round2(i.vatAmount),
@@ -279,6 +283,7 @@ export async function POST(req: NextRequest) {
           issueDate,
           dueDate,
           status,
+          invoiceType: body.invoiceType ?? 'standard',
           subtotal,
           vatRate,
           vatAmount,

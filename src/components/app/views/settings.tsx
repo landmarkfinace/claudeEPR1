@@ -139,7 +139,9 @@ export function SettingsView() {
       setSaving(true)
       const res = await api.put<{ settings: AppSettings }>('/api/settings', {
         companyName,
+        companyNameAr: form.companyNameAr.trim(),
         address: form.address,
+        addressAr: form.addressAr.trim(),
         phone: form.phone,
         email: form.email,
         logo: form.logo,
@@ -147,6 +149,11 @@ export function SettingsView() {
         defaultPayType: form.defaultPayType,
         authorizedSignatory: form.authorizedSignatory.trim(),
         signatoryTitle: form.signatoryTitle.trim(),
+        vatNumber: form.vatNumber.trim(),
+        crNumber: form.crNumber.trim(),
+        bankName: form.bankName.trim(),
+        bankIban: form.bankIban.trim(),
+        bankAccountNumber: form.bankAccountNumber.trim(),
         vatRate: Number.isFinite(Number(form.vatRate)) ? Number(form.vatRate) : 15,
       })
       setSettings(res.settings)
@@ -190,12 +197,46 @@ export function SettingsView() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="company-name-ar">
+                Company Name — <span lang="ar" dir="rtl">الاسم بالعربية</span>
+              </Label>
+              <Input
+                id="company-name-ar"
+                lang="ar"
+                dir="rtl"
+                value={form.companyNameAr}
+                onChange={(e) => setField('companyNameAr', e.target.value)}
+                placeholder="لاندمارك انتر جلف"
+                disabled={!canEdit}
+              />
+              <p className="text-xs text-muted-foreground">
+                Printed bilingually on ZATCA-style tax invoices and agreements.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="company-address">Address</Label>
               <Textarea
                 id="company-address"
                 value={form.address}
                 onChange={(e) => setField('address', e.target.value)}
                 placeholder="Riyadh, Kingdom of Saudi Arabia"
+                rows={2}
+                disabled={!canEdit}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="company-address-ar">
+                Address — <span lang="ar" dir="rtl">العنوان بالعربية</span>
+              </Label>
+              <Textarea
+                id="company-address-ar"
+                lang="ar"
+                dir="rtl"
+                value={form.addressAr}
+                onChange={(e) => setField('addressAr', e.target.value)}
+                placeholder="الجبيل، المملكة العربية السعودية"
                 rows={2}
                 disabled={!canEdit}
               />
@@ -388,6 +429,99 @@ export function SettingsView() {
                 <TooltipContent>You do not have permission to edit settings</TooltipContent>
               </Tooltip>
             )}
+          </div>
+        </SectionCard>
+
+        {/* ---- ZATCA e-Invoicing identity ---- */}
+        <SectionCard className="p-6">
+          <h2 className="text-base font-semibold">ZATCA e-Invoicing</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Seller identity used on the bilingual tax invoice QR (Phase 1 tags 1&ndash;2 and Phase
+            2 UBL XML). Set the VAT number so the QR verifies.
+          </p>
+          <div className="mt-6 space-y-5">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="vat-number">VAT Registration Number</Label>
+                <Input
+                  id="vat-number"
+                  inputMode="numeric"
+                  value={form.vatNumber}
+                  onChange={(e) => setField('vatNumber', e.target.value)}
+                  placeholder="3XXXXXXXXXXXXX3"
+                  className="font-mono"
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-muted-foreground">
+                  15 digits — appears in QR tag 2 and on every tax invoice.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cr-number">Commercial Registration (CR) No.</Label>
+                <Input
+                  id="cr-number"
+                  inputMode="numeric"
+                  value={form.crNumber}
+                  onChange={(e) => setField('crNumber', e.target.value)}
+                  placeholder="e.g. 2050xxxxxxx"
+                  className="font-mono"
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Included in the UBL XML seller identification.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-dashed bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">Phase 1 + Phase 2 ready:</span> every
+              invoice print carries the TLV QR with all 8 tags (seller, VAT number, timestamp,
+              total, VAT, invoice hash, ECDSA signature and public key) plus the UUID / PIH hash
+              chain. Formal Fatoora certification additionally requires portal onboarding (CSID).
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* ---- Bank details ---- */}
+        <SectionCard className="p-6">
+          <h2 className="text-base font-semibold">Bank Details</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Printed in the payment instructions block of every invoice.
+          </p>
+          <div className="mt-6 space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="bank-name">Bank Name</Label>
+              <Input
+                id="bank-name"
+                value={form.bankName}
+                onChange={(e) => setField('bankName', e.target.value)}
+                placeholder="e.g. Saudi National Bank"
+                disabled={!canEdit}
+              />
+            </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="bank-iban">IBAN</Label>
+                <Input
+                  id="bank-iban"
+                  value={form.bankIban}
+                  onChange={(e) => setField('bankIban', e.target.value)}
+                  placeholder="SA00 0000 0000 0000 0000 0000"
+                  className="font-mono"
+                  disabled={!canEdit}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bank-account">Account Number</Label>
+                <Input
+                  id="bank-account"
+                  value={form.bankAccountNumber}
+                  onChange={(e) => setField('bankAccountNumber', e.target.value)}
+                  placeholder="00000000000000"
+                  className="font-mono"
+                  disabled={!canEdit}
+                />
+              </div>
+            </div>
           </div>
         </SectionCard>
 

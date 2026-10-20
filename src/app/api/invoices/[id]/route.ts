@@ -28,11 +28,18 @@ type InvoiceStatus = (typeof INVOICE_STATUSES)[number]
 const clientSelect = {
   id: true,
   name: true,
+  nameAr: true,
   address: true,
+  addressAr: true,
   city: true,
   phone: true,
   email: true,
   crNumber: true,
+  vatNumber: true,
+  bankName: true,
+  iban: true,
+  accountNumber: true,
+  swiftCode: true,
 } as const
 
 const itemSchema = z.object({
@@ -55,6 +62,8 @@ const invoiceUpdateSchema = z.object({
   issueDate: z.string().min(1, 'Issue date is required').optional(),
   dueDate: z.string().nullable().optional(),
   status: z.enum(INVOICE_STATUSES).optional(),
+  // ZATCA document type: standard = B2B tax invoice, simplified = B2C
+  invoiceType: z.enum(['standard', 'simplified']).optional(),
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(1, 'VAT rate cannot exceed 100%').optional(),
   paidAmount: z.coerce.number().min(0, 'Paid amount cannot be negative').optional(),
   notes: z.string().nullable().optional(),
@@ -75,6 +84,7 @@ type InvoiceWithRelations = {
   issueDate: Date
   dueDate: Date | null
   status: string
+  invoiceType: string
   subtotal: number
   vatRate: number
   vatAmount: number
@@ -95,11 +105,18 @@ type InvoiceWithRelations = {
   client: {
     id: string
     name: string
+    nameAr: string | null
     address: string | null
+    addressAr: string | null
     city: string | null
     phone: string | null
     email: string | null
     crNumber: string | null
+    vatNumber: string | null
+    bankName: string | null
+    iban: string | null
+    accountNumber: string | null
+    swiftCode: string | null
   } | null
 }
 
@@ -116,6 +133,7 @@ function mapInvoiceFull(i: InvoiceWithRelations): InvoiceRow & {
     issueDate: i.issueDate.toISOString(),
     dueDate: i.dueDate ? i.dueDate.toISOString() : null,
     status: i.status,
+    invoiceType: i.invoiceType,
     subtotal: round2(i.subtotal),
     vatRate: i.vatRate,
     vatAmount: round2(i.vatAmount),
@@ -256,6 +274,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           issueDate,
           dueDate,
           status,
+          invoiceType: body.invoiceType,
           subtotal,
           vatRate,
           vatAmount,

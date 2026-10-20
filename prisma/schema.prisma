@@ -54,12 +54,23 @@ model Setting {
 model Client {
   id            String    @id @default(cuid())
   name          String    @unique
+  // Arabic company name (printed bilingually on ZATCA-style invoices)
+  nameAr        String?
   contactPerson String?
   phone         String?
   email         String?
   address       String?
+  addressAr     String? // Arabic address
   city          String?
   crNumber      String? // Saudi commercial registration number
+  // Saudi VAT registration number (15 digits, starts & ends with 3) — printed
+  // on the buyer block of standard (B2B) ZATCA tax invoices
+  vatNumber     String?
+  // ---- Client bank account (for payments/references) ----
+  bankName      String?
+  iban          String? // SA.. 24 chars for Saudi accounts
+  accountNumber String?
+  swiftCode     String?
   status        String    @default("active") // active | inactive
   notes         String?
   createdAt     DateTime  @default(now())
@@ -407,6 +418,9 @@ model Invoice {
   issueDate     DateTime
   dueDate       DateTime?
   status        String    @default("draft") // draft | issued | paid | cancelled
+  // standard = B2B tax invoice (must carry buyer VAT number in Phase 2)
+  // simplified = B2C (QR-only, no buyer VAT requirement)
+  invoiceType   String    @default("standard") // standard | simplified
   subtotal      Float     @default(0)
   vatRate       Float     @default(0.15)
   vatAmount     Float     @default(0)
@@ -414,6 +428,15 @@ model Invoice {
   paidAmount    Float     @default(0)
   notes         String?
   createdByName String?
+  // ---- ZATCA Phase 2 (Fatoora integration-ready) ----
+  // Cryptographic stamp chain: each issued invoice stores its UUID, the
+  // base64 SHA-256 hash of its UBL XML, the previous invoice's hash (PIH)
+  // and the base64 ECDSA signature over that hash. The QR code then carries
+  // all 8 TLV tags (Phase 1 tags 1-5 + Phase 2 tags 6-8).
+  uuid          String?   @unique // ZATCA invoice UUID (uuid v4)
+  invoiceHash   String?   // base64 SHA-256 of the invoice UBL XML (QR tag 6)
+  previousHash  String?   // base64 hash of the previous issued invoice (PIH chain)
+  signature     String?   // base64 ECDSA-SHA256 signature over the hash (QR tag 7)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

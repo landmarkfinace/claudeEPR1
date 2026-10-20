@@ -18,9 +18,11 @@ export const dynamic = 'force-dynamic'
 function buildSettings(map: Record<string, string>) {
   return {
     companyName: map.companyName ?? 'Landmark Inter Gulf',
+    companyNameAr: map.companyNameAr ?? 'لاندمارك انتر جلف',
     address:
       map.address ??
       'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
+    addressAr: map.addressAr ?? 'مركز السويدي التجاري، مكتب 103، الدور الأول، ص.ب. 35712، مبنى 5526، الشارع الرابع، حي الوها، الجبيل، المملكة العربية السعودية',
     phone: map.phone ?? '+966 13 847 2200',
     email: map.email ?? 'info@landmarkintergulf.com',
     logo: map.logo ?? '/logo-mark.png', // default brand ML monogram
@@ -28,6 +30,13 @@ function buildSettings(map: Record<string, string>) {
     defaultPayType: (map.defaultPayType ?? 'bank_transfer') as PayType,
     authorizedSignatory: map.authorizedSignatory ?? '',
     signatoryTitle: map.signatoryTitle ?? 'Authorized Signatory',
+    // ZATCA seller identity — QR tag 2 / UBL PartyTaxScheme CompanyID
+    vatNumber: map.vatNumber ?? '',
+    crNumber: map.crNumber ?? '',
+    // Company bank details — printed as payment instructions on invoices
+    bankName: map.bankName ?? '',
+    bankIban: map.bankIban ?? '',
+    bankAccountNumber: map.bankAccountNumber ?? '',
     // VAT rate for the VAT Return Expense module — stored as a PERCENT string ("15")
     vatRate: clampVatPercent(parseFloat(map.vatRate ?? '')),
   }
@@ -56,6 +65,13 @@ const settingsSchema = z.object({
   defaultPayType: z.enum(['bank_transfer', 'cash', 'cheque']).optional(),
   authorizedSignatory: z.string().max(120).optional(),
   signatoryTitle: z.string().max(120).optional(),
+  // ZATCA seller identity (15-digit Saudi VAT number, e.g. 3xxxxxxxxxxxxx3)
+  vatNumber: z.string().max(15, 'VAT number cannot exceed 15 digits').optional(),
+  crNumber: z.string().max(20).optional(),
+  // Company bank details for invoice payment instructions
+  bankName: z.string().max(120).optional(),
+  bankIban: z.string().max(34, 'IBAN cannot exceed 34 characters').optional(),
+  bankAccountNumber: z.string().max(34).optional(),
   // VAT percent 0–100 (15 = Saudi standard); stored under the `vatRate` key
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(100, 'VAT rate cannot exceed 100').optional(),
 })
@@ -101,6 +117,13 @@ export async function PUT(req: NextRequest) {
     }
     if (body.signatoryTitle !== undefined) {
       entries.push(['signatoryTitle', body.signatoryTitle])
+    }
+    if (body.vatNumber !== undefined) entries.push(['vatNumber', body.vatNumber])
+    if (body.crNumber !== undefined) entries.push(['crNumber', body.crNumber])
+    if (body.bankName !== undefined) entries.push(['bankName', body.bankName])
+    if (body.bankIban !== undefined) entries.push(['bankIban', body.bankIban])
+    if (body.bankAccountNumber !== undefined) {
+      entries.push(['bankAccountNumber', body.bankAccountNumber])
     }
     if (body.vatRate !== undefined) {
       entries.push(['vatRate', String(clampVatPercent(body.vatRate))])

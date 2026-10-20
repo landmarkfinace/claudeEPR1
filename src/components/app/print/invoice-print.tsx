@@ -1,17 +1,20 @@
 'use client'
 
-// TAX INVOICE print document — A4 portrait, ZATCA simplified (Phase 1) layout:
-//   • company letterhead (logo + name + address from Settings)
-//   • TAX INVOICE title block: number, issue date, due date, status stamp
-//   • "Bill To" block (client name + address when linked to a Client record)
-//   • line-items table + Subtotal / VAT / TOTAL bar (+ Amount Paid / Balance Due)
-//   • ZATCA Phase-1 QR code — simplified TLV encoding of the 5 mandatory tags
-//     (seller name, VAT number, timestamp, total with VAT, VAT total)
-//   • notes, Authorized By signature block, computer-generated footer
+// TAX INVOICE print document — A4 portrait, bilingual English/Arabic,
+// ZATCA Phase 1 + Phase 2 compliant:
+//   • company letterhead (logo + EN/AR name + EN/AR address from Settings)
+//   • title block: TAX INVOICE / فاتورة ضريبية (standard B2B) or
+//     SIMPLIFIED TAX INVOICE / فاتورة ضريبية مبسطة (simplified B2C)
+//   • "Bill To" block with client EN/AR name, address, CR + VAT numbers
+//   • line-items table + Subtotal / VAT / TOTAL bar (+ Amount Paid / Balance)
+//   • ZATCA QR from /api/invoices/[id]/zatca — all 8 TLV tags:
+//     Phase 1 (seller, VAT no, timestamp, total, VAT) + Phase 2 (invoice
+//     hash, ECDSA signature, public key)
+//   • compliance block: UUID, invoice hash, previous invoice hash (PIH)
+//   • payment instructions (company bank details) + signature block
 // Print via the browser (Ctrl+P → "Save as PDF" for the PDF export).
-import { useEffect, useState } from 'react'
-import QRCode from 'qrcode'
-import { Printer, QrCode, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2, Printer, QrCode, ShieldCheck, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -21,59 +24,33 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
+import { api } from '@/lib/api-client'
 import { formatDate, formatMoney, round2 } from '@/lib/format'
 import { useAppStore } from '@/lib/store'
-import type { AppSettings, DocItemRow, InvoiceRow } from '@/lib/types'
+import type { AppSettings, DocItemRow, InvoiceRow, ZatcaStamp } from '@/lib/types'
 
 /** Linked client info returned by GET /api/invoices/[id] (null = free-text client). */
 export type InvoiceClientInfo = {
   id: string
   name: string
+  nameAr: string | null
   address: string | null
+  addressAr: string | null
   city: string | null
   phone: string | null
   email: string | null
   crNumber: string | null
+  vatNumber: string | null
+  bankName: string | null
+  iban: string | null
+  accountNumber: string | null
+  swiftCode: string | null
 } | null
 
 /** Full invoice payload with items + linked client — the print source of truth. */
 export type InvoicePrintData = InvoiceRow & {
   client: InvoiceClientInfo
   items: DocItemRow[]
-}
-
-/**
- * ZATCA Phase-1 (simplified) TLV encoder: each field is encoded as
- *   [tagId (1 byte)][length (2 bytes, big-endian)][UTF-8 value]
- * and the concatenated byte stream is returned as base64 for the QR code.
- */
-function tlvBase64(entries: { tag: number; value: string }[]): string {
-  const encoder = new TextEncoder()
-  const parts: Uint8Array[] = []
-  for (const { tag, value } of entries) {
-    const valueBytes = encoder.encode(value)
-    const head = new Uint8Array(3)
-    head[0] = tag & 0xff
-    head[1] = (valueBytes.length >> 8) & 0xff
-    head[2] = valueBytes.length & 0xff
-    parts.push(head, valueBytes)
-  }
-  const totalLength = parts.reduce((n, p) => n + p.length, 0)
-  const merged = new Uint8Array(totalLength)
-  let offset = 0
-  for (const p of parts) {
-    merged.set(p, offset)
-    offset += p.length
-  }
-  let binary = ''
-  for (const byte of merged) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
-/** VAT registration number — not yet a Settings key, so read it defensively. */
-function sellerVatNumber(settings: AppSettings): string {
-  const raw = (settings as unknown as { vatNumber?: string | null }).vatNumber
-  return typeof raw === 'string' ? raw.trim() : ''
 }
 
 export function InvoicePrintDialog({
@@ -89,29 +66,33 @@ export function InvoicePrintDialog({
   const user = useAppStore((s) => s.user)
   usePageRule(open, 'size: A4 portrait; margin: 12mm;')
 
-  // ZATCA QR (Phase-1 TLV) — regenerated whenever the invoice or company data changes
-  const [qrUrl, setQrUrl] = useState<string | null>(null)
+  // ZATCA Phase 1+2 stamp — fetched from the API whenever the dialog opens
+  const [stamp, setStamp] = useState<ZatcaStamp | null>(null)
+  const [stampLoading, setStampLoading] = useState(false)
+  const [stampError, setStampError] = useState<string | null>(null)
+  const stampReqId = useRef(0)
+
+  const loadStamp = useCallback(async (invoiceId: string) => {
+    const reqId = ++stampReqId.current
+    setStamp(null)
+    setStampError(null)
+    setStampLoading(true)
+    try {
+      const s = await api.get<ZatcaStamp>(`/api/invoices/${invoiceId}/zatca`)
+      if (reqId !== stampReqId.current) return
+      setStamp(s)
+    } catch (e) {
+      if (reqId !== stampReqId.current) return
+      setStampError(e instanceof Error ? e.message : 'ZATCA stamp failed')
+    } finally {
+      if (reqId === stampReqId.current) setStampLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!open || !invoice) return
-    let cancelled = false
-    const payload = tlvBase64([
-      { tag: 1, value: settings.companyName || 'Landmark Inter Gulf' }, // seller name
-      { tag: 2, value: sellerVatNumber(settings) }, // seller VAT number
-      { tag: 3, value: new Date(invoice.issueDate).toISOString() }, // timestamp
-      { tag: 4, value: invoice.total.toFixed(2) }, // total with VAT
-      { tag: 5, value: invoice.vatAmount.toFixed(2) }, // VAT total
-    ])
-    QRCode.toDataURL(payload, { margin: 0, width: 240, errorCorrectionLevel: 'M' })
-      .then((url) => {
-        if (!cancelled) setQrUrl(url)
-      })
-      .catch(() => {
-        if (!cancelled) setQrUrl(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, invoice, settings])
+    void loadStamp(invoice.id)
+  }, [open, invoice, loadStamp])
 
   if (!open) return null
 
@@ -120,6 +101,8 @@ export function InvoicePrintDialog({
   const i = invoice
   const vatPercent = Math.round((i?.vatRate ?? 0.15) * 100)
   const balanceDue = i ? round2(i.total - i.paidAmount) : 0
+  const isSimplified = i?.invoiceType === 'simplified'
+  const sellerVat = settings.vatNumber || stamp?.sellerVatNumber || ''
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -129,8 +112,8 @@ export function InvoicePrintDialog({
       >
         <DialogTitle className="sr-only">Tax invoice print preview</DialogTitle>
         <DialogDescription className="sr-only">
-          Printable ZATCA-style tax invoice with line items, VAT breakdown and verification QR
-          code.
+          Printable bilingual ZATCA-compliant tax invoice with line items, VAT breakdown,
+          cryptographic stamp and verification QR code.
         </DialogDescription>
 
         {/* Toolbar (hidden when printing) */}
@@ -141,7 +124,7 @@ export function InvoicePrintDialog({
             </h2>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <QrCode className="h-3.5 w-3.5" />
-              A4 portrait · ZATCA Phase-1 QR included · {vatPercent}% VAT
+              A4 portrait · ZATCA Phase 1 + 2 QR · {vatPercent}% VAT · English / العربية
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -159,8 +142,12 @@ export function InvoicePrintDialog({
         {/* Scrollable preview / printable page */}
         <div className="nice-scrollbar print-area flex-1 overflow-y-auto bg-neutral-100 p-4 print:overflow-visible print:bg-white print:p-0">
           {i ? (
-            <div className="mx-auto w-full max-w-[820px] bg-white p-8 text-neutral-900 shadow-sm [print-color-adjust:exact] [-webkit-print-color-adjust:exact] print:max-w-none print:p-0 print:shadow-none">
-              {/* ---- Letterhead ---- */}
+            <div
+              dir="ltr"
+              className="mx-auto w-full max-w-[820px] bg-white p-8 text-neutral-900 shadow-sm [print-color-adjust:exact] [-webkit-print-color-adjust:exact] print:max-w-none print:p-0 print:shadow-none"
+              style={{ fontFamily: "'Segoe UI', 'Noto Naskh Arabic', Tahoma, Arial, sans-serif" }}
+            >
+              {/* ---- Letterhead (bilingual) ---- */}
               <header className="flex items-start justify-between gap-4 border-b-2 border-[#0F1F3D] pb-4">
                 <div className="flex min-w-0 items-start gap-4">
                   <img
@@ -172,30 +159,51 @@ export function InvoicePrintDialog({
                     <p className="text-lg font-bold uppercase tracking-wide text-[#0F1F3D]">
                       {settings.companyName}
                     </p>
+                    <p lang="ar" dir="rtl" className="text-sm font-bold text-[#0F1F3D]">
+                      {settings.companyNameAr}
+                    </p>
                     {settings.address ? (
                       <p className="mt-1 max-w-[380px] text-[10px] leading-relaxed text-neutral-600">
                         {settings.address}
+                      </p>
+                    ) : null}
+                    {settings.addressAr ? (
+                      <p
+                        lang="ar"
+                        dir="rtl"
+                        className="max-w-[380px] text-[10px] leading-relaxed text-neutral-600"
+                      >
+                        {settings.addressAr}
                       </p>
                     ) : null}
                     <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-neutral-600">
                       {settings.phone ? <span>Tel: {settings.phone}</span> : null}
                       {settings.email ? <span>Email: {settings.email}</span> : null}
                     </div>
+                    {sellerVat ? (
+                      <p className="mt-1 text-[10px] font-semibold text-neutral-800">
+                        VAT No. / الرقم الضريبي:{' '}
+                        <span className="font-mono tabular-nums">{sellerVat}</span>
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-sm font-bold tracking-widest text-white">
                     TAX INVOICE
                   </p>
+                  <p lang="ar" dir="rtl" className="mt-1 text-sm font-bold text-[#0F1F3D]">
+                    {isSimplified ? 'فاتورة ضريبية مبسطة' : 'فاتورة ضريبية'}
+                  </p>
                   <p className="mt-2 text-[11px] text-neutral-700">
-                    Invoice No:{' '}
+                    Invoice No. / رقم الفاتورة:{' '}
                     <span className="font-mono font-bold text-neutral-900">{i.invoiceNumber}</span>
                   </p>
                   <p className="text-[11px] text-neutral-600">
-                    Issue Date: {formatDate(i.issueDate)}
+                    Issue Date / تاريخ الإصدار: {formatDate(i.issueDate)}
                   </p>
                   <p className="text-[11px] text-neutral-600">
-                    Due Date: {i.dueDate ? formatDate(i.dueDate) : '—'}
+                    Due Date / تاريخ الاستحقاق: {i.dueDate ? formatDate(i.dueDate) : '—'}
                   </p>
                   {/* status stamp */}
                   {i.status === 'paid' ? (
@@ -220,56 +228,83 @@ export function InvoicePrintDialog({
               {/* gold accent segment under the navy header rule */}
               <div className="mt-[3px] h-[3px] w-24 bg-[#D4AF37]" aria-hidden />
 
-              {/* ---- Bill To ---- */}
+              {/* ---- Bill To (bilingual) + Invoice Details ---- */}
               <section className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                    Bill To
+                    Bill To / الفاتورة إلى
                   </p>
                   <p className="mt-1 text-sm font-bold text-neutral-900">{i.clientName}</p>
+                  {i.client?.nameAr ? (
+                    <p lang="ar" dir="rtl" className="text-sm font-bold text-neutral-900">
+                      {i.client.nameAr}
+                    </p>
+                  ) : null}
                   {i.client ? (
                     <div className="mt-1 space-y-0.5 text-[11px] leading-relaxed text-neutral-600">
                       {i.client.address ? <p>{i.client.address}</p> : null}
+                      {i.client.addressAr ? (
+                        <p lang="ar" dir="rtl">
+                          {i.client.addressAr}
+                        </p>
+                      ) : null}
                       {i.client.city ? <p>{i.client.city}</p> : null}
                       {i.client.phone ? (
                         <p>
-                          Tel:{' '}
-                          <span className="tabular-nums">{i.client.phone}</span>
+                          Tel: <span className="tabular-nums">{i.client.phone}</span>
                         </p>
                       ) : null}
                       {i.client.email ? <p>{i.client.email}</p> : null}
                       {i.client.crNumber ? (
                         <p>
-                          CR No: <span className="tabular-nums">{i.client.crNumber}</span>
+                          CR No. / السجل التجاري:{' '}
+                          <span className="tabular-nums">{i.client.crNumber}</span>
+                        </p>
+                      ) : null}
+                      {i.client.vatNumber ? (
+                        <p>
+                          VAT No. / الرقم الضريبي:{' '}
+                          <span className="font-mono tabular-nums">{i.client.vatNumber}</span>
+                        </p>
+                      ) : !isSimplified ? (
+                        <p className="italic text-amber-700">
+                          (unregistered buyer / عميل غير مسجل)
                         </p>
                       ) : null}
                     </div>
                   ) : (
                     <p className="mt-1 text-[11px] italic text-neutral-400">
-                      (unregistered customer)
+                      (unregistered customer / عميل غير مسجل)
                     </p>
                   )}
                 </div>
                 <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                    Invoice Details
+                    Invoice Details / تفاصيل الفاتورة
                   </p>
                   <div className="mt-1 space-y-0.5 text-[11px] text-neutral-600">
                     <p>
-                      Subject:{' '}
+                      Subject / الموضوع:{' '}
                       <span className="font-medium text-neutral-900">{i.subject ?? '—'}</span>
                     </p>
                     <p>
-                      Currency: <span className="font-medium text-neutral-900">{currency}</span>
+                      Type / النوع:{' '}
+                      <span className="font-medium text-neutral-900">
+                        {isSimplified ? 'Simplified / مبسطة' : 'Standard / قياسية'}
+                      </span>
                     </p>
                     <p>
-                      VAT Rate:{' '}
+                      Currency / العملة:{' '}
+                      <span className="font-medium text-neutral-900">{currency}</span>
+                    </p>
+                    <p>
+                      VAT Rate / نسبة الضريبة:{' '}
                       <span className="font-medium tabular-nums text-neutral-900">
                         {vatPercent}%
                       </span>
                     </p>
                     <p>
-                      Prepared By:{' '}
+                      Prepared By / أعدت بواسطة:{' '}
                       <span className="font-medium text-neutral-900">
                         {i.createdByName ?? user?.name ?? 'Accounts'}
                       </span>
@@ -278,7 +313,7 @@ export function InvoicePrintDialog({
                 </div>
               </section>
 
-              {/* ---- Items table ---- */}
+              {/* ---- Items table (bilingual headers) ---- */}
               <table className="mt-4 w-full border-collapse text-[11px]">
                 <thead>
                   <tr>
@@ -286,19 +321,19 @@ export function InvoicePrintDialog({
                       Sr
                     </th>
                     <th className="border border-neutral-300 bg-neutral-100 px-1.5 py-1.5 text-left font-semibold text-neutral-800">
-                      Description
+                      Description / الوصف
                     </th>
                     <th className="w-[80px] border border-neutral-300 bg-neutral-100 px-1.5 py-1.5 text-left font-semibold text-neutral-800">
-                      Unit
+                      Unit / الوحدة
                     </th>
                     <th className="w-[60px] border border-neutral-300 bg-neutral-100 px-1.5 py-1.5 text-right font-semibold text-neutral-800">
-                      Qty
+                      Qty / الكمية
                     </th>
                     <th className="w-[90px] border border-neutral-300 bg-neutral-100 px-1.5 py-1.5 text-right font-semibold text-neutral-800">
-                      Unit Price
+                      Unit Price / السعر
                     </th>
                     <th className="w-[100px] border border-neutral-300 bg-neutral-100 px-1.5 py-1.5 text-right font-semibold text-neutral-800">
-                      Line Total
+                      Total / المجموع
                     </th>
                   </tr>
                 </thead>
@@ -328,13 +363,13 @@ export function InvoicePrintDialog({
                 </tbody>
               </table>
 
-              {/* ---- Totals bar ---- */}
+              {/* ---- Totals bar (bilingual) ---- */}
               <div className="mt-3 flex justify-end">
-                <table className="w-full max-w-[320px] border-collapse text-[11px] sm:w-[320px]">
+                <table className="w-full max-w-[340px] border-collapse text-[11px] sm:w-[340px]">
                   <tbody>
                     <tr>
                       <td className="border border-neutral-300 bg-neutral-50 px-2.5 py-1.5 font-medium">
-                        Subtotal
+                        Subtotal / المجموع قبل الضريبة
                       </td>
                       <td className="w-[120px] border border-neutral-300 px-2.5 py-1.5 text-right tabular-nums">
                         {i.subtotal.toFixed(2)}
@@ -342,14 +377,16 @@ export function InvoicePrintDialog({
                     </tr>
                     <tr>
                       <td className="border border-neutral-300 bg-neutral-50 px-2.5 py-1.5 font-medium">
-                        VAT ({vatPercent}%)
+                        VAT {vatPercent}% / ضريبة القيمة المضافة
                       </td>
                       <td className="border border-neutral-300 px-2.5 py-1.5 text-right tabular-nums">
                         {i.vatAmount.toFixed(2)}
                       </td>
                     </tr>
                     <tr className="bg-[#0F1F3D] font-bold text-white">
-                      <td className="border border-[#0F1F3D] px-2.5 py-2">TOTAL</td>
+                      <td className="border border-[#0F1F3D] px-2.5 py-2">
+                        TOTAL / الإجمالي
+                      </td>
                       <td className="border border-[#0F1F3D] px-2.5 py-2 text-right text-sm tabular-nums">
                         {money(i.total)}
                       </td>
@@ -358,7 +395,7 @@ export function InvoicePrintDialog({
                       <>
                         <tr>
                           <td className="border border-neutral-300 bg-neutral-50 px-2.5 py-1.5 font-medium">
-                            Amount Paid
+                            Amount Paid / المبلغ المدفوع
                           </td>
                           <td className="border border-neutral-300 px-2.5 py-1.5 text-right tabular-nums text-emerald-700">
                             {money(i.paidAmount)}
@@ -366,7 +403,7 @@ export function InvoicePrintDialog({
                         </tr>
                         <tr className="font-bold">
                           <td className="border border-neutral-300 bg-neutral-50 px-2.5 py-1.5">
-                            Balance Due
+                            Balance Due / الرصيد المستحق
                           </td>
                           <td className="border border-neutral-300 px-2.5 py-1.5 text-right tabular-nums text-[#0F1F3D]">
                             {money(balanceDue)}
@@ -378,11 +415,40 @@ export function InvoicePrintDialog({
                 </table>
               </div>
 
+              {/* ---- Payment instructions (company bank) ---- */}
+              {settings.bankIban || settings.bankName || settings.bankAccountNumber ? (
+                <section className="mt-4 break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                    Payment Details / تفاصيل الدفع
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-x-6 gap-y-0.5 text-[11px] text-neutral-700">
+                    {settings.bankName ? (
+                      <p>
+                        <span className="text-neutral-500">Bank / البنك:</span>{' '}
+                        <span className="font-medium">{settings.bankName}</span>
+                      </p>
+                    ) : null}
+                    {settings.bankIban ? (
+                      <p>
+                        <span className="text-neutral-500">IBAN:</span>{' '}
+                        <span className="font-mono">{settings.bankIban}</span>
+                      </p>
+                    ) : null}
+                    {settings.bankAccountNumber ? (
+                      <p>
+                        <span className="text-neutral-500">Account / الحساب:</span>{' '}
+                        <span className="font-mono">{settings.bankAccountNumber}</span>
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
               {/* ---- Notes ---- */}
               {i.notes ? (
                 <section className="mt-4 break-inside-avoid rounded-lg border border-neutral-200 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                    Notes
+                    Notes / ملاحظات
                   </p>
                   <p className="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-neutral-700">
                     {i.notes}
@@ -390,33 +456,78 @@ export function InvoicePrintDialog({
                 </section>
               ) : null}
 
-              {/* ---- QR + signatures ---- */}
+              {/* ---- ZATCA QR + compliance block + signatures ---- */}
               <div className="mt-6 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-                {/* ZATCA Phase-1 verification QR */}
+                {/* ZATCA Phase 1 + 2 verification QR */}
                 <div className="shrink-0 text-center">
-                  {qrUrl ? (
+                  {stampLoading ? (
+                    <div className="flex h-[130px] w-[130px] items-center justify-center border border-dashed border-neutral-300">
+                      <Loader2 className="h-5 w-5 animate-spin text-neutral-400" />
+                    </div>
+                  ) : stamp?.qrDataUrl ? (
                     <img
-                      src={qrUrl}
+                      src={stamp.qrDataUrl}
                       alt="ZATCA invoice verification QR code"
-                      className="h-[110px] w-[110px]"
+                      className="h-[130px] w-[130px]"
                     />
                   ) : (
-                    <div className="flex h-[110px] w-[110px] items-center justify-center border border-dashed border-neutral-300 text-[9px] text-neutral-400">
-                      QR
+                    <div className="flex h-[130px] w-[130px] items-center justify-center border border-dashed border-rose-300 text-[9px] text-rose-400">
+                      QR unavailable
                     </div>
                   )}
-                  <p className="mt-1 max-w-[130px] text-[9px] leading-tight text-neutral-500">
-                    Scan to verify (ZATCA Phase 1)
+                  <p className="mt-1 max-w-[140px] text-[9px] leading-tight text-neutral-500">
+                    Scan to verify · امسح للتحقق
+                    <br />
+                    ZATCA Phase 1 + 2
                   </p>
                 </div>
 
-                <div className="flex min-w-0 flex-1 justify-end gap-10">
+                {/* Phase 2 cryptographic stamp details */}
+                <div className="min-w-0 flex-1">
+                  {stamp ? (
+                    <div className="break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-600">
+                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        e-Invoice Cryptographic Stamp / الختم الإلكتروني
+                      </p>
+                      <div className="mt-1.5 space-y-1 text-[9px] leading-relaxed text-neutral-600">
+                        <p className="truncate">
+                          UUID:{' '}
+                          <span className="font-mono text-neutral-800">{stamp.uuid}</span>
+                        </p>
+                        <p className="truncate">
+                          Invoice Hash / بصمة الفاتورة:{' '}
+                          <span className="font-mono text-neutral-800">{stamp.invoiceHash}</span>
+                        </p>
+                        <p className="truncate">
+                          Previous Hash / بصمة الفاتورة السابقة:{' '}
+                          <span className="font-mono text-neutral-800">{stamp.previousHash}</span>
+                        </p>
+                        <p className="truncate">
+                          ECDSA Signature / التوقيع الإلكتروني:{' '}
+                          <span className="font-mono text-neutral-800">{stamp.signature}</span>
+                        </p>
+                      </div>
+                    </div>
+                  ) : stampError ? (
+                    <p className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-2 text-[9px] text-amber-700">
+                      ZATCA stamp unavailable: {stampError}
+                    </p>
+                  ) : null}
+                  {stamp?.warnings?.length ? (
+                    <p className="mt-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 p-2 text-[9px] text-amber-700">
+                      {stamp.warnings[0]}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex min-w-[180px] justify-end">
                   <div className="min-w-[180px]">
                     <div className="flex h-12 items-end">
                       <div className="w-full border-t border-neutral-800" />
                     </div>
                     <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
-                      Authorized By
+                      Authorized By / المفوض بالتوقيع
                     </p>
                     <p className="text-[10px] text-neutral-600">
                       {settings.authorizedSignatory || settings.companyName}
@@ -429,7 +540,8 @@ export function InvoicePrintDialog({
               </div>
 
               <p className="mt-4 border-t border-neutral-200 pt-2 text-center text-[9px] text-neutral-400">
-                This is a computer-generated tax invoice issued by {settings.companyName}.
+                This is a computer-generated tax invoice issued by {settings.companyName}. ·
+                فاتورة ضريبية صادرة إلكترونياً من {settings.companyNameAr}
               </p>
             </div>
           ) : (

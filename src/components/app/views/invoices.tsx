@@ -107,6 +107,8 @@ type InvoiceForm = {
   issueDate: string
   dueDate: string
   status: string
+  // ZATCA document type: standard (B2B) or simplified (B2C)
+  invoiceType: string
   vatRatePercent: string // typed as percent (15), converted to a fraction on save
   paidAmount: string
   notes: string
@@ -123,6 +125,7 @@ function emptyForm(vatRatePercent: number): InvoiceForm {
     issueDate: toDateInputValue(new Date()),
     dueDate: '',
     status: 'draft',
+    invoiceType: 'standard',
     vatRatePercent: String(vatRatePercent),
     paidAmount: '',
     notes: '',
@@ -155,6 +158,7 @@ export function InvoicesView() {
   const canCreate = can(user, 'invoices.create')
   const canEdit = can(user, 'invoices.edit')
   const canDelete = can(user, 'invoices.delete')
+  const canCreateClient = can(user, 'clients.create')
 
   const currentYear = new Date().getFullYear()
 
@@ -184,10 +188,27 @@ export function InvoicesView() {
   const [form, setForm] = useState<InvoiceForm>(() => emptyForm(settings.vatRate || 15))
   const [clientOptions, setClientOptions] = useState<ClientRow[]>([])
 
+  // ---- quick-add client (inside the invoice dialog) ----
+  const [quickClientOpen, setQuickClientOpen] = useState(false)
+  const [quickClientSaving, setQuickClientSaving] = useState(false)
+  const [quickClient, setQuickClient] = useState({
+    name: '',
+    nameAr: '',
+    vatNumber: '',
+    phone: '',
+    city: '',
+  })
+
   // ---- print ----
   const [printOpen, setPrintOpen] = useState(false)
   const [printInvoice, setPrintInvoice] = useState<InvoicePrintData | null>(null)
   const [printLoadingId, setPrintLoadingId] = useState<string | null>(null)
+
+  /** The client record currently selected in the form (null = free text). */
+  const selectedClient = useMemo(
+    () => clientOptions.find((c) => c.id === form.clientId) ?? null,
+    [clientOptions, form.clientId]
+  )
 
   // guard against out-of-order list responses
   const requestId = useRef(0)
@@ -277,12 +298,49 @@ export function InvoicesView() {
   }, [load])
 
   // Client companies for the dialog's link selector (small list, loaded once)
-  useEffect(() => {
+  const loadClientOptions = useCallback(() => {
     api
       .get<Paginated<ClientRow>>('/api/clients?pageSize=100')
       .then((r) => setClientOptions(r.data))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    loadClientOptions()
+  }, [loadClientOptions])
+
+  /** Create a client from inside the invoice dialog and auto-select it. */
+  async function handleQuickAddClient() {
+    const name = quickClient.name.trim()
+    if (!name) {
+      toast.error('Client name is required')
+      return
+    }
+    const vat = quickClient.vatNumber.replace(/[\s-]/g, '')
+    if (vat && !/^\d{15}$/.test(vat)) {
+      toast.error('VAT number must be exactly 15 digits')
+      return
+    }
+    try {
+      setQuickClientSaving(true)
+      const created = await api.post<ClientRow>('/api/clients', {
+        name,
+        nameAr: quickClient.nameAr.trim(),
+        vatNumber: vat,
+        phone: quickClient.phone.trim(),
+        city: quickClient.city.trim(),
+      })
+      setClientOptions((opts) => [created, ...opts])
+      setForm((f) => ({ ...f, clientId: created.id, clientName: created.name }))
+      setQuickClientOpen(false)
+      setQuickClient({ name: '', nameAr: '', vatNumber: '', phone: '', city: '' })
+      toast.success(`Client "${created.name}" created & selected`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create the client')
+    } finally {
+      setQuickClientSaving(false)
+    }
+  }
 
   const yearOptions = useMemo(() => {
     const set = new Set<number>(years)
@@ -325,6 +383,7 @@ export function InvoicesView() {
         issueDate: toDateInputValue(inv.issueDate),
         dueDate: inv.dueDate ? toDateInputValue(inv.dueDate) : '',
         status: inv.status,
+        invoiceType: inv.invoiceType === 'simplified' ? 'simplified' : 'standard',
         vatRatePercent: String(round2(inv.vatRate * 100)),
         paidAmount: String(inv.paidAmount),
         notes: inv.notes ?? '',
@@ -394,6 +453,7 @@ export function InvoicesView() {
         issueDate: form.issueDate,
         dueDate: form.dueDate || null,
         status: form.status,
+        invoiceType: form.invoiceType === 'simplified' ? 'simplified' : 'standard',
         vatRate: round2(pct / 100),
         paidAmount: round2(paid),
         notes: form.notes.trim() || null,
@@ -958,10 +1018,27 @@ export function InvoicesView() {
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="inv-client">Client</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="inv-client">Client</Label>
+                  {canCreateClient ? (
+                    <button
+                      type="button"
+                      onClick={() => setQuickClientOpen(true)}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add Client
+                    </button>
+                  ) : null}
+                </div>
                 <Select
                   value={form.clientId || 'none'}
                   onValueChange={(v) => {
+                    // Radix can emit '' spuriously when the current value's
+                    // SelectItem is not yet mounted (content renders only
+                    // while open — e.g. right after quick-adding a client).
+                    // Ignore it so the freshly selected client is kept.
+                    if (v === '') return
                     const id = v === 'none' ? '' : v
                     const client = clientOptions.find((c) => c.id === id)
                     setForm((f) => ({
@@ -972,20 +1049,46 @@ export function InvoicesView() {
                   }}
                 >
                   <SelectTrigger id="inv-client" className="w-full" aria-label="Client">
-                    <SelectValue />
+                    <SelectValue>
+                      {form.clientId
+                        ? selectedClient?.name ?? form.clientName
+                        : 'Free text / unregistered'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Free text / unregistered</SelectItem>
                     {clientOptions.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.name}
+                        <span className="flex items-center gap-2">
+                          {c.name}
+                          {c.vatNumber ? (
+                            <span className="text-[10px] text-emerald-600">✓ VAT</span>
+                          ) : null}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
-                  Pick a registered client or type a name below.
-                </p>
+                {selectedClient ? (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedClient.vatNumber ? (
+                      <>
+                        VAT:{' '}
+                        <span className="font-mono tabular-nums text-emerald-600">
+                          {selectedClient.vatNumber}
+                        </span>
+                      </>
+                    ) : form.invoiceType === 'standard' ? (
+                      <span className="text-amber-600">
+                        No VAT number on this client — needed for B2B tax invoices.
+                      </span>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Pick a registered client or type a name below.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="inv-client-name">
@@ -999,9 +1102,38 @@ export function InvoicesView() {
                   readOnly={Boolean(form.clientId)}
                   required
                 />
-                {form.clientId ? (
+                {form.clientId && selectedClient?.nameAr ? (
+                  <p lang="ar" dir="rtl" className="truncate text-xs text-muted-foreground">
+                    {selectedClient.nameAr}
+                  </p>
+                ) : form.clientId ? (
                   <p className="text-xs text-muted-foreground">From the linked client record.</p>
                 ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="inv-type">Invoice Type (ZATCA)</Label>
+                <Select
+                  value={form.invoiceType}
+                  onValueChange={(v) => setField('invoiceType', v)}
+                >
+                  <SelectTrigger id="inv-type" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">
+                      Standard — B2B Tax Invoice فاتورة ضريبية
+                    </SelectItem>
+                    <SelectItem value="simplified">
+                      Simplified — B2C فاتورة ضريبية مبسطة
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {form.invoiceType === 'standard'
+                    ? 'B2B — buyer VAT number printed on the invoice.'
+                    : 'B2C — QR-verified simplified invoice.'}
+                </p>
               </div>
 
               <div className="space-y-2 sm:col-span-2">
@@ -1217,6 +1349,91 @@ export function InvoicesView() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick-add client (opened from inside the invoice dialog) */}
+      <Dialog open={quickClientOpen} onOpenChange={setQuickClientOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Client</DialogTitle>
+            <DialogDescription>
+              Create a client on the fly — you can enrich VAT, address and bank details later in
+              Client Management.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="qc-name">
+                Company Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="qc-name"
+                value={quickClient.name}
+                onChange={(e) => setQuickClient((f) => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Al Rushaid Construction Co."
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="qc-name-ar">
+                Name — <span lang="ar" dir="rtl">العربية</span>
+              </Label>
+              <Input
+                id="qc-name-ar"
+                lang="ar"
+                dir="rtl"
+                value={quickClient.nameAr}
+                onChange={(e) => setQuickClient((f) => ({ ...f, nameAr: e.target.value }))}
+                placeholder="الاسم بالعربية"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="qc-vat">VAT Number</Label>
+                <Input
+                  id="qc-vat"
+                  value={quickClient.vatNumber}
+                  onChange={(e) => setQuickClient((f) => ({ ...f, vatNumber: e.target.value }))}
+                  placeholder="3XXXXXXXXXXXXX3"
+                  inputMode="numeric"
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qc-phone">Phone</Label>
+                <Input
+                  id="qc-phone"
+                  value={quickClient.phone}
+                  onChange={(e) => setQuickClient((f) => ({ ...f, phone: e.target.value }))}
+                  placeholder="+966 13 000 0000"
+                  inputMode="tel"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="qc-city">City</Label>
+              <Input
+                id="qc-city"
+                value={quickClient.city}
+                onChange={(e) => setQuickClient((f) => ({ ...f, city: e.target.value }))}
+                placeholder="e.g. Jubail"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setQuickClientOpen(false)}
+              disabled={quickClientSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleQuickAddClient()} disabled={quickClientSaving}>
+              {quickClientSaving ? 'Saving…' : 'Create & Select'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
