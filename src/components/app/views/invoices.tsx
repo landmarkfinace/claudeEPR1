@@ -7,8 +7,11 @@
 //   • list with search (number / client / subject), status + issue-year filters
 //   • add/edit dialog with a live line-items editor (per-line totals, subtotal,
 //     VAT and grand total recomputed while typing; the server always recomputes)
+//   • per-invoice ZATCA phase designation (Phase 1 QR-only / Phase 2 Integration)
+//     with the Phase 2 "connect system" submission dialog, Approved By /
+//     Received By signature overrides and a per-invoice bank-details override
 //   • quick "Mark Paid" action, per-invoice A4 TAX INVOICE print with the
-//     ZATCA Phase-1 QR code, CSV export
+//     phase-aware ZATCA QR code, CSV export
 // Role-based: add/edit/delete buttons only appear with invoices.create/edit/delete.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -18,11 +21,15 @@ import {
   Calculator,
   CheckCircle2,
   Download,
+  FileCode,
   Hash,
   Pencil,
   Plus,
   Printer,
+  QrCode,
   ReceiptText,
+  Send,
+  ShieldCheck,
   Trash2,
   Wallet,
   X,
@@ -30,7 +37,7 @@ import {
 
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
-import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
+import { formatDate, formatDateTime, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
 import type { ClientRow, DocItemRow, InvoiceRow, Paginated } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
@@ -65,6 +72,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 
 import { StatusBadge } from '../shared/status-badge'
 import { ConfirmDelete } from '../shared/confirm-delete'
@@ -74,6 +82,11 @@ import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
 import { InvoicePrintDialog, type InvoicePrintData } from '../print/invoice-print'
+import {
+  ZatcaStatusBadge,
+  ZatcaSubmitDialog,
+  downloadInvoiceUbl,
+} from './invoice-zatca-submit'
 
 type InvoiceTotals = {
   count: number
@@ -113,6 +126,21 @@ type InvoiceForm = {
   paidAmount: string
   notes: string
   items: ItemForm[]
+  // Per-invoice ZATCA designation: '1' = Phase 1 Generation · '2' = Phase 2 Integration
+  zatcaPhase: string
+  // Signature blocks (empty = company default on print)
+  approvedBy: string
+  approvedByTitle: string
+  receivedBy: string
+  receivedByTitle: string
+  // Bank details override (useCompanyBank=true → the 6 fields are sent empty → server null → Settings fallback)
+  useCompanyBank: boolean
+  bankName: string
+  bankAccountName: string
+  bankAccountNumber: string
+  bankIban: string
+  bankSwiftCode: string
+  bankAddress: string
 }
 
 const EMPTY_ITEM: ItemForm = { description: '', unit: '', quantity: '1', unitPrice: '' }
@@ -130,6 +158,18 @@ function emptyForm(vatRatePercent: number): InvoiceForm {
     paidAmount: '',
     notes: '',
     items: [{ ...EMPTY_ITEM }],
+    zatcaPhase: '1',
+    approvedBy: '',
+    approvedByTitle: '',
+    receivedBy: '',
+    receivedByTitle: '',
+    useCompanyBank: true,
+    bankName: '',
+    bankAccountName: '',
+    bankAccountNumber: '',
+    bankIban: '',
+    bankSwiftCode: '',
+    bankAddress: '',
   }
 }
 
@@ -145,6 +185,43 @@ function InvoiceStatusBadge({ status }: { status: string }) {
 function isOverdue(row: InvoiceRow): boolean {
   if (row.status !== 'issued' || !row.dueDate) return false
   return new Date(row.dueDate).getTime() < startOfToday()
+}
+
+/** True when the invoice carries any per-invoice bank override field. */
+function hasBankOverride(row: InvoiceRow): boolean {
+  return Boolean(
+    row.bankName ||
+      row.bankAccountName ||
+      row.bankAccountNumber ||
+      row.bankIban ||
+      row.bankSwiftCode ||
+      row.bankAddress
+  )
+}
+
+/**
+ * Small ZATCA phase chip for the list rows — "P1" (neutral) or "P2"
+ * (emerald-tinted), with a tooltip explaining the designation.
+ */
+function PhaseChip({ phase }: { phase: number }) {
+  const isP2 = phase === 2
+  return (
+    <span
+      title={
+        isP2
+          ? 'ZATCA Phase 2 — Integration (full e-invoice: cryptographic QR + UBL + submission)'
+          : 'ZATCA Phase 1 — Generation (5-tag QR, no portal submission)'
+      }
+      className={cn(
+        'inline-flex items-center rounded px-1 py-px text-[9px] font-bold uppercase leading-none tabular-nums',
+        isP2
+          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+          : 'bg-muted text-muted-foreground'
+      )}
+    >
+      {isP2 ? 'P2' : 'P1'}
+    </span>
+  )
 }
 
 function startOfToday(): number {
@@ -180,6 +257,8 @@ export function InvoicesView() {
   const debouncedSearch = useDebounce(search)
   const [statusFilter, setStatusFilter] = useState('all')
   const [yearFilter, setYearFilter] = useState('all')
+  const [zatcaPhaseFilter, setZatcaPhaseFilter] = useState('all')
+  const [zatcaStatusFilter, setZatcaStatusFilter] = useState('all')
 
   // ---- add/edit dialog ----
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -203,6 +282,10 @@ export function InvoicesView() {
   const [printOpen, setPrintOpen] = useState(false)
   const [printInvoice, setPrintInvoice] = useState<InvoicePrintData | null>(null)
   const [printLoadingId, setPrintLoadingId] = useState<string | null>(null)
+
+  // ---- ZATCA Phase 2 submission (connect system) ----
+  const [zatcaOpen, setZatcaOpen] = useState(false)
+  const [zatcaInvoice, setZatcaInvoice] = useState<InvoiceRow | null>(null)
 
   /** The client record currently selected in the form (null = free text). */
   const selectedClient = useMemo(
@@ -268,6 +351,8 @@ export function InvoicesView() {
           search: debouncedSearch,
           status: statusFilter === 'all' ? '' : statusFilter,
           year: yearFilter === 'all' ? '' : yearFilter,
+          zatcaPhase: zatcaPhaseFilter === 'all' ? '' : zatcaPhaseFilter,
+          zatcaStatus: zatcaStatusFilter === 'all' ? '' : zatcaStatusFilter,
           page,
           pageSize,
         })}`
@@ -291,7 +376,16 @@ export function InvoicesView() {
     } finally {
       if (id === requestId.current) setLoading(false)
     }
-  }, [debouncedSearch, statusFilter, yearFilter, page, pageSize, currentYear])
+  }, [
+    debouncedSearch,
+    statusFilter,
+    yearFilter,
+    zatcaPhaseFilter,
+    zatcaStatusFilter,
+    page,
+    pageSize,
+    currentYear,
+  ])
 
   useEffect(() => {
     void load()
@@ -348,12 +442,19 @@ export function InvoicesView() {
     return Array.from(set).sort((a, b) => b - a)
   }, [years, currentYear])
 
-  const hasFilters = debouncedSearch !== '' || statusFilter !== 'all' || yearFilter !== 'all'
+  const hasFilters =
+    debouncedSearch !== '' ||
+    statusFilter !== 'all' ||
+    yearFilter !== 'all' ||
+    zatcaPhaseFilter !== 'all' ||
+    zatcaStatusFilter !== 'all'
 
   function resetFilters() {
     setSearch('')
     setStatusFilter('all')
     setYearFilter('all')
+    setZatcaPhaseFilter('all')
+    setZatcaStatusFilter('all')
     setPage(1)
   }
 
@@ -396,6 +497,19 @@ export function InvoicesView() {
                 unitPrice: String(it.unitPrice),
               }))
             : [{ ...EMPTY_ITEM }],
+        zatcaPhase: inv.zatcaPhase === 2 ? '2' : '1',
+        approvedBy: inv.approvedBy ?? '',
+        approvedByTitle: inv.approvedByTitle ?? '',
+        receivedBy: inv.receivedBy ?? '',
+        receivedByTitle: inv.receivedByTitle ?? '',
+        // an invoice carrying any bank override field starts with the override ON
+        useCompanyBank: !hasBankOverride(inv),
+        bankName: inv.bankName ?? '',
+        bankAccountName: inv.bankAccountName ?? '',
+        bankAccountNumber: inv.bankAccountNumber ?? '',
+        bankIban: inv.bankIban ?? '',
+        bankSwiftCode: inv.bankSwiftCode ?? '',
+        bankAddress: inv.bankAddress ?? '',
       })
       setDialogOpen(true)
     } catch (e) {
@@ -454,9 +568,21 @@ export function InvoicesView() {
         dueDate: form.dueDate || null,
         status: form.status,
         invoiceType: form.invoiceType === 'simplified' ? 'simplified' : 'standard',
+        zatcaPhase: form.zatcaPhase === '2' ? 2 : 1,
         vatRate: round2(pct / 100),
         paidAmount: round2(paid),
         notes: form.notes.trim() || null,
+        approvedBy: form.approvedBy.trim(),
+        approvedByTitle: form.approvedByTitle.trim(),
+        receivedBy: form.receivedBy.trim(),
+        receivedByTitle: form.receivedByTitle.trim(),
+        // empty string → server stores null → company Settings fallback
+        bankName: form.useCompanyBank ? '' : form.bankName.trim(),
+        bankAccountName: form.useCompanyBank ? '' : form.bankAccountName.trim(),
+        bankAccountNumber: form.useCompanyBank ? '' : form.bankAccountNumber.trim(),
+        bankIban: form.useCompanyBank ? '' : form.bankIban.trim(),
+        bankSwiftCode: form.useCompanyBank ? '' : form.bankSwiftCode.trim(),
+        bankAddress: form.useCompanyBank ? '' : form.bankAddress.trim(),
         items: form.items.map((it) => ({
           description: it.description.trim(),
           unit: it.unit.trim() || null,
@@ -505,6 +631,37 @@ export function InvoicesView() {
   }
 
   // -----------------------------------------------------------------------
+  // ZATCA Phase 2 submission (connect system)
+  // -----------------------------------------------------------------------
+  function openZatca(row: InvoiceRow) {
+    setZatcaInvoice(row)
+    setZatcaOpen(true)
+  }
+
+  /** After a successful submission — refresh the list + the open row states. */
+  function handleZatcaSubmitted() {
+    void load()
+    const targetId = zatcaInvoice?.id ?? editing?.id
+    if (!targetId) return
+    api
+      .get<InvoiceRow>(`/api/invoices/${targetId}`)
+      .then((fresh) => {
+        setEditing((e) => (e && e.id === fresh.id ? fresh : e))
+        setZatcaInvoice((z) => (z && z.id === fresh.id ? fresh : z))
+      })
+      .catch(() => {}) // keep the stale row — the dialog already shows the result
+  }
+
+  /** UBL XML download from the edit dialog (Phase 2 invoices only). */
+  async function handleDownloadUbl(row: InvoiceRow) {
+    try {
+      await downloadInvoiceUbl(row.id, row.invoiceNumber)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Download failed')
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Print + CSV export
   // -----------------------------------------------------------------------
   async function openPrint(row: InvoiceRow) {
@@ -530,6 +687,8 @@ export function InvoicesView() {
           search: debouncedSearch,
           status: statusFilter === 'all' ? '' : statusFilter,
           year: yearFilter === 'all' ? '' : yearFilter,
+          zatcaPhase: zatcaPhaseFilter === 'all' ? '' : zatcaPhaseFilter,
+          zatcaStatus: zatcaStatusFilter === 'all' ? '' : zatcaStatusFilter,
           page: p,
           pageSize: 100,
         })}`
@@ -692,7 +851,10 @@ export function InvoicesView() {
               />
             }
             activeCount={
-              (statusFilter !== 'all' ? 1 : 0) + (yearFilter !== 'all' ? 1 : 0)
+              (statusFilter !== 'all' ? 1 : 0) +
+              (yearFilter !== 'all' ? 1 : 0) +
+              (zatcaPhaseFilter !== 'all' ? 1 : 0) +
+              (zatcaStatusFilter !== 'all' ? 1 : 0)
             }
           >
             <FilterSelect
@@ -714,6 +876,33 @@ export function InvoicesView() {
               options={yearOptions.map((y) => ({ value: String(y), label: String(y) }))}
               placeholder="All Years"
               className="sm:w-[120px]"
+            />
+            <FilterSelect
+              value={zatcaPhaseFilter}
+              onChange={(v) => {
+                setZatcaPhaseFilter(v)
+                setPage(1)
+              }}
+              options={[
+                { value: '1', label: 'Phase 1 — QR only' },
+                { value: '2', label: 'Phase 2 — Integration' },
+              ]}
+              placeholder="All ZATCA Phases"
+              className="sm:w-[160px]"
+            />
+            <FilterSelect
+              value={zatcaStatusFilter}
+              onChange={(v) => {
+                setZatcaStatusFilter(v)
+                setPage(1)
+              }}
+              options={[
+                { value: 'reported', label: 'Reported' },
+                { value: 'cleared', label: 'Cleared' },
+                { value: 'rejected', label: 'Rejected' },
+              ]}
+              placeholder="All ZATCA Statuses"
+              className="sm:w-[150px]"
             />
             {hasFilters ? (
               <Button
@@ -776,6 +965,7 @@ export function InvoicesView() {
                           <span className="inline-flex items-center gap-1.5 font-semibold tabular-nums">
                             <Hash className="h-3 w-3 text-muted-foreground" />
                             {row.invoiceNumber}
+                            <PhaseChip phase={row.zatcaPhase} />
                           </span>
                           {row.subject ? (
                             <p
@@ -827,9 +1017,26 @@ export function InvoicesView() {
                         </TableCell>
                         <TableCell>
                           <InvoiceStatusBadge status={row.status} />
+                          {row.zatcaStatus ? (
+                            <div className="mt-1">
+                              <ZatcaStatusBadge status={row.zatcaStatus} />
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-0.5">
+                            {canEdit && row.zatcaPhase === 2 ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => openZatca(row)}
+                                aria-label={`ZATCA submission for invoice ${row.invoiceNumber}`}
+                                title="ZATCA (Phase 2) — submit / status"
+                              >
+                                <ShieldCheck className="h-4 w-4" />
+                              </Button>
+                            ) : null}
                             {canEdit && row.status === 'issued' ? (
                               <Button
                                 variant="ghost"
@@ -897,6 +1104,7 @@ export function InvoicesView() {
                         <p className="flex items-center gap-1.5 font-semibold tabular-nums">
                           <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                           {row.invoiceNumber}
+                          <PhaseChip phase={row.zatcaPhase} />
                         </p>
                         <p className="mt-0.5 truncate text-sm font-medium" title={row.clientName}>
                           {row.clientName}
@@ -931,9 +1139,25 @@ export function InvoicesView() {
                         <div className="mt-1">
                           <InvoiceStatusBadge status={row.status} />
                         </div>
+                        {row.zatcaStatus ? (
+                          <div className="mt-1 flex justify-end">
+                            <ZatcaStatusBadge status={row.zatcaStatus} />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     <div className="mt-2 flex items-center justify-end gap-0.5 border-t pt-2">
+                      {canEdit && row.zatcaPhase === 2 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+                          onClick={() => openZatca(row)}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          ZATCA
+                        </Button>
+                      ) : null}
                       {canEdit && row.status === 'issued' ? (
                         <Button
                           variant="ghost"
@@ -1334,6 +1558,259 @@ export function InvoicesView() {
               </div>
             </div>
 
+            {/* ---- ZATCA e-Invoicing (per-invoice phase designation) ---- */}
+            <div className="space-y-3 rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-semibold">ZATCA e-Invoicing</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Phase 1 and Phase 2 are separate per-invoice designations — choose the
+                  compliance track for this invoice.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setField('zatcaPhase', '1')}
+                  aria-pressed={form.zatcaPhase !== '2'}
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    form.zatcaPhase !== '2'
+                      ? 'border-primary bg-primary/5 shadow-sm'
+                      : 'hover:bg-muted/50'
+                  )}
+                >
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    <QrCode className="h-4 w-4 shrink-0" />
+                    Phase 1 — Generation (QR only)
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    TLV QR with the 5 mandatory tags. No portal submission.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setField('zatcaPhase', '2')}
+                  aria-pressed={form.zatcaPhase === '2'}
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    form.zatcaPhase === '2'
+                      ? 'border-emerald-600/70 bg-emerald-50/70 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40'
+                      : 'hover:bg-muted/50'
+                  )}
+                >
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    Phase 2 — Integration (Full e-invoice)
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    8-tag cryptographic QR + UBL XML + reporting to ZATCA (Fatoora).
+                  </p>
+                </button>
+              </div>
+
+              {/* Submission state + Phase 2 actions — only when editing an existing invoice */}
+              {editing ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2">
+                  {editing.zatcaStatus ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ZatcaStatusBadge status={editing.zatcaStatus} />
+                      <span className="text-xs text-muted-foreground">
+                        submitted{' '}
+                        {editing.zatcaSubmittedAt
+                          ? formatDateTime(editing.zatcaSubmittedAt)
+                          : ''}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Not submitted
+                      {editing.zatcaPhase === 2
+                        ? ' — report it to ZATCA (Fatoora) when ready'
+                        : ''}
+                    </span>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {editing.zatcaPhase === 2 && canEdit ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => openZatca(editing)}
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Submit to ZATCA
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => void handleDownloadUbl(editing)}
+                        >
+                          <FileCode className="h-3.5 w-3.5" />
+                          UBL XML
+                        </Button>
+                      </>
+                    ) : form.zatcaPhase === '2' ? (
+                      <span className="text-xs text-muted-foreground">
+                        Save the invoice to enable Phase 2 submission.
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  After creating the invoice, Phase 2 submissions run from here or the
+                  list row's <ShieldCheck className="inline h-3 w-3" aria-hidden /> action.
+                </p>
+              )}
+            </div>
+
+            {/* ---- Signatures (Approved By / Received By) ---- */}
+            <div className="space-y-3 rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-semibold">Signatures</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Printed in the invoice signature area. Leave empty to use the company
+                  default for “Approved By”.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="inv-approved-by">Approved By</Label>
+                  <Input
+                    id="inv-approved-by"
+                    value={form.approvedBy}
+                    onChange={(e) => setField('approvedBy', e.target.value)}
+                    placeholder={settings.authorizedSignatory || 'Authorized Signatory'}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="inv-approved-by-title">Approved By — Title</Label>
+                  <Input
+                    id="inv-approved-by-title"
+                    value={form.approvedByTitle}
+                    onChange={(e) => setField('approvedByTitle', e.target.value)}
+                    placeholder={settings.signatoryTitle || 'Authorized Signatory'}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="inv-received-by">Received By</Label>
+                  <Input
+                    id="inv-received-by"
+                    value={form.receivedBy}
+                    onChange={(e) => setField('receivedBy', e.target.value)}
+                    placeholder={form.clientName.trim() || 'Client name'}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="inv-received-by-title">Received By — Title</Label>
+                  <Input
+                    id="inv-received-by-title"
+                    value={form.receivedByTitle}
+                    onChange={(e) => setField('receivedByTitle', e.target.value)}
+                    placeholder="Client Representative"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ---- Bank details (per-invoice override) ---- */}
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">Bank Details</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Printed in the payment instructions box of this invoice.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor="inv-use-company-bank"
+                    className="text-xs font-normal text-muted-foreground"
+                  >
+                    Use company bank details
+                  </Label>
+                  <Switch
+                    id="inv-use-company-bank"
+                    checked={form.useCompanyBank}
+                    onCheckedChange={(v) => setField('useCompanyBank', v)}
+                  />
+                </div>
+              </div>
+              {form.useCompanyBank ? (
+                <p className="text-xs text-muted-foreground">
+                  Company defaults from Settings
+                  {settings.bankName ? ` — ${settings.bankName}` : ' — no bank name set'}
+                  {settings.bankIban ? ` · ${settings.bankIban}` : ''}. Switch off to
+                  override for this invoice only.
+                </p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-name">Bank Name</Label>
+                    <Input
+                      id="inv-bank-name"
+                      value={form.bankName}
+                      onChange={(e) => setField('bankName', e.target.value)}
+                      placeholder={settings.bankName || 'e.g. Saudi National Bank'}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-account-name">Account Name</Label>
+                    <Input
+                      id="inv-bank-account-name"
+                      value={form.bankAccountName}
+                      onChange={(e) => setField('bankAccountName', e.target.value)}
+                      placeholder={settings.bankAccountName || 'e.g. Landmark Inter Gulf Co.'}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-account-number">Account Number</Label>
+                    <Input
+                      id="inv-bank-account-number"
+                      value={form.bankAccountNumber}
+                      onChange={(e) => setField('bankAccountNumber', e.target.value)}
+                      placeholder={settings.bankAccountNumber || '00000000000000'}
+                      className="font-mono"
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-iban">IBAN Number</Label>
+                    <Input
+                      id="inv-bank-iban"
+                      value={form.bankIban}
+                      onChange={(e) => setField('bankIban', e.target.value)}
+                      placeholder={settings.bankIban || 'SA00 0000 0000 0000 0000 0000'}
+                      className="font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-swift">Swift Code</Label>
+                    <Input
+                      id="inv-bank-swift"
+                      value={form.bankSwiftCode}
+                      onChange={(e) => setField('bankSwiftCode', e.target.value)}
+                      placeholder={settings.bankSwiftCode || 'NCBKSAJE'}
+                      className="font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="inv-bank-address">Bank Address</Label>
+                    <Input
+                      id="inv-bank-address"
+                      value={form.bankAddress}
+                      onChange={(e) => setField('bankAddress', e.target.value)}
+                      placeholder={settings.bankAddress || 'e.g. Jubail Industrial City, KSA'}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
@@ -1442,6 +1919,14 @@ export function InvoicesView() {
         open={printOpen}
         onOpenChange={setPrintOpen}
         invoice={printInvoice}
+      />
+
+      {/* ---- ZATCA Phase 2 submission dialog (connect system) ---- */}
+      <ZatcaSubmitDialog
+        open={zatcaOpen}
+        onOpenChange={setZatcaOpen}
+        invoice={zatcaInvoice}
+        onSubmitted={handleZatcaSubmitted}
       />
     </div>
   )

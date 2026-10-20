@@ -37,6 +37,9 @@ function buildSettings(map: Record<string, string>) {
     bankName: map.bankName ?? '',
     bankIban: map.bankIban ?? '',
     bankAccountNumber: map.bankAccountNumber ?? '',
+    bankAccountName: map.bankAccountName ?? '',
+    bankSwiftCode: map.bankSwiftCode ?? '',
+    bankAddress: map.bankAddress ?? '',
     // VAT rate for the VAT Return Expense module — stored as a PERCENT string ("15")
     vatRate: clampVatPercent(parseFloat(map.vatRate ?? '')),
   }
@@ -72,6 +75,9 @@ const settingsSchema = z.object({
   bankName: z.string().max(120).optional(),
   bankIban: z.string().max(34, 'IBAN cannot exceed 34 characters').optional(),
   bankAccountNumber: z.string().max(34).optional(),
+  bankAccountName: z.string().max(120).optional(),
+  bankSwiftCode: z.string().max(20, 'SWIFT code cannot exceed 20 characters').optional(),
+  bankAddress: z.string().max(240).optional(),
   // VAT percent 0–100 (15 = Saudi standard); stored under the `vatRate` key
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(100, 'VAT rate cannot exceed 100').optional(),
 })
@@ -124,6 +130,15 @@ export async function PUT(req: NextRequest) {
     if (body.bankIban !== undefined) entries.push(['bankIban', body.bankIban])
     if (body.bankAccountNumber !== undefined) {
       entries.push(['bankAccountNumber', body.bankAccountNumber])
+    }
+    if (body.bankAccountName !== undefined) {
+      entries.push(['bankAccountName', body.bankAccountName])
+    }
+    if (body.bankSwiftCode !== undefined) {
+      entries.push(['bankSwiftCode', body.bankSwiftCode])
+    }
+    if (body.bankAddress !== undefined) {
+      entries.push(['bankAddress', body.bankAddress])
     }
     if (body.vatRate !== undefined) {
       entries.push(['vatRate', String(clampVatPercent(body.vatRate))])

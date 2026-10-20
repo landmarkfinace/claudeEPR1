@@ -563,6 +563,12 @@ export type AppSettings = {
   bankName: string
   bankIban: string
   bankAccountNumber: string
+  /** Account holder name shown on payment instructions */
+  bankAccountName: string
+  /** SWIFT/BIC code for international transfers */
+  bankSwiftCode: string
+  /** Bank branch address */
+  bankAddress: string
   /** VAT rate in PERCENT for the VAT Return Expense module (15 = 15% Saudi standard) */
   vatRate: number
 }
@@ -903,10 +909,31 @@ export type InvoiceRow = {
   createdByName: string | null
   createdAt: string
   items?: DocItemRow[]
+  /** Per-invoice ZATCA designation: 1 = Generation (5-tag QR) · 2 = Integration (full stamp + gateway) */
+  zatcaPhase: number
+  /** Phase 2 submission lifecycle: null = not submitted | reported | cleared | rejected */
+  zatcaStatus: string | null
+  /** ISO timestamp of the last ZATCA submission (Phase 2) */
+  zatcaSubmittedAt: string | null
+  /** "Approved By" signature block — name */
+  approvedBy: string | null
+  approvedByTitle: string | null
+  /** "Received By" signature block (client side) — name */
+  receivedBy: string | null
+  receivedByTitle: string | null
+  /** Per-invoice bank details override (null = fall back to company Settings) */
+  bankName: string | null
+  bankAccountName: string | null
+  bankAccountNumber: string | null
+  bankIban: string | null
+  bankSwiftCode: string | null
+  bankAddress: string | null
 }
 
-/** GET /api/invoices/[id]/zatca — ZATCA Phase 1+2 cryptographic stamp */
+/** GET /api/invoices/[id]/zatca — ZATCA stamp (phase-dependent payload) */
 export type ZatcaStamp = {
+  /** 1 = Phase 1 QR (TLV tags 1-5) · 2 = Phase 2 full cryptographic stamp */
+  phase: number
   uuid: string
   invoiceHash: string
   previousHash: string

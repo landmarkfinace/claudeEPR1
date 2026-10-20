@@ -6,6 +6,9 @@
 //   • quick update — only scalar fields (status / paidAmount / dates / notes…):
 //     "mark paid" sends { status: 'paid' } and the server fills paidAmount = total.
 // The invoice number is immutable (allocated at creation).
+// ZATCA: editing items/dates/client/totals of a STAMPED Phase 2 invoice clears
+// the stored crypto stamp (uuid/hash/PIH/signature) so it re-stamps on the next
+// fetch, and resets a reported/cleared submission status (resubmission needed).
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
@@ -24,6 +27,35 @@ import {
 
 const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'] as const
 type InvoiceStatus = (typeof INVOICE_STATUSES)[number]
+
+/**
+ * Optional trimmed text field that maps "" → null (an empty signature/bank
+ * override box means "fall back to the company default", not "keep a blank").
+ */
+const optionalText = (max: number, label: string) =>
+  z.preprocess(
+    (v) => (v === '' ? null : v),
+    z
+      .string()
+      .trim()
+      .max(max, `${label} cannot exceed ${max} characters`)
+      .nullable()
+      .optional(),
+  )
+
+/** Shared zod fields for the per-invoice signature + bank override blocks. */
+const signatureAndBankSchema = {
+  approvedBy: optionalText(120, 'Approved By name'),
+  approvedByTitle: optionalText(120, 'Approved By title'),
+  receivedBy: optionalText(120, 'Received By name'),
+  receivedByTitle: optionalText(120, 'Received By title'),
+  bankName: optionalText(120, 'Bank name'),
+  bankAccountName: optionalText(120, 'Bank account name'),
+  bankAccountNumber: optionalText(34, 'Bank account number'),
+  bankIban: optionalText(34, 'Bank IBAN'),
+  bankSwiftCode: optionalText(20, 'Bank SWIFT code'),
+  bankAddress: optionalText(240, 'Bank address'),
+} as const
 
 const clientSelect = {
   id: true,
@@ -64,10 +96,13 @@ const invoiceUpdateSchema = z.object({
   status: z.enum(INVOICE_STATUSES).optional(),
   // ZATCA document type: standard = B2B tax invoice, simplified = B2C
   invoiceType: z.enum(['standard', 'simplified']).optional(),
+  // Per-invoice ZATCA designation: 1 = Phase 1 (Generation), 2 = Phase 2 (Integration)
+  zatcaPhase: z.coerce.number().int().min(1).max(2).optional(),
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(1, 'VAT rate cannot exceed 100%').optional(),
   paidAmount: z.coerce.number().min(0, 'Paid amount cannot be negative').optional(),
   notes: z.string().nullable().optional(),
   items: z.array(itemSchema).min(1, 'At least one line item is required').optional(),
+  ...signatureAndBankSchema,
 })
 
 const invoiceInclude = {
@@ -93,6 +128,19 @@ type InvoiceWithRelations = {
   notes: string | null
   createdByName: string | null
   createdAt: Date
+  zatcaPhase: number
+  zatcaStatus: string | null
+  zatcaSubmittedAt: Date | null
+  approvedBy: string | null
+  approvedByTitle: string | null
+  receivedBy: string | null
+  receivedByTitle: string | null
+  bankName: string | null
+  bankAccountName: string | null
+  bankAccountNumber: string | null
+  bankIban: string | null
+  bankSwiftCode: string | null
+  bankAddress: string | null
   items: {
     id: string
     sr: number
@@ -142,6 +190,19 @@ function mapInvoiceFull(i: InvoiceWithRelations): InvoiceRow & {
     notes: i.notes,
     createdByName: i.createdByName,
     createdAt: i.createdAt.toISOString(),
+    zatcaPhase: i.zatcaPhase,
+    zatcaStatus: i.zatcaStatus || null,
+    zatcaSubmittedAt: i.zatcaSubmittedAt ? i.zatcaSubmittedAt.toISOString() : null,
+    approvedBy: i.approvedBy,
+    approvedByTitle: i.approvedByTitle,
+    receivedBy: i.receivedBy,
+    receivedByTitle: i.receivedByTitle,
+    bankName: i.bankName,
+    bankAccountName: i.bankAccountName,
+    bankAccountNumber: i.bankAccountNumber,
+    bankIban: i.bankIban,
+    bankSwiftCode: i.bankSwiftCode,
+    bankAddress: i.bankAddress,
     client: i.client,
     items: i.items.map((it) => ({
       id: it.id,
@@ -182,7 +243,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const existing = await db.invoice.findUnique({
       where: { id },
-      include: { items: true },
+      include: { items: { orderBy: { sr: 'asc' } } },
     })
     if (!existing) return notFound('Invoice not found')
 
@@ -261,6 +322,36 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return badRequest('Paid amount cannot exceed the invoice total')
     }
 
+    // ---- ZATCA stamp invalidation ----
+    // If anything that went into a stored Phase 2 stamp changed (items, issue
+    // date, client, totals), the stored crypto no longer describes this
+    // document: clear it so the next stamp fetch re-stamps, and reset a
+    // reported/cleared submission status (the invoice must be resubmitted).
+    let stampInvalidated = false
+    if (existing.invoiceHash) {
+      const itemsChanged =
+        items !== null &&
+        (existing.items.length !== items.length ||
+          items.some((it, idx) => {
+            const ex = existing.items[idx]
+            return (
+              ex.description !== it.description ||
+              ex.unit !== it.unit ||
+              round2(ex.quantity) !== round2(it.quantity) ||
+              round2(ex.unitPrice) !== round2(it.unitPrice)
+            )
+          }))
+      const dateChanged = issueDate.getTime() !== existing.issueDate.getTime()
+      const clientChanged = clientId !== existing.clientId || clientName !== existing.clientName
+      const totalsChanged =
+        round2(subtotal) !== round2(existing.subtotal) ||
+        vatRate !== existing.vatRate ||
+        round2(vatAmount) !== round2(existing.vatAmount) ||
+        round2(total) !== round2(existing.total)
+      stampInvalidated = itemsChanged || dateChanged || clientChanged || totalsChanged
+    }
+    const zatcaPhase = body.zatcaPhase ?? existing.zatcaPhase
+
     const updated = await db.$transaction(async (tx) => {
       if (items !== null) {
         await tx.invoiceItem.deleteMany({ where: { invoiceId: id } })
@@ -275,13 +366,37 @@ export async function PUT(req: NextRequest, { params }: Params) {
           dueDate,
           status,
           invoiceType: body.invoiceType,
+          zatcaPhase,
           subtotal,
           vatRate,
           vatAmount,
           total,
           paidAmount,
           notes: body.notes !== undefined ? (body.notes ?? '').trim() || null : undefined,
+          approvedBy: body.approvedBy !== undefined ? body.approvedBy : undefined,
+          approvedByTitle: body.approvedByTitle !== undefined ? body.approvedByTitle : undefined,
+          receivedBy: body.receivedBy !== undefined ? body.receivedBy : undefined,
+          receivedByTitle: body.receivedByTitle !== undefined ? body.receivedByTitle : undefined,
+          bankName: body.bankName !== undefined ? body.bankName : undefined,
+          bankAccountName: body.bankAccountName !== undefined ? body.bankAccountName : undefined,
+          bankAccountNumber:
+            body.bankAccountNumber !== undefined ? body.bankAccountNumber : undefined,
+          bankIban: body.bankIban !== undefined ? body.bankIban : undefined,
+          bankSwiftCode: body.bankSwiftCode !== undefined ? body.bankSwiftCode : undefined,
+          bankAddress: body.bankAddress !== undefined ? body.bankAddress : undefined,
           ...(items !== null ? { items: { create: items } } : {}),
+          ...(stampInvalidated
+            ? {
+                uuid: null,
+                invoiceHash: null,
+                previousHash: null,
+                signature: null,
+                // a reported/cleared invoice that changed must be resubmitted
+                ...(existing.zatcaStatus === 'reported' || existing.zatcaStatus === 'cleared'
+                  ? { zatcaStatus: null }
+                  : {}),
+              }
+            : {}),
         },
         include: invoiceInclude,
       })
@@ -291,7 +406,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
       user: auth,
       action: 'updated',
       module: 'invoice',
-      description: `Invoice ${updated.invoiceNumber} — ${updated.clientName}`,
+      description:
+        stampInvalidated && existing.invoiceHash
+          ? `Invoice ${updated.invoiceNumber} — ${updated.clientName} (ZATCA stamp reset — content changed)`
+          : `Invoice ${updated.invoiceNumber} — ${updated.clientName}`,
       amount: round2(updated.total),
     })
     return ok(mapInvoiceFull(updated as InvoiceWithRelations))

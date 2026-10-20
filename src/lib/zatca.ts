@@ -1,17 +1,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ZATCA e-Invoicing library (server-side only)
-// Saudi Arabia's Fatara (فواتيرا) compliance in two phases:
+// Saudi Arabia's Fatara (فواتيرا) compliance — WITH PER-INVOICE PHASE DESIGNATION:
 //
 //   PHASE 1 (Generation) — mandatory QR on every invoice:
 //     TLV (Tag-Length-Value) encoded base64 payload with the 5 mandatory tags:
 //       1 seller name · 2 seller VAT number · 3 timestamp (ISO-8601)
 //       4 invoice total (VAT inclusive) · 5 VAT total
+//     No crypto, no portal submission.
 //
 //   PHASE 2 (Integration) — cryptographic stamping + reporting:
 //     6 invoice XML hash (SHA-256, base64) · 7 ECDSA signature (base64)
 //     8 ECDSA public key (base64, raw 64-byte x‖y point)
 //     plus the UBL 2.1 XML document, an invoice UUID, and the PIH chain
 //     (Previous Invoice Hash) that links each invoice to the previous one.
+//     Submitted to the Fatoora gateway (reporting = simplified invoices,
+//     clearance = standard invoices) using the ZATCA connection profile
+//     (env / EGS serial / CSID token) stored in the Setting table.
+//
+// The phase is chosen PER INVOICE (Invoice.zatcaPhase = 1 | 2) — the boss
+// requirement that Phase 1 and Phase 2 stay SEPARATE designations.
 //
 // Key management: an EC P-256 keypair is generated on first use and stored
 // in the Setting table (zatca_private_key / zatca_public_key PEM strings).
@@ -28,6 +35,7 @@ import {
   createPublicKey,
   randomUUID,
 } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import QRCode from 'qrcode'
 import { db } from '@/lib/db'
 import { round2 } from '@/lib/format'
@@ -83,6 +91,109 @@ export async function readSellerInfo(): Promise<ZatcaSellerInfo> {
   }
 }
 
+// ── ZATCA connection profile (Phase 2 gateway configuration) ────────────────
+
+export type ZatcaEnv = 'simulation' | 'preprod' | 'production'
+
+/** Default Fatoora gateway base URLs per environment. */
+export const ZATCA_ENV_BASES: Record<ZatcaEnv, string> = {
+  simulation: 'https://gw-fatura.zatca.gov.sa/e-invoicing/simulation',
+  preprod: 'https://gw-fatura.zatca.gov.sa/e-invoicing/developer-portal',
+  production: 'https://gw-fatura.zatca.gov.sa/e-invoicing/core',
+}
+
+/** Result of the last "Test Connection" run (persisted as zatca_last_test). */
+export type ZatcaLastTest = {
+  at: string // ISO timestamp
+  ok: boolean
+  mode: ZatcaEnv
+  httpStatus?: number
+  error?: string
+  latencyMs: number
+}
+
+/**
+ * The ZATCA connection profile returned to clients — NEVER includes the raw
+ * CSID token, only whether one is configured (csidTokenSet).
+ */
+export type ZatcaProfile = {
+  env: ZatcaEnv
+  egsSerial: string
+  csidTokenSet: boolean
+  apiBase: string
+  lastTest: ZatcaLastTest | null
+}
+
+function parseZatcaEnv(v: string | undefined): ZatcaEnv {
+  return v === 'preprod' || v === 'production' ? v : 'simulation'
+}
+
+function parseLastTest(v: string | undefined): ZatcaLastTest | null {
+  if (!v) return null
+  try {
+    const raw = JSON.parse(v) as Partial<ZatcaLastTest>
+    if (!raw || typeof raw.at !== 'string' || typeof raw.ok !== 'boolean') return null
+    return {
+      at: raw.at,
+      ok: raw.ok,
+      mode: parseZatcaEnv(raw.mode),
+      httpStatus: typeof raw.httpStatus === 'number' ? raw.httpStatus : undefined,
+      error: typeof raw.error === 'string' ? raw.error : undefined,
+      latencyMs: typeof raw.latencyMs === 'number' ? raw.latencyMs : 0,
+    }
+  } catch {
+    return null // malformed JSON — treat as never tested
+  }
+}
+
+/** Read the ZATCA gateway profile from the Setting table (token stays server-side). */
+export async function readZatcaProfile(): Promise<ZatcaProfile> {
+  const rows = await db.setting.findMany({
+    where: {
+      key: {
+        in: ['zatca_env', 'zatca_egs_serial', 'zatca_csid_token', 'zatca_api_base', 'zatca_last_test'],
+      },
+    },
+  })
+  const map: Record<string, string> = {}
+  for (const r of rows) map[r.key] = r.value
+
+  const env = parseZatcaEnv(map.zatca_env)
+  // An explicitly saved apiBase wins over the per-environment default
+  const apiBase = (map.zatca_api_base ?? '').trim() || ZATCA_ENV_BASES[env]
+  return {
+    env,
+    egsSerial: (map.zatca_egs_serial ?? '').trim(),
+    csidTokenSet: Boolean((map.zatca_csid_token ?? '').trim()),
+    apiBase,
+    lastTest: parseLastTest(map.zatca_last_test),
+  }
+}
+
+/** Read the raw CSID bearer token (server-side only — never send to a client). */
+export async function readZatcaCsidToken(): Promise<string> {
+  const row = await db.setting.findUnique({ where: { key: 'zatca_csid_token' } })
+  return (row?.value ?? '').trim()
+}
+
+/** Upsert (value) or remove (null) one zatca_* Setting row. */
+export async function writeZatcaSetting(key: string, value: string | null): Promise<void> {
+  if (value === null) {
+    await db.setting.deleteMany({ where: { key } })
+    return
+  }
+  await db.setting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value },
+  })
+}
+
+/** Persist the outcome of a connection test (never throws). */
+export async function saveZatcaLastTest(test: ZatcaLastTest): Promise<void> {
+  await writeZatcaSetting('zatca_last_test', JSON.stringify(test))
+}
+
 // ── ECDSA keypair (auto-generated once, stored in Setting) ──────────────────
 
 type ZatcaKeys = { privatePem: string; publicPem: string }
@@ -115,6 +226,16 @@ async function getZatcaKeys(): Promise<ZatcaKeys> {
     }),
   ])
   return { privatePem, publicPem }
+}
+
+/** Check whether the ZATCA EC keypair has been generated (no side effects). */
+export async function hasZatcaKeys(): Promise<boolean> {
+  const rows = await db.setting.findMany({
+    where: { key: { in: ['zatca_private_key', 'zatca_public_key'] } },
+    select: { key: true },
+  })
+  const found = new Set(rows.map((r) => r.key))
+  return found.has('zatca_private_key') && found.has('zatca_public_key')
 }
 
 /**
@@ -307,9 +428,91 @@ export function hashInvoiceXml(xml: string): string {
   return createHash('sha256').update(xml, 'utf8').digest('base64')
 }
 
+// ── Invoice record adapters (shared by the ZATCA API routes) ────────────────
+
+/** An Invoice row loaded WITH its items and linked client. */
+export type ZatcaInvoiceRecord = Prisma.InvoiceGetPayload<{
+  include: { items: true; client: true }
+}>
+
+/** Build the ZatcaInvoiceData for a loaded invoice (items sorted by sr). */
+export function zatcaInvoiceData(inv: ZatcaInvoiceRecord): ZatcaInvoiceData {
+  return {
+    invoiceNumber: inv.invoiceNumber,
+    uuid: inv.uuid ?? '',
+    issueDate: inv.issueDate,
+    dueDate: inv.dueDate,
+    invoiceType: inv.invoiceType,
+    currency: 'SAR',
+    subtotal: round2(inv.subtotal),
+    vatRate: inv.vatRate,
+    vatAmount: round2(inv.vatAmount),
+    total: round2(inv.total),
+    paidAmount: round2(inv.paidAmount),
+    notes: inv.notes,
+    clientName: inv.clientName,
+    clientNameAr: inv.client?.nameAr ?? null,
+    clientVatNumber: inv.client?.vatNumber ?? null,
+    clientAddress: inv.client?.address ?? null,
+    clientCity: inv.client?.city ?? null,
+    clientCrNumber: inv.client?.crNumber ?? null,
+    items: [...inv.items]
+      .sort((a, b) => a.sr - b.sr)
+      .map((it) => ({
+        sr: it.sr,
+        description: it.description,
+        unit: it.unit,
+        quantity: it.quantity,
+        unitPrice: round2(it.unitPrice),
+        lineTotal: round2(it.lineTotal),
+      })),
+  }
+}
+
+/** Build the ZatcaStampSource for a loaded invoice (phase from zatcaPhase). */
+export function zatcaStampSource(
+  inv: ZatcaInvoiceRecord,
+  phase?: 1 | 2
+): ZatcaStampSource {
+  return {
+    id: inv.id,
+    createdAt: inv.createdAt,
+    invoiceNumber: inv.invoiceNumber,
+    phase: phase ?? (inv.zatcaPhase === 2 ? 2 : 1),
+    storedUuid: inv.uuid,
+    storedHash: inv.invoiceHash,
+    storedPreviousHash: inv.previousHash,
+    storedSignature: inv.signature,
+  }
+}
+
+/** Stamp one invoice (persisting fresh crypto on the row) — used by the QR route. */
+export async function buildInvoiceStamp(inv: ZatcaInvoiceRecord): Promise<ZatcaStamp> {
+  return buildZatcaStamp(
+    zatcaStampSource(inv),
+    () => zatcaInvoiceData(inv),
+    async (fields) => {
+      await db.invoice.update({ where: { id: inv.id }, data: fields })
+    },
+  )
+}
+
+/** Build the full Phase 2 submission bundle (stamp + UBL XML) for one invoice. */
+export async function buildInvoiceSubmission(inv: ZatcaInvoiceRecord): Promise<ZatcaSubmission> {
+  return buildZatcaSubmission(
+    zatcaStampSource(inv),
+    () => zatcaInvoiceData(inv),
+    async (fields) => {
+      await db.invoice.update({ where: { id: inv.id }, data: fields })
+    },
+  )
+}
+
 // ── Full stamp: what /api/invoices/[id]/zatca returns ───────────────────────
 
 export type ZatcaStamp = {
+  /** Which ZATCA phase this invoice is designated for (per-invoice choice) */
+  phase: 1 | 2
   uuid: string
   invoiceHash: string
   previousHash: string
@@ -326,6 +529,12 @@ export type ZatcaStampSource = {
   id: string
   createdAt: Date
   invoiceNumber: string
+  /**
+   * Per-invoice ZATCA phase designation:
+   *   1 = Phase 1 (Generation) — QR with TLV tags 1-5 only, no crypto
+   *   2 = Phase 2 (Integration) — full 8-tag stamp + UBL + PIH chain
+   */
+  phase: 1 | 2
   /** If already stamped and unchanged → these are reused from the DB. */
   storedUuid: string | null
   storedHash: string | null
@@ -334,8 +543,13 @@ export type ZatcaStampSource = {
 }
 
 /**
- * Stamp an invoice (or reuse its stored stamp) and build the full Phase-1+2
- * QR payload. Pure computation + DB persistence is left to the caller.
+ * Stamp an invoice (or reuse its stored stamp) and build the QR payload for
+ * its ZATCA phase. Pure computation + DB persistence is left to the caller.
+ *
+ * Phase 1 → TLV tags 1-5 ONLY: no keypair is touched, nothing is persisted
+ *   and any previously stored crypto is ignored (kept in the DB, unused).
+ * Phase 2 → current behavior: full 8-tag TLV + uuid + hash + PIH chain +
+ *   ECDSA signature, persisted once.
  */
 export async function buildZatcaStamp(
   source: ZatcaStampSource,
@@ -355,6 +569,40 @@ export async function buildZatcaStamp(
     )
   }
 
+  const data = buildData()
+
+  // ---- PHASE 1 (Generation): QR with TLV tags 1-5 only, no crypto at all ----
+  if (source.phase === 1) {
+    const qrPayload = tlvEncode([
+      { tag: 1, value: seller.companyName },
+      { tag: 2, value: seller.vatNumber },
+      { tag: 3, value: data.issueDate.toISOString() },
+      { tag: 4, value: round2(data.total).toFixed(2) },
+      { tag: 5, value: round2(data.vatAmount).toFixed(2) },
+    ]).toString('base64')
+
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, {
+      margin: 0,
+      width: 480,
+      errorCorrectionLevel: 'M',
+    })
+
+    return {
+      phase: 1,
+      uuid: '',
+      invoiceHash: '',
+      previousHash: '',
+      signature: '',
+      qrPayload,
+      qrDataUrl,
+      publicKeyBase64: '',
+      icv: 0,
+      sellerVatNumber: seller.vatNumber,
+      warnings,
+    }
+  }
+
+  // ---- PHASE 2 (Integration): full 8-tag cryptographic stamp ----
   const keys = await getZatcaKeys()
   const publicKeyBase64 = ecPublicKeyBase64(keys.publicPem)
 
@@ -362,11 +610,11 @@ export async function buildZatcaStamp(
   let invoiceHash = source.storedHash
   let previousHash = source.storedPreviousHash
   let signature = source.storedSignature
+  let icv = 0
 
   if (!uuid || !invoiceHash || !signature || !previousHash) {
     // ---- first stamp (or repairing an incomplete one) ----
     uuid = source.storedUuid ?? randomUUID()
-    const data = buildData()
 
     // PIH chain: hash of the most recently stamped invoice (any status),
     // or the KSA initial PIH constant for the first invoice ever stamped.
@@ -377,15 +625,18 @@ export async function buildZatcaStamp(
     })
     previousHash = prev?.invoiceHash ?? ZATCA_INITIAL_PIH
 
-    const icv = await db.invoice.count({ where: { invoiceHash: { not: null } } })
-    const xml = buildInvoiceXml(data, seller, previousHash, icv + 1)
+    icv = await computeInvoiceCounter(previousHash)
+    // The XML must embed the FINAL uuid so later rebuilds (submission, UBL
+    // download) hash byte-identically — no drift, no surprise re-stamps.
+    const xml = buildInvoiceXml({ ...data, uuid }, seller, previousHash, icv)
     invoiceHash = hashInvoiceXml(xml)
     signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
 
     await persist({ uuid, invoiceHash, previousHash, signature })
+  } else {
+    icv = await computeInvoiceCounter(previousHash)
   }
 
-  const data = buildData()
   // QR timestamp must reflect the invoice issue moment (tag 3)
   const qrPayload = tlvEncode([
     { tag: 1, value: seller.companyName },
@@ -405,6 +656,7 @@ export async function buildZatcaStamp(
   })
 
   return {
+    phase: 2,
     uuid,
     invoiceHash,
     previousHash,
@@ -412,8 +664,93 @@ export async function buildZatcaStamp(
     qrPayload,
     qrDataUrl,
     publicKeyBase64,
-    icv: 0,
+    icv,
     sellerVatNumber: seller.vatNumber,
     warnings,
+  }
+}
+
+/**
+ * Invoice Counter Value (ICV): the 1-based position of this invoice in the
+ * PIH chain, reconstructed by walking the previousHash links backwards
+ * (robust against deletions / re-stamps, unlike a plain row count).
+ */
+async function computeInvoiceCounter(previousHash: string): Promise<number> {
+  if (!previousHash || previousHash === ZATCA_INITIAL_PIH) return 1
+  const rows = await db.invoice.findMany({
+    where: { invoiceHash: { not: null }, previousHash: { not: null } },
+    select: { invoiceHash: true, previousHash: true },
+  })
+  const byHash = new Map<string, string>()
+  for (const r of rows) byHash.set(r.invoiceHash as string, r.previousHash as string)
+
+  let counter = 1
+  let ph: string | null = previousHash
+  const seen = new Set<string>()
+  while (ph && ph !== ZATCA_INITIAL_PIH && !seen.has(ph)) {
+    seen.add(ph)
+    counter++
+    ph = byHash.get(ph) ?? null
+  }
+  return counter
+}
+
+// ── Phase 2 submission bundle (stamp + UBL XML, guaranteed consistent) ──────
+
+export type ZatcaSubmission = {
+  stamp: ZatcaStamp
+  /** UBL 2.1 XML whose SHA-256 hash equals stamp.invoiceHash */
+  xml: string
+  /** Invoice Counter Value — position of this invoice in the PIH chain */
+  icv: number
+  /** True when the stored stamp no longer matched the rebuilt XML and was re-signed */
+  restamped: boolean
+}
+
+/**
+ * Build everything needed to submit one Phase 2 invoice to the Fatoora
+ * gateway: the (stored or freshly computed) cryptographic stamp plus the UBL
+ * 2.1 XML document. If the current document no longer hashes to the stored
+ * stamp (e.g. company details changed in Settings after stamping), the stamp
+ * is re-computed and persisted so the printed QR, the stored fields and the
+ * submitted XML always agree.
+ */
+export async function buildZatcaSubmission(
+  source: ZatcaStampSource,
+  buildData: () => ZatcaInvoiceData,
+  persist: (fields: {
+    uuid: string
+    invoiceHash: string
+    previousHash: string
+    signature: string
+  }) => Promise<void>,
+): Promise<ZatcaSubmission> {
+  const seller = await readSellerInfo()
+  const stamp = await buildZatcaStamp(source, buildData, persist)
+  if (stamp.phase !== 2 || !stamp.uuid) {
+    throw new Error('ZATCA submission requires a Phase 2 invoice')
+  }
+
+  const icv = await computeInvoiceCounter(stamp.previousHash)
+  // Stamp.uuid is authoritative (the caller's record may be stale for a
+  // fresh stamp whose uuid was just assigned + persisted).
+  const data = buildData()
+  const xml = buildInvoiceXml({ ...data, uuid: stamp.uuid }, seller, stamp.previousHash, icv)
+
+  if (hashInvoiceXml(xml) === stamp.invoiceHash) {
+    return { stamp, xml, icv, restamped: false }
+  }
+
+  // Stored stamp drifted from the current document — re-hash + re-sign and
+  // persist so the submitted pair (XML, hash) and the printed QR stay in sync.
+  const keys = await getZatcaKeys()
+  const invoiceHash = hashInvoiceXml(xml)
+  const signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
+  await persist({ uuid: stamp.uuid, invoiceHash, previousHash: stamp.previousHash, signature })
+  return {
+    stamp: { ...stamp, invoiceHash, signature },
+    xml,
+    icv,
+    restamped: true,
   }
 }

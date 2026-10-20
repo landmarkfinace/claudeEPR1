@@ -481,6 +481,28 @@ model Invoice {
   invoiceHash   String?   // base64 SHA-256 of the invoice UBL XML (QR tag 6)
   previousHash  String?   // base64 hash of the previous issued invoice (PIH chain)
   signature     String?   // base64 ECDSA-SHA256 signature over the hash (QR tag 7)
+  // ---- ZATCA phase designation (boss requirement: Phase 1 and Phase 2 SEPARATE) ----
+  // 1 = Phase 1 (Generation): QR with TLV tags 1-5 only, no portal submission
+  // 2 = Phase 2 (Integration): QR with all 8 TLV tags + UBL XML + reporting/clearance to Fatoora
+  zatcaPhase    Int       @default(1)
+  // Phase 2 submission lifecycle: null/"" = not submitted | reported | cleared | rejected
+  zatcaStatus   String?
+  // JSON string of the last ZATCA gateway response (validation results, status, timestamps)
+  zatcaResponse String?
+  zatcaSubmittedAt DateTime?
+  zatcaSubmissionMode String? // simulation | production (which mode was used for last submission)
+  // ---- Signatures (boss requirement: Approved By + Received By) ----
+  approvedBy    String? // name over the "Approved By" line (default: settings.authorizedSignatory)
+  approvedByTitle String? // title under Approved By
+  receivedBy    String? // name over the "Received By" line (client side)
+  receivedByTitle String? // title under Received By
+  // ---- Per-invoice bank details override (null = fall back to company Settings) ----
+  bankName        String?
+  bankAccountName String?
+  bankAccountNumber String?
+  bankIban        String?
+  bankSwiftCode   String?
+  bankAddress     String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -488,6 +510,8 @@ model Invoice {
 
   @@index([issueDate])
   @@index([status])
+  @@index([zatcaPhase])
+  @@index([zatcaStatus])
 }
 
 model InvoiceItem {

@@ -1,17 +1,21 @@
 'use client'
 
 // TAX INVOICE print document — A4 portrait, bilingual English/Arabic,
-// ZATCA Phase 1 + Phase 2 compliant:
+// ZATCA phase-aware (the phase is a PER-INVOICE designation):
 //   • company letterhead (logo + EN/AR name + EN/AR address from Settings)
 //   • title block: TAX INVOICE / فاتورة ضريبية (standard B2B) or
-//     SIMPLIFIED TAX INVOICE / فاتورة ضريبية مبسطة (simplified B2C)
+//     SIMPLIFIED TAX INVOICE / فاتورة ضريبية مبسطة (simplified B2C) + a
+//     ZATCA phase badge (Phase 1 — QR / Phase 2 — E-Invoice)
 //   • "Bill To" block with client EN/AR name, address, CR + VAT numbers
 //   • line-items table + Subtotal / VAT / TOTAL bar (+ Amount Paid / Balance)
-//   • ZATCA QR from /api/invoices/[id]/zatca — all 8 TLV tags:
-//     Phase 1 (seller, VAT no, timestamp, total, VAT) + Phase 2 (invoice
-//     hash, ECDSA signature, public key)
-//   • compliance block: UUID, invoice hash, previous invoice hash (PIH)
-//   • payment instructions (company bank details) + signature block
+//   • ZATCA QR from /api/invoices/[id]/zatca — Phase 1 = TLV tags 1-5 only;
+//     Phase 2 = all 8 tags (adds invoice hash, ECDSA signature, public key)
+//   • Phase 2 only: e-Invoice Cryptographic Stamp block (UUID / hash / PIH /
+//     signature) + submission status (Reported / Cleared). Phase 1 renders a
+//     subtle "QR verification only" one-liner in the same slot.
+//   • full Bank Account Details box (6 fields — per-invoice override with
+//     company Settings fallback)
+//   • Approved By + Received By dual signature area
 // Print via the browser (Ctrl+P → "Save as PDF" for the PDF export).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Printer, QrCode, ShieldCheck, X } from 'lucide-react'
@@ -25,7 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { api } from '@/lib/api-client'
-import { formatDate, formatMoney, round2 } from '@/lib/format'
+import { formatDate, formatDateTime, formatMoney, round2 } from '@/lib/format'
 import { useAppStore } from '@/lib/store'
 import type { AppSettings, DocItemRow, InvoiceRow, ZatcaStamp } from '@/lib/types'
 
@@ -104,6 +108,40 @@ export function InvoicePrintDialog({
   const isSimplified = i?.invoiceType === 'simplified'
   const sellerVat = settings.vatNumber || stamp?.sellerVatNumber || ''
 
+  // Per-invoice ZATCA designation — drives the QR payload (5 vs 8 tags), the
+  // crypto stamp block and the phase badge.
+  const phase = i?.zatcaPhase === 2 ? 2 : 1
+  const isPhase2 = phase === 2
+
+  // Bank Account Details — per-field resolution: invoice override ?? Settings.
+  const bankFields = i
+    ? [
+        { label: 'Bank Name / اسم البنك', value: i.bankName ?? settings.bankName, mono: false },
+        {
+          label: 'Account Name / اسم الحساب',
+          value: i.bankAccountName ?? settings.bankAccountName,
+          mono: false,
+        },
+        {
+          label: 'Account Number / رقم الحساب',
+          value: i.bankAccountNumber ?? settings.bankAccountNumber,
+          mono: true,
+        },
+        { label: 'IBAN / الآيبان', value: i.bankIban ?? settings.bankIban, mono: true },
+        {
+          label: 'Swift Code / السويفت',
+          value: i.bankSwiftCode ?? settings.bankSwiftCode,
+          mono: true,
+        },
+        {
+          label: 'Bank Address / عنوان البنك',
+          value: i.bankAddress ?? settings.bankAddress,
+          mono: false,
+        },
+      ]
+    : []
+  const bankRows = bankFields.filter((f) => (f.value ?? '').trim() !== '')
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -124,7 +162,11 @@ export function InvoicePrintDialog({
             </h2>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <QrCode className="h-3.5 w-3.5" />
-              A4 portrait · ZATCA Phase 1 + 2 QR · {vatPercent}% VAT · English / العربية
+              A4 portrait ·{' '}
+              {isPhase2
+                ? 'ZATCA Phase 2 · Full cryptographic stamp'
+                : 'ZATCA Phase 1 · QR (5 tags)'}{' '}
+              · {vatPercent}% VAT · English / العربية
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -223,6 +265,18 @@ export function InvoicePrintDialog({
                       Draft
                     </p>
                   )}
+                  {/* ZATCA phase badge — Phase 1 (QR) vs Phase 2 (full e-invoice) */}
+                  {isPhase2 ? (
+                    <p className="mt-2 inline-block rounded border-2 border-emerald-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                      ZATCA Phase 2 — E-Invoice ·{' '}
+                      <span lang="ar" dir="rtl">المرحلة الثانية</span>
+                    </p>
+                  ) : (
+                    <p className="mt-2 inline-block rounded border-2 border-neutral-400 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-neutral-600">
+                      ZATCA Phase 1 — QR ·{' '}
+                      <span lang="ar" dir="rtl">المرحلة الأولى</span>
+                    </p>
+                  )}
                 </div>
               </header>
               {/* gold accent segment under the navy header rule */}
@@ -301,6 +355,12 @@ export function InvoicePrintDialog({
                       VAT Rate / نسبة الضريبة:{' '}
                       <span className="font-medium tabular-nums text-neutral-900">
                         {vatPercent}%
+                      </span>
+                    </p>
+                    <p>
+                      ZATCA Phase / مرحلة ZATCA:{' '}
+                      <span className="font-medium text-neutral-900">
+                        {isPhase2 ? 'Phase 2 (Integration)' : 'Phase 1 (QR)'}
                       </span>
                     </p>
                     <p>
@@ -415,34 +475,35 @@ export function InvoicePrintDialog({
                 </table>
               </div>
 
-              {/* ---- Payment instructions (company bank) ---- */}
-              {settings.bankIban || settings.bankName || settings.bankAccountNumber ? (
-                <section className="mt-4 break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                    Payment Details / تفاصيل الدفع
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-x-6 gap-y-0.5 text-[11px] text-neutral-700">
-                    {settings.bankName ? (
-                      <p>
-                        <span className="text-neutral-500">Bank / البنك:</span>{' '}
-                        <span className="font-medium">{settings.bankName}</span>
+              {/* ---- Bank Account Details (always shown — invoice override ?? Settings) ---- */}
+              <section className="mt-4 break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                  Bank Account Details / تفاصيل الحساب البنكي
+                </p>
+                {bankRows.length > 0 ? (
+                  <div className="mt-1 grid grid-cols-1 gap-x-6 gap-y-0.5 text-[11px] text-neutral-700 sm:grid-cols-2">
+                    {bankRows.map((f) => (
+                      <p key={f.label} className="min-w-0">
+                        <span className="text-neutral-500">{f.label}:</span>{' '}
+                        <span
+                          className={
+                            f.mono
+                              ? 'break-all font-mono tabular-nums text-neutral-900'
+                              : 'font-medium text-neutral-900'
+                          }
+                        >
+                          {f.value}
+                        </span>
                       </p>
-                    ) : null}
-                    {settings.bankIban ? (
-                      <p>
-                        <span className="text-neutral-500">IBAN:</span>{' '}
-                        <span className="font-mono">{settings.bankIban}</span>
-                      </p>
-                    ) : null}
-                    {settings.bankAccountNumber ? (
-                      <p>
-                        <span className="text-neutral-500">Account / الحساب:</span>{' '}
-                        <span className="font-mono">{settings.bankAccountNumber}</span>
-                      </p>
-                    ) : null}
+                    ))}
                   </div>
-                </section>
-              ) : null}
+                ) : (
+                  <p className="mt-1 text-[11px] italic text-neutral-400">
+                    Contact us for bank transfer details / يرجى التواصل معنا لتفاصيل
+                    التحويل البنكي
+                  </p>
+                )}
+              </section>
 
               {/* ---- Notes ---- */}
               {i.notes ? (
@@ -458,7 +519,7 @@ export function InvoicePrintDialog({
 
               {/* ---- ZATCA QR + compliance block + signatures ---- */}
               <div className="mt-6 flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-                {/* ZATCA Phase 1 + 2 verification QR */}
+                {/* ZATCA verification QR — Phase 1: tags 1-5 · Phase 2: all 8 tags */}
                 <div className="shrink-0 text-center">
                   {stampLoading ? (
                     <div className="flex h-[130px] w-[130px] items-center justify-center border border-dashed border-neutral-300">
@@ -478,13 +539,15 @@ export function InvoicePrintDialog({
                   <p className="mt-1 max-w-[140px] text-[9px] leading-tight text-neutral-500">
                     Scan to verify · امسح للتحقق
                     <br />
-                    ZATCA Phase 1 + 2
+                    {isPhase2
+                      ? 'ZATCA Phase 2 — Cryptographic stamp'
+                      : 'ZATCA Phase 1 (QR)'}
                   </p>
                 </div>
 
-                {/* Phase 2 cryptographic stamp details */}
+                {/* Phase 2 cryptographic stamp details · Phase 1 one-liner */}
                 <div className="min-w-0 flex-1">
-                  {stamp ? (
+                  {stamp && isPhase2 ? (
                     <div className="break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-600">
                         <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
@@ -508,6 +571,26 @@ export function InvoicePrintDialog({
                           <span className="font-mono text-neutral-800">{stamp.signature}</span>
                         </p>
                       </div>
+                      {i.zatcaStatus === 'cleared' || i.zatcaStatus === 'reported' ? (
+                        <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded border border-emerald-300 bg-emerald-50 px-1.5 py-1 text-[9px] font-bold text-emerald-700">
+                          <ShieldCheck className="h-3 w-3 shrink-0" />
+                          {i.zatcaStatus === 'cleared'
+                            ? 'Cleared by ZATCA · تمت المصادقة'
+                            : 'Reported to ZATCA · تم الإبلاغ'}
+                          {i.zatcaSubmittedAt ? (
+                            <span className="font-normal text-emerald-600">
+                              — {formatDateTime(i.zatcaSubmittedAt)}
+                            </span>
+                          ) : null}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : stamp && !isPhase2 ? (
+                    <div className="break-inside-avoid rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                      <p className="text-[9px] leading-relaxed text-neutral-500">
+                        Phase 1 invoice — QR verification only · فاتورة المرحلة
+                        الأولى — التحقق برمز QR فقط
+                      </p>
                     </div>
                   ) : stampError ? (
                     <p className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-2 text-[9px] text-amber-700">
@@ -521,20 +604,37 @@ export function InvoicePrintDialog({
                   ) : null}
                 </div>
 
-                <div className="flex min-w-[180px] justify-end">
-                  <div className="min-w-[180px]">
-                    <div className="flex h-12 items-end">
-                      <div className="w-full border-t border-neutral-800" />
+                {/* Approved By + Received By signature area */}
+                <div className="flex shrink-0 justify-end">
+                  <div className="grid w-full grid-cols-1 gap-4 sm:w-[300px] sm:grid-cols-2 sm:gap-3">
+                    <div className="break-inside-avoid">
+                      <div className="flex h-12 items-end">
+                        <div className="w-full border-t border-neutral-800" />
+                      </div>
+                      <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                        Approved By / يعتمدها
+                      </p>
+                      <p className="text-[10px] text-neutral-600">
+                        {i.approvedBy || settings.authorizedSignatory || settings.companyName}
+                      </p>
+                      <p className="text-[10px] text-neutral-600">
+                        {i.approvedByTitle || settings.signatoryTitle || 'Authorized Signatory'}
+                      </p>
                     </div>
-                    <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
-                      Authorized By / المفوض بالتوقيع
-                    </p>
-                    <p className="text-[10px] text-neutral-600">
-                      {settings.authorizedSignatory || settings.companyName}
-                    </p>
-                    <p className="text-[10px] text-neutral-600">
-                      {settings.signatoryTitle || 'Authorized Signatory'}
-                    </p>
+                    <div className="break-inside-avoid">
+                      <div className="flex h-12 items-end">
+                        <div className="w-full border-t border-neutral-800" />
+                      </div>
+                      <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                        Received By / المستلم
+                      </p>
+                      <p className="text-[10px] text-neutral-600">
+                        {i.receivedBy || '\u00A0'}
+                      </p>
+                      <p className="text-[10px] text-neutral-600">
+                        {i.receivedByTitle || 'Client Representative'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>

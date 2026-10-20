@@ -21,6 +21,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   bankName: '',
   bankIban: '',
   bankAccountNumber: '',
+  bankAccountName: '',
+  bankSwiftCode: '',
+  bankAddress: '',
   vatRate: 15, // percent — Saudi standard VAT for the VAT Return Expense module
 }
 
