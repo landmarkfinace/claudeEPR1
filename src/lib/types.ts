@@ -830,7 +830,7 @@ export const PAY_TYPE_LABELS: Record<PayType, string> = {
 
 // ── Business Documents (Quotations, E-Invoices, Name List, Supplier P.O., Agreements) ──
 
-/** Shared line-item shape used by quotations, invoices, supplier POs and agreements */
+/** Shared line-item shape used by quotations, supplier POs and agreements */
 export type DocItemRow = {
   id?: string
   sr: number
@@ -841,6 +841,12 @@ export type DocItemRow = {
   /** Optional per-line discount amount (quotations). */
   discount?: number
   lineTotal: number
+  /** Quotation template: gray detail line under the description. */
+  subText?: string | null
+  /** Quotation template: SAR/hour basis (Rate / Hour column). */
+  ratePerHour?: number | null
+  /** Quotation template: hours/month basis (Hours / Month column). */
+  hoursPerMonth?: number | null
 }
 
 /** Signature / stamp image placed on a quotation (percent-of-A4 coordinates). */
@@ -883,6 +889,16 @@ export type QuotationRow = {
   total: number
   notes: string | null
   terms: string | null
+  /** Quotation template: PROJECT DETAILS box. */
+  projectName: string | null
+  projectLocation: string | null
+  contractPeriod: string | null
+  /** Numeric months — drives the Contract Value row (total × months). */
+  contractMonths: number | null
+  mobilization: string | null
+  /** Newline-separated bullet lists (INCLUDED / EXCLUDED boxes). */
+  inclusions: string | null
+  exclusions: string | null
   createdByName: string | null
   createdAt: string
   items?: DocItemRow[]

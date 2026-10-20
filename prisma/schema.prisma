@@ -386,6 +386,14 @@ model Quotation {
   total        Float         @default(0)
   notes        String?
   terms        String?
+  // ---- Quotation template fields (boss's design) ----
+  projectName     String? // "Residential Complex - Dammam" (PROJECT DETAILS box)
+  projectLocation String? // "Al Faisaliyah, Dammam"
+  contractPeriod  String? // free text, e.g. "12 Months" (PROJECT DETAILS box)
+  contractMonths  Int?    // numeric months - drives the Contract Value row (total x months)
+  mobilization    String? // e.g. "7 days from P.O."
+  inclusions      String? // newline-separated bullet list (INCLUDED box)
+  exclusions      String? // newline-separated bullet list (EXCLUDED box)
   createdByName String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -448,6 +456,10 @@ model QuotationItem {
   unitPrice   Float     @default(0)
   discount    Float     @default(0) // per-line discount amount (currency)
   lineTotal   Float     @default(0) // qty × unitPrice − discount
+  // ---- Quotation template columns ----
+  subText      String?  // gray detail line under the category name (e.g. "Licensed, SCE-classified")
+  ratePerHour  Float?   // SAR/hour basis (Rate / Hour column)
+  hoursPerMonth Float?  // hours/month basis (Hours / Month column); rate x hours = unitPrice
 
   @@index([quotationId])
 }

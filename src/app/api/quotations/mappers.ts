@@ -46,6 +46,9 @@ export type QuotationItemRecord = {
   unitPrice: number
   discount: number
   lineTotal: number
+  subText?: string | null
+  ratePerHour?: number | null
+  hoursPerMonth?: number | null
 }
 
 export type QuotationAssetRecord = {
@@ -69,6 +72,9 @@ function mapItems(items: QuotationItemRecord[]): DocItemRow[] {
     unitPrice: round2(it.unitPrice),
     discount: round2(it.discount ?? 0),
     lineTotal: round2(it.lineTotal),
+    subText: it.subText ?? null,
+    ratePerHour: it.ratePerHour != null ? round2(it.ratePerHour) : null,
+    hoursPerMonth: it.hoursPerMonth != null ? round2(it.hoursPerMonth) : null,
   }))
 }
 
@@ -114,6 +120,13 @@ export function mapQuotation(
     total: round2(q.total),
     notes: q.notes,
     terms: q.terms,
+    projectName: q.projectName ?? null,
+    projectLocation: q.projectLocation ?? null,
+    contractPeriod: q.contractPeriod ?? null,
+    contractMonths: q.contractMonths ?? null,
+    mobilization: q.mobilization ?? null,
+    inclusions: q.inclusions ?? null,
+    exclusions: q.exclusions ?? null,
     createdByName: q.createdByName,
     createdAt: q.createdAt.toISOString(),
     itemCount: q._count.items,
@@ -146,6 +159,10 @@ export const itemSchema = z.object({
     .min(0, 'Line discount cannot be negative')
     .max(1_000_000_000, 'Line discount is too large')
     .optional(),
+  // ---- quotation template columns ----
+  subText: z.string().max(300, 'Sub-text is too long').nullable().optional(),
+  ratePerHour: z.coerce.number().min(0).max(100_000, 'Rate per hour is too large').nullable().optional(),
+  hoursPerMonth: z.coerce.number().min(0).max(1_000, 'Hours per month is too large').nullable().optional(),
 })
 
 export const assetSchema = z.object({
@@ -198,6 +215,9 @@ export type NormalizedQuotationItem = {
   unitPrice: number
   discount: number
   lineTotal: number
+  subText: string | null
+  ratePerHour: number | null
+  hoursPerMonth: number | null
 }
 
 export type NormalizedQuotationAsset = QuotationAssetRow
@@ -228,6 +248,9 @@ export function normalizeItems(
       unitPrice,
       discount,
       lineTotal: round2(gross - discount),
+      subText: it.subText?.trim() || null,
+      ratePerHour: it.ratePerHour != null ? round2(it.ratePerHour) : null,
+      hoursPerMonth: it.hoursPerMonth != null ? round2(it.hoursPerMonth) : null,
     })
   }
   return { items: out }

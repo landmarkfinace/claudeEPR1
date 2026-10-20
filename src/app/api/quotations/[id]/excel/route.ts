@@ -96,21 +96,45 @@ export async function GET(_req: NextRequest, { params }: Params) {
     if (quotation.subject) {
       aoa.push([`Subject: ${quotation.subject}`])
     }
+    if (quotation.projectName || quotation.projectLocation || quotation.contractPeriod || quotation.mobilization) {
+      aoa.push(['PROJECT DETAILS'])
+      if (quotation.projectName) aoa.push([`Project: ${quotation.projectName}`])
+      if (quotation.projectLocation) aoa.push([`Location: ${quotation.projectLocation}`])
+      if (quotation.contractPeriod) aoa.push([`Contract Period: ${quotation.contractPeriod}`])
+      if (quotation.mobilization) aoa.push([`Mobilization: ${quotation.mobilization}`])
+    }
     aoa.push([null])
 
-    // Items table
+    // Items table — rate/hour + hours/month columns when the template data is present
+    const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
     const headerRowIndex = aoa.length
-    aoa.push(['Sr', 'Description', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Line Total'])
+    if (hasRateBasis) {
+      aoa.push(['Sr', 'Worker Category / Trade', 'No. of Workers', 'Rate / Hour', 'Hours / Month', 'Rate / Worker / Month', 'Monthly Amount'])
+    } else {
+      aoa.push(['Sr', 'Description', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Line Total'])
+    }
     for (const it of items) {
-      aoa.push([
-        it.sr,
-        it.description,
-        it.unit ?? '',
-        round2(it.quantity),
-        round2(it.unitPrice),
-        round2(it.discount ?? 0),
-        round2(it.lineTotal),
-      ])
+      aoa.push(
+        hasRateBasis
+          ? [
+              it.sr,
+              it.subText ? `${it.description} (${it.subText})` : it.description,
+              round2(it.quantity),
+              it.ratePerHour != null ? round2(it.ratePerHour) : '',
+              it.hoursPerMonth != null ? round2(it.hoursPerMonth) : '',
+              round2(it.unitPrice),
+              round2(it.lineTotal),
+            ]
+          : [
+              it.sr,
+              it.description,
+              it.unit ?? '',
+              round2(it.quantity),
+              round2(it.unitPrice),
+              round2(it.discount ?? 0),
+              round2(it.lineTotal),
+            ]
+      )
     }
     aoa.push([null])
 
@@ -121,6 +145,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
     aoa.push(['', '', '', '', 'Net Amount', '', netTotal])
     aoa.push(['', '', '', '', `VAT (${vatPercent}%)`, '', quotation.vatAmount])
     aoa.push(['', '', '', '', 'TOTAL', '', quotation.total])
+    if (quotation.contractMonths && quotation.contractMonths > 0) {
+      aoa.push([
+        '',
+        '',
+        '',
+        '',
+        `Contract Value (${quotation.contractMonths} Months) incl. VAT`,
+        '',
+        round2(quotation.total * quotation.contractMonths),
+      ])
+    }
     aoa.push([`Amount in words: ${amountInWords(quotation.total, currency)}`])
     aoa.push([null])
 
@@ -134,6 +169,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
       aoa.push(['TERMS & CONDITIONS'])
       for (const line of quotation.terms.split('\n')) aoa.push([line])
       aoa.push([null])
+    }
+    if (quotation.inclusions || quotation.exclusions) {
+      if (quotation.inclusions) {
+        aoa.push(['INCLUDED'])
+        for (const line of quotation.inclusions.split('\n')) aoa.push([line])
+        aoa.push([null])
+      }
+      if (quotation.exclusions) {
+        aoa.push(['EXCLUDED'])
+        for (const line of quotation.exclusions.split('\n')) aoa.push([line])
+        aoa.push([null])
+      }
     }
 
     aoa.push([`Prepared by: ${quotation.createdByName ?? ''}`])

@@ -52,6 +52,13 @@ export async function POST(_req: NextRequest, { params }: Params) {
           total: source.total,
           notes: source.notes,
           terms: source.terms,
+          projectName: source.projectName,
+          projectLocation: source.projectLocation,
+          contractPeriod: source.contractPeriod,
+          contractMonths: source.contractMonths,
+          mobilization: source.mobilization,
+          inclusions: source.inclusions,
+          exclusions: source.exclusions,
           createdByName: auth.name,
           items: {
             create: [...source.items]
@@ -64,6 +71,9 @@ export async function POST(_req: NextRequest, { params }: Params) {
                 unitPrice: it.unitPrice,
                 discount: it.discount,
                 lineTotal: it.lineTotal,
+                subText: it.subText,
+                ratePerHour: it.ratePerHour,
+                hoursPerMonth: it.hoursPerMonth,
               })),
           },
           assets: source.assets.length
