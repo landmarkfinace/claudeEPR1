@@ -1,23 +1,25 @@
 'use client'
 
-// E-Invoice print preview — bilingual (EN/AR) ZATCA-style A4 portrait tax
-// invoice / credit note / debit note, modelled on the boss's approved design:
-// gold chevron title banner, 4-cell meta row, Seller|Buyer boxes, reference
-// row, 10-column items table, Amount-in-words + bank details, totals with a
-// Dark-Navy/Gold TOTAL DUE highlight, and the signature row with the 32mm
-// ZATCA QR.
+// E-Invoice print preview — the boss's "Mirror EN-AR" A4 portrait template:
+// striped letterhead placeholder zones (top/bottom bands), a 3-part mirror
+// title row (TAX INVOICE left · navy pill badge with a gold ring holding the
+// invoice number center · Arabic title right), a gold rule broken by a centre
+// diamond, a cream date & currency bar, SUPPLIER ◆ / CUSTOMER ◆ cards on
+// cream headers, a project info strip, a 9-column items table (navy header —
+// white English over gold Arabic, gold-ring index circles, horizontal-only
+// row separators), the Amount-in-words + bank details split with the totals
+// column (navy TOTAL DUE with a gold amount) and the closing row with the
+// 32mm ZATCA QR, dual signature lines and a dashed gold stamp circle.
 //
-// Pagination model mirrors quotation-print.tsx: EXPLICIT A4 pages
-// (210mm × 296.5mm — the 0.5mm slack prevents blank interleaved pages in
-// Chrome's print pipeline) with FLOW-FILL so the invoice fills ONE A4 page
-// nicely: a conservative row-height estimator chunks items across pages, the
-// thead repeats on every page, each page's leftover room is handed back to its
-// item rows (taller, airier rows), a sparse final page gets the roomier bottom
-// treatment, and the bottom split + signature row live on the LAST page only.
-// Without letterhead artwork the configured 35/22mm bands would be pure blank
-// — the document falls back to compact print margins so a typical invoice
-// prints as a single, well-filled A4 page. Each page carries the letterhead
-// artwork plus a "Page X of Y | صفحة X من Y" footer.
+// Pagination keeps the proven FLOW-FILL model from quotation-print.tsx:
+// EXPLICIT A4 pages (210mm × 296.5mm — the 0.5mm slack prevents blank
+// interleaved pages in Chrome's print pipeline), a conservative row-height
+// estimator chunks items across pages, the thead repeats on every page, each
+// page's leftover room is handed back to its item rows (taller, airier rows),
+// a sparse final page gets the roomier bottom treatment, and the bottom split
+// + signature row live on the LAST page only. Letterhead artwork, when
+// uploaded, replaces the striped placeholder bands on every page; each page
+// also carries a "Page X of Y | صفحة X من Y" footer.
 //
 // The component is purely presentational: the parent (e-invoices view)
 // fetches the document, the e-invoice print config (letterhead / margins /
@@ -48,7 +50,13 @@ const LIGHT_GOLD = '#E1B169'
 const DARK_GOLD = '#8E6420'
 const LIGHT_BG = '#F2F5FA'
 const BORDER = '#DDE3EC'
+const ROW_SEP = '#E8ECF2'
 const MUTED = '#6B7488'
+// warm cream — the template's soft beige for bars and card headers
+const CREAM = '#FBF9F3'
+// striped letterhead placeholder hatching + caption tone
+const STRIPE_A = '#F3F5F8'
+const STRIPE_CAPTION = '#9AA5B5'
 
 const DOC_FONT = "'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif"
 
@@ -73,6 +81,15 @@ const DOC_TITLES: Record<string, { en: string; ar: string }> = {
   invoice: { en: 'TAX INVOICE', ar: 'فاتورة ضريبية' },
   credit_note: { en: 'CREDIT NOTE', ar: 'إشعار دائن' },
   debit_note: { en: 'DEBIT NOTE', ar: 'إشعار مدين' },
+}
+
+/** Arabic names for the currency cell of the date & currency bar. */
+const CURRENCY_AR: Record<string, string> = {
+  SAR: 'ريال سعودي',
+  USD: 'دولار أمريكي',
+  EUR: 'يورو',
+  GBP: 'جنيه إسترليني',
+  AED: 'درهم إماراتي',
 }
 
 /** DD / MM / YYYY — the e-invoice document date format. */
@@ -105,7 +122,18 @@ function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean 
   )
 }
 
-/** Rotated status stamp chip — top-right corner of the meta row. */
+/** Small solid gold diamond — the template's recurring ornament. */
+function GoldDiamond({ size = 5 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-block shrink-0 rotate-45"
+      style={{ width: `${size}px`, height: `${size}px`, background: GOLD }}
+    />
+  )
+}
+
+/** Rotated status stamp chip — floats over the title row's right side. */
 function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) {
   const map: Record<string, { label: string; border: string; color: string }> = {
     draft: { label: 'DRAFT', border: '#737373', color: '#525252' },
@@ -118,7 +146,7 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
     : (map[status] ?? map.draft)
   return (
     <span
-      className="absolute -top-3 right-1 z-10 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      className="absolute -top-3 right-0 z-20 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
       style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
     >
       {entry.label}
@@ -127,9 +155,10 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
 }
 
 // ── Height estimators (conservative — over-estimate = safe page breaks) ─────
-// Calibrated against real Chrome A4 prints of this template (title ≈ 8mm,
-// meta row ≈ 11mm, seller/buyer boxes ≈ 34mm + wrapped address lines, ref row
-// ≈ 13mm, 10-col thead ≈ 10mm, inter-section margins ≈ 8mm).
+// Calibrated against real Chrome A4 prints of this template (title row ≈ 13mm,
+// divider ≈ 2.5mm, date & currency bar ≈ 10mm, supplier/customer cards ≈ 37mm
+// + wrapped address lines, project strip ≈ 9.5mm, 2-line thead ≈ 11mm,
+// inter-section margins ≈ 10mm).
 function estLines(text: string | null | undefined, charsPerLine: number): number {
   if (!text) return 0
   return text
@@ -138,7 +167,7 @@ function estLines(text: string | null | undefined, charsPerLine: number): number
 }
 
 function rowHeightMm(it: EInvoiceItemRow): number {
-  // Description column ≈ 27.5% × 194mm ≈ 53mm ≈ 47 latin chars at 8.5px —
+  // Description column ≈ 27% × 194mm ≈ 52mm ≈ 46 latin chars at 8.5px —
   // 42/36 keeps a safety margin against wrap drift (over-estimate = safe
   // page breaks; the page box clips, so never under-estimate).
   const lines = Math.max(
@@ -155,11 +184,11 @@ const STRETCH_SAFE_MM = 5
 // per-row stretch cap — keeps the stretched table tasteful
 const MAX_ROW_STRETCH = 8
 // final-page slack above which the tail gets the roomier treatment
-const ROOMY_SLACK_MM = 40
+const ROOMY_SLACK_MM = 34
 // extra height the roomy treatment adds (tail padding + header breathing —
 // over-estimate keeps the row-stretch math from over-allocating; the roomy
-// gate ROOMY_SLACK_MM > 40 guarantees this always fits)
-const ROOMY_TAIL_DELTA_MM = 22
+// gate ROOMY_SLACK_MM > 34 guarantees this always fits)
+const ROOMY_TAIL_DELTA_MM = 12
 
 /** One explicit A4 page: its item chunk, stretched row height, roominess. */
 type PagePlan = {
@@ -388,8 +417,8 @@ export function EInvoiceDocument({
   const companyName = settings.companyName || 'Landmark Inter Gulf'
   const balanceDue = round2(inv.totalDue - inv.paidAmount)
 
-  // Seller identity from the shared company settings
-  const seller = {
+  // Supplier identity from the shared company settings (ZATCA role: supplier)
+  const supplier = {
     nameEn: companyName,
     nameAr: settings.companyNameAr || '',
     vat: settings.vatNumber || '',
@@ -407,21 +436,23 @@ export function EInvoiceDocument({
   const money = (n: number) => formatNumber(n)
 
   // ---- pagination ----
-  // Without letterhead artwork the configured 35/22mm bands would be pure
-  // blank — fall back to compact print margins so the invoice fills ONE A4.
-  const hasArtwork = !!config.letterhead
-  const topMm = hasArtwork ? config.topMm : 12
-  const bottomMm = hasArtwork ? config.bottomMm : 14
+  // The letterhead bands are part of this template's design: artwork fills
+  // them when uploaded; otherwise the striped placeholder zones print at the
+  // configured sizes. Either way the content area honours topMm/bottomMm.
+  const topMm = config.topMm
+  const bottomMm = config.bottomMm
 
-  // Page-1 fixed sections (title + meta + seller/buyer + reference row + thead)
-  const sellerBuyerMm =
+  // Page-1 fixed sections (title row + divider + date/currency bar + cards +
+  // project strip + thead + inter-section gaps). The two party cards sit
+  // side-by-side, so only the TALLER card's address wraps drive the height.
+  const cardsMm =
     34 +
-    2.6 * estLines(seller.addressEn, 52) +
-    2.2 * estLines(seller.addressAr, 46) +
-    2.6 * estLines(inv.clientAddressEn, 52) +
-    2.2 * estLines(inv.clientAddressAr, 46)
-  const refRowMm =
-    13 +
+    Math.max(
+      2.6 * estLines(supplier.addressEn, 52) + 2.2 * estLines(supplier.addressAr, 46),
+      2.6 * estLines(inv.clientAddressEn, 52) + 2.2 * estLines(inv.clientAddressAr, 46),
+    )
+  const projectBarMm =
+    9 +
     2.4 *
       Math.max(
         estLines(inv.poRef, 18),
@@ -433,20 +464,21 @@ export function EInvoiceDocument({
         estLines(inv.paymentMethodAr, 20),
       )
   const page1FixedMm =
-    8.5 + (inv.relatedInvoiceNumber ? 4 : 0) + 11.5 + sellerBuyerMm + refRowMm + 10 + 8
+    11 + (inv.relatedInvoiceNumber ? 4.5 : 0) + 2.5 + 10.5 + cardsMm + projectBarMm + 8 + 8
 
   // Tail = bottom split + signature row (last page only)
-  const tailMm = 48 + 40 + 6
+  const tailMm = 48 + 42 + 4
 
   const pages = planPages(items, topMm, bottomMm, page1FixedMm, tailMm)
 
   // ---- table cell styles ----
-  const th =
-    'border px-1 py-1 text-[7.5px] font-bold leading-[1.25] text-white'
-  const td = 'border px-1 py-[3px] align-top text-[8.5px] leading-[1.35] text-neutral-900'
+  // Mirror-template table: navy header (white EN over gold AR), horizontal-
+  // only row separators, no vertical body lines.
+  const th = 'px-1 py-[3px] text-center align-middle leading-[1.3]'
+  const td = 'px-1 py-[3px] align-top text-[8.5px] leading-[1.35] text-neutral-900'
   const tdR = `${td} text-right tabular-nums`
-  const cellBorder = { borderColor: BORDER }
 
+  const currencyAr = CURRENCY_AR[currency] ?? ''
   const printedAt = new Date()
 
   return (
@@ -470,14 +502,48 @@ export function EInvoiceDocument({
           >
             {/* ── letterhead artwork (full-page A4 design, every page) ── */}
             {config.letterhead ? (
-               
+              
               <img
                 src={config.letterhead}
                 alt=""
                 aria-hidden
                 className="pointer-events-none absolute inset-0 z-0 h-full w-full object-fill"
               />
-            ) : null}
+            ) : (
+              <>
+                {/* ── striped letterhead placeholder zones (the template look) ── */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-0 z-0 flex flex-col items-center justify-center gap-[2px]"
+                  style={{
+                    height: `${topMm}mm`,
+                    background: `repeating-linear-gradient(45deg, ${STRIPE_A} 0px, ${STRIPE_A} 5px, #ffffff 5px, #ffffff 11px)`,
+                    borderBottom: `1px dashed #C9D2DE`,
+                  }}
+                >
+                  <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    Letterhead Header Area
+                    <span className="mx-1.5 opacity-50">|</span>
+                    <span lang="ar" dir="rtl" className="tracking-normal">مساحة رأس الخطاب</span>
+                  </p>
+                </div>
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 bottom-0 z-0 flex flex-col items-center justify-center gap-[2px]"
+                  style={{
+                    height: `${bottomMm}mm`,
+                    background: `repeating-linear-gradient(45deg, ${STRIPE_A} 0px, ${STRIPE_A} 5px, #ffffff 5px, #ffffff 11px)`,
+                    borderTop: `1px dashed #C9D2DE`,
+                  }}
+                >
+                  <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    Letterhead Footer Area
+                    <span className="mx-1.5 opacity-50">|</span>
+                    <span lang="ar" dir="rtl" className="tracking-normal">مساحة ذيل الخطاب</span>
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* ── DRAFT watermark (drafts only — subtle, behind content) ── */}
             {inv.status === 'draft' ? (
@@ -509,24 +575,43 @@ export function EInvoiceDocument({
             >
               {pageIdx === 0 ? (
                 <>
-                  {/* 1 ─ gold chevron title banner */}
-                  <div className="flex justify-center">
-                    <div
-                      className={`px-14 text-center ${plan.roomy ? 'py-[7px]' : 'py-[5px]'}`}
-                      style={{
-                        background: `linear-gradient(105deg, ${DARK_GOLD} 0%, ${GOLD} 32%, ${LIGHT_GOLD} 50%, ${GOLD} 68%, ${DARK_GOLD} 100%)`,
-                        clipPath:
-                          'polygon(9mm 0%, calc(100% - 9mm) 0%, 100% 50%, calc(100% - 9mm) 100%, 9mm 100%, 0% 50%)',
-                      }}
+                  {/* 1 ─ mirror title row: EN title · invoice-no pill badge · AR title */}
+                  <div className="relative flex items-center justify-between gap-3">
+                    <StatusStamp status={inv.status} overdue={inv.overdue} />
+                    <h1
+                      className="text-[16px] font-extrabold uppercase leading-[1.15] tracking-[0.05em]"
+                      style={{ color: NAVY }}
                     >
-                      <p className="text-[12.5px] font-extrabold uppercase tracking-[0.12em] text-white">
-                        {title.en}
-                        <span className="mx-2 opacity-60">|</span>
-                        <span lang="ar" dir="rtl" className="tracking-normal">
-                          {title.ar}
-                        </span>
-                      </p>
+                      {title.en}
+                    </h1>
+                    {/* pill badge — gold ring outside, navy fill inside */}
+                    <div className="shrink-0 rounded-full p-[2px]" style={{ background: GOLD }}>
+                      <div
+                        className={`rounded-full px-5 text-center ${plan.roomy ? 'py-[5px]' : 'py-1'}`}
+                        style={{ background: NAVY }}
+                      >
+                        <p
+                          className="whitespace-nowrap text-[6.5px] font-bold uppercase tracking-[0.16em]"
+                          style={{ color: LIGHT_GOLD }}
+                        >
+                          {title.en.includes('TAX') ? 'Invoice No.' : 'Document No.'}{' '}
+                          <span lang="ar" dir="rtl" className="tracking-normal">
+                            رقم الفاتورة
+                          </span>
+                        </p>
+                        <p className="whitespace-nowrap font-mono text-[12.5px] font-extrabold leading-tight text-white">
+                          {inv.invoiceNumber}
+                        </p>
+                      </div>
                     </div>
+                    <h1
+                      lang="ar"
+                      dir="rtl"
+                      className="text-[16px] font-extrabold leading-[1.3]"
+                      style={{ color: NAVY }}
+                    >
+                      {title.ar}
+                    </h1>
                   </div>
                   {inv.relatedInvoiceNumber ? (
                     <p className="mt-1 text-center text-[8.5px] font-semibold" style={{ color: MUTED }}>
@@ -542,20 +627,26 @@ export function EInvoiceDocument({
                     </p>
                   ) : null}
 
-                  {/* 2 ─ meta row (4 cells) + status stamp */}
+                  {/* 2 ─ gold rule broken by a centre diamond */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="h-[2px] flex-1 rounded-full" style={{ background: GOLD }} />
+                    <GoldDiamond size={6} />
+                    <div className="h-[2px] flex-1 rounded-full" style={{ background: GOLD }} />
+                  </div>
+
+                  {/* 3 ─ date & currency bar (cream, rounded, 4 cells) */}
                   <div
-                    className={`relative grid grid-cols-4 overflow-visible rounded border ${plan.roomy ? 'mt-3' : 'mt-2'}`}
-                    style={{ borderColor: BORDER, background: LIGHT_BG }}
+                    className={`mt-2.5 grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomy ? 'mt-3' : ''}`}
+                    style={{ borderColor: BORDER, background: CREAM }}
                   >
-                    <StatusStamp status={inv.status} overdue={inv.overdue} />
                     {(
                       [
-                        ['Invoice No', 'رقم الفاتورة', inv.invoiceNumber, true],
-                        ['Issue Date', 'تاريخ الإصدار', fmtDate(inv.issueDate), false],
-                        ['Supply Date', 'تاريخ التوريد', fmtDate(inv.supplyDate), false],
-                        ['Due Date', 'تاريخ الاستحقاق', fmtDate(inv.dueDate), false],
-                      ] as Array<[string, string, string, boolean]>
-                    ).map(([en, ar, value, mono]) => (
+                        ['Issue Date', 'تاريخ الإصدار', fmtDate(inv.issueDate)],
+                        ['Supply Date', 'تاريخ التوريد', fmtDate(inv.supplyDate)],
+                        ['Due Date', 'تاريخ الاستحقاق', fmtDate(inv.dueDate)],
+                        ['Currency', 'العملة', currencyAr ? `${currency} · ${currencyAr}` : currency],
+                      ] as Array<[string, string, string]>
+                    ).map(([en, ar, value]) => (
                       <div
                         key={en}
                         className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
@@ -563,7 +654,7 @@ export function EInvoiceDocument({
                       >
                         <BiLabel en={en} ar={ar} center />
                         <p
-                          className={`mt-0.5 text-[10px] font-bold ${mono ? 'font-mono' : 'tabular-nums'}`}
+                          className={`mt-0.5 whitespace-nowrap text-[10px] font-bold tabular-nums ${en === 'Currency' ? '' : 'font-mono'}`}
                           style={{ color: NAVY }}
                         >
                           {value}
@@ -572,23 +663,23 @@ export function EInvoiceDocument({
                     ))}
                   </div>
 
-                  {/* 3 ─ Seller | Buyer boxes */}
-                  <div className={`grid grid-cols-2 gap-2 ${plan.roomy ? 'mt-3' : 'mt-2'}`}>
+                  {/* 4 ─ SUPPLIER ◆ | CUSTOMER ◆ cards (cream header, dotted fields) */}
+                  <div className={`grid grid-cols-2 gap-2.5 ${plan.roomy ? 'mt-3' : 'mt-2.5'}`}>
                     {(
                       [
                         {
-                          label: 'SELLER',
-                          labelAr: 'البائع',
-                          nameEn: seller.nameEn,
-                          nameAr: seller.nameAr,
-                          vat: seller.vat,
-                          cr: seller.cr,
-                          addressEn: seller.addressEn,
-                          addressAr: seller.addressAr,
+                          label: 'Supplier',
+                          labelAr: 'المورد',
+                          nameEn: supplier.nameEn,
+                          nameAr: supplier.nameAr,
+                          vat: supplier.vat,
+                          cr: supplier.cr,
+                          addressEn: supplier.addressEn,
+                          addressAr: supplier.addressAr,
                         },
                         {
-                          label: 'BUYER',
-                          labelAr: 'المشتري',
+                          label: 'Customer',
+                          labelAr: 'العميل',
                           nameEn: inv.clientNameEn,
                           nameAr: inv.clientNameAr,
                           vat: inv.clientVatNumber,
@@ -607,32 +698,49 @@ export function EInvoiceDocument({
                         addressAr: string | null
                       }>
                     ).map((box) => (
-                      <div key={box.label} className="overflow-hidden rounded border" style={{ borderColor: BORDER }}>
+                      <div
+                        key={box.label}
+                        className="overflow-hidden rounded-lg border"
+                        style={{ borderColor: BORDER, background: 'white' }}
+                      >
                         <div
-                          className="border-b px-2.5 py-1"
-                          style={{ borderColor: BORDER, background: LIGHT_BG }}
+                          className="flex items-center justify-center gap-2 border-b px-2.5 py-[5px]"
+                          style={{ borderColor: BORDER, background: CREAM }}
                         >
                           <p
-                            className="text-[8.5px] font-extrabold uppercase tracking-[0.16em]"
+                            className="text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
                             style={{ color: DARK_GOLD }}
                           >
                             {box.label}
-                            <span className="mx-1.5 text-neutral-300">|</span>
-                            <span lang="ar" dir="rtl" className="tracking-normal">
-                              {box.labelAr}
-                            </span>
+                          </p>
+                          <GoldDiamond size={5} />
+                          <p
+                            lang="ar"
+                            dir="rtl"
+                            className="text-[9.5px] font-bold leading-none"
+                            style={{ color: DARK_GOLD }}
+                          >
+                            {box.labelAr}
                           </p>
                         </div>
-                        <div className={`${plan.roomy ? 'space-y-1.5 py-2.5' : 'space-y-1 py-1.5'} px-2.5`}>
+                        <div className={`px-2.5 ${plan.roomy ? 'space-y-1.5 py-2.5' : 'space-y-1 py-2'}`}>
                           <p className="text-[10.5px] font-bold leading-snug" style={{ color: NAVY }}>
                             {box.nameEn || '—'}
                           </p>
                           {box.nameAr ? (
-                            <p lang="ar" dir="rtl" className="text-[10px] font-semibold leading-snug" style={{ color: NAVY }}>
+                            <p
+                              lang="ar"
+                              dir="rtl"
+                              className="text-[10px] font-semibold leading-snug"
+                              style={{ color: NAVY }}
+                            >
                               {box.nameAr}
                             </p>
                           ) : null}
-                          <div className="space-y-[3px] border-t pt-1 text-[8.5px] leading-[1.4]" style={{ borderColor: BORDER }}>
+                          <div
+                            className="space-y-[3px] border-t border-dotted pt-1 text-[8.5px] leading-[1.4]"
+                            style={{ borderColor: '#C7CFDC' }}
+                          >
                             <p>
                               <span className="font-semibold" style={{ color: MUTED }}>
                                 VAT No. <span lang="ar" dir="rtl">الرقم الضريبي</span>:{' '}
@@ -662,12 +770,15 @@ export function EInvoiceDocument({
                     ))}
                   </div>
 
-                  {/* 4 ─ reference row (4 cells) */}
+                  {/* 5 ─ project info strip (P.O. · Project · Terms · Method) */}
                   <div
-                    className={`grid grid-cols-4 rounded border ${plan.roomy ? 'mt-3' : 'mt-2'}`}
-                    style={{ borderColor: BORDER, background: LIGHT_BG }}
+                    className={`grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomy ? 'mt-3' : 'mt-2.5'}`}
+                    style={{ borderColor: BORDER, background: CREAM }}
                   >
-                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
+                    <div
+                      className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
+                      style={{ borderColor: BORDER }}
+                    >
                       <BiLabel en="P.O. / Contract Ref" ar="رقم أمر الشراء" center />
                       <p className="mt-0.5 break-words text-[9px] font-bold" style={{ color: NAVY }}>
                         {inv.poRef || '—'}
@@ -678,24 +789,40 @@ export function EInvoiceDocument({
                         </p>
                       ) : null}
                     </div>
-                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
+                    <div
+                      className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
+                      style={{ borderColor: BORDER }}
+                    >
                       <BiLabel en="Project" ar="المشروع" center />
                       <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
                         {inv.projectEn || '—'}
                       </p>
                       {inv.projectAr ? (
-                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                        <p
+                          lang="ar"
+                          dir="rtl"
+                          className="break-words text-[8.5px]"
+                          style={{ color: MUTED }}
+                        >
                           {inv.projectAr}
                         </p>
                       ) : null}
                     </div>
-                    <div className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`} style={{ borderColor: BORDER }}>
+                    <div
+                      className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
+                      style={{ borderColor: BORDER }}
+                    >
                       <BiLabel en="Payment Terms" ar="شروط الدفع" center />
                       <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
                         {inv.paymentTermsEn || '—'}
                       </p>
                       {inv.paymentTermsAr ? (
-                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                        <p
+                          lang="ar"
+                          dir="rtl"
+                          className="break-words text-[8.5px]"
+                          style={{ color: MUTED }}
+                        >
                           {inv.paymentTermsAr}
                         </p>
                       ) : null}
@@ -706,15 +833,20 @@ export function EInvoiceDocument({
                         {inv.paymentMethodEn || '—'}
                       </p>
                       {inv.paymentMethodAr ? (
-                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                        <p
+                          lang="ar"
+                          dir="rtl"
+                          className="break-words text-[8.5px]"
+                          style={{ color: MUTED }}
+                        >
                           {inv.paymentMethodAr}
                         </p>
                       ) : null}
                     </div>
                   </div>
 
-                  {/* 5 ─ items table heading spacing */}
-                  <div className={plan.roomy ? 'mt-3' : 'mt-2'} />
+                  {/* 6 ─ items table heading spacing */}
+                  <div className={plan.roomy ? 'mt-3' : 'mt-2.5'} />
                 </>
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
@@ -728,111 +860,176 @@ export function EInvoiceDocument({
                 </div>
               )}
 
-              {/* 5 ─ items chunk — thead repeats on every page (tail-only pages skip the table) */}
+              {/* 6 ─ items chunk — mirror-template table (thead repeats, tail-only pages skip) */}
               {chunk.length > 0 || pageIdx === 0 ? (
-                <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
-                  <colgroup>
-                    <col style={{ width: '4.5%' }} />
-                    <col style={{ width: '27.5%' }} />
-                    <col style={{ width: '8%' }} />
-                    <col style={{ width: '6.5%' }} />
-                    <col style={{ width: '9.5%' }} />
-                    <col style={{ width: '8%' }} />
-                    <col style={{ width: '11%' }} />
-                    <col style={{ width: '6.5%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '9.5%' }} />
-                  </colgroup>
-                  <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
-                    <tr>
-                      <th className={`${th} text-center`} style={cellBorder}>#</th>
-                      <th className={th} style={cellBorder}>
-                        Description <span lang="ar" dir="rtl">الوصف</span>
-                      </th>
-                      <th className={th} style={cellBorder}>
-                        Unit <span lang="ar" dir="rtl">الوحدة</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        Qty <span lang="ar" dir="rtl">الكمية</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        Unit Price <span lang="ar" dir="rtl">سعر الوحدة</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        Discount <span lang="ar" dir="rtl">الخصم</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        Taxable Amt. <span lang="ar" dir="rtl">الخضوع للضريبة</span>
-                      </th>
-                      <th className={`${th} text-center`} style={cellBorder}>
-                        VAT % <span lang="ar" dir="rtl">النسبة</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        VAT Amt. <span lang="ar" dir="rtl">الضريبة</span>
-                      </th>
-                      <th className={`${th} text-right`} style={cellBorder}>
-                        Total ({currency}) <span lang="ar" dir="rtl">الإجمالي</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chunk.length === 0 ? (
+                <div
+                  className="overflow-hidden rounded-lg border"
+                  style={{ borderColor: BORDER, background: 'white' }}
+                >
+                  <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
+                    <colgroup>
+                      <col style={{ width: '4.5%' }} />
+                      <col style={{ width: '27%' }} />
+                      <col style={{ width: '7.5%' }} />
+                      <col style={{ width: '6.5%' }} />
+                      <col style={{ width: '9.5%' }} />
+                      <col style={{ width: '8.5%' }} />
+                      <col style={{ width: '11%' }} />
+                      <col style={{ width: '12.5%' }} />
+                      <col style={{ width: '13%' }} />
+                    </colgroup>
+                    <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
                       <tr>
-                        <td className={`${td} text-center text-neutral-400`} colSpan={10} style={cellBorder}>
-                          No line items yet
-                        </td>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">#</p>
+                        </th>
+                        <th className={`${th} text-left`}>
+                          <p className="text-[7.5px] font-bold text-white">Description</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الوصف
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">Unit</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الوحدة
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">Qty</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الكمية
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">Unit Price</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            سعر الوحدة
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">Discount</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الخصم
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">Taxable</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            القيمة الخاضعة
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">{`VAT${vatLabel ? ` ${vatLabel}` : ''}`}</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الضريبة
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[7.5px] font-bold text-white">{`Total (${currency})`}</p>
+                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            الإجمالي
+                          </p>
+                        </th>
                       </tr>
-                    ) : (
-                      chunk.map((it, i) => (
-                        <tr
-                          key={it.id ?? `${it.sr}-${i}`}
-                          className="break-inside-avoid"
-                          style={{
-                            background: i % 2 === 1 ? LIGHT_BG : 'white',
-                            // flow-fill: leftover page room → taller, airier rows
-                            ...(plan.rowExtraMm > 0.4
-                              ? { height: `${rowHeightMm(it) + plan.rowExtraMm}mm` }
-                              : null),
-                          }}
-                        >
-                          <td className={`${td} text-center tabular-nums`} style={cellBorder}>
-                            {it.sr}
+                    </thead>
+                    <tbody>
+                      {chunk.length === 0 ? (
+                        <tr>
+                          <td
+                            className={`${td} border-b py-2 text-center text-neutral-400`}
+                            colSpan={9}
+                            style={{ borderColor: ROW_SEP }}
+                          >
+                            No line items yet
                           </td>
-                          <td className={td} style={cellBorder}>
-                            <p className="text-neutral-900">{it.descriptionEn}</p>
-                            {it.descriptionAr ? (
-                              <p lang="ar" dir="rtl" className="mt-px text-[8px]" style={{ color: MUTED }}>
-                                {it.descriptionAr}
-                              </p>
-                            ) : null}
-                          </td>
-                          <td className={td} style={cellBorder}>
-                            <p>{it.unitEn || '—'}</p>
-                            {it.unitAr ? (
-                              <p lang="ar" dir="rtl" className="text-[7.5px]" style={{ color: MUTED }}>
-                                {it.unitAr}
-                              </p>
-                            ) : null}
-                          </td>
-                          <td className={tdR} style={cellBorder}>{fmtQty(it.quantity)}</td>
-                          <td className={tdR} style={cellBorder}>{money(it.unitPrice)}</td>
-                          <td className={tdR} style={cellBorder}>
-                            {it.discount > 0 ? `-${money(it.discount)}` : '—'}
-                          </td>
-                          <td className={tdR} style={cellBorder}>{money(it.taxableAmount)}</td>
-                          <td className={`${td} text-center tabular-nums`} style={cellBorder}>
-                            {Math.round(it.vatPercent)}%
-                          </td>
-                          <td className={tdR} style={cellBorder}>{money(it.vatAmount)}</td>
-                          <td className={`${tdR} font-bold`} style={cellBorder}>{money(it.lineTotal)}</td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        chunk.map((it, i) => (
+                          <tr
+                            key={it.id ?? `${it.sr}-${i}`}
+                            className="break-inside-avoid"
+                            style={{
+                              background: i % 2 === 1 ? '#FAFBFD' : 'white',
+                              // flow-fill: leftover page room → taller, airier rows
+                              ...(plan.rowExtraMm > 0.4
+                                ? { height: `${rowHeightMm(it) + plan.rowExtraMm}mm` }
+                                : null),
+                            }}
+                          >
+                            <td
+                              className={`${td} border-b text-center`}
+                              style={{ borderColor: ROW_SEP }}
+                            >
+                              {/* index inside a thin gold ring — the template's touch */}
+                              <span
+                                className="inline-flex h-[13px] w-[13px] items-center justify-center rounded-full border-[1.3px] text-[7.5px] font-bold tabular-nums"
+                                style={{ borderColor: GOLD, color: NAVY }}
+                              >
+                                {it.sr}
+                              </span>
+                            </td>
+                            <td className={`${td} border-b`} style={{ borderColor: ROW_SEP }}>
+                              <p className="text-neutral-900">{it.descriptionEn}</p>
+                              {it.descriptionAr ? (
+                                <p
+                                  lang="ar"
+                                  dir="rtl"
+                                  className="mt-px text-[8px]"
+                                  style={{ color: MUTED }}
+                                >
+                                  {it.descriptionAr}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className={`${td} border-b text-center`} style={{ borderColor: ROW_SEP }}>
+                              <p>{it.unitEn || '—'}</p>
+                              {it.unitAr ? (
+                                <p
+                                  lang="ar"
+                                  dir="rtl"
+                                  className="text-[7.5px]"
+                                  style={{ color: MUTED }}
+                                >
+                                  {it.unitAr}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
+                              {fmtQty(it.quantity)}
+                            </td>
+                            <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
+                              {money(it.unitPrice)}
+                            </td>
+                            <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
+                              {it.discount > 0 ? `-${money(it.discount)}` : '—'}
+                            </td>
+                            <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
+                              {money(it.taxableAmount)}
+                            </td>
+                            <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
+                              {money(it.vatAmount)}
+                              {rates.length > 1 ? (
+                                <p className="text-[7px]" style={{ color: MUTED }}>
+                                  {Math.round(it.vatPercent)}%
+                                </p>
+                              ) : null}
+                            </td>
+                            <td
+                              className={`${tdR} border-b font-bold`}
+                              style={{ borderColor: ROW_SEP }}
+                            >
+                              {money(it.lineTotal)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               ) : null}
 
-              {/* 6 + 7 ─ bottom split + signature row — last page only.
+              {/* 7 + 8 ─ bottom split + signature row — last page only.
                   Shares the items page → pinned to the page foot (mt-auto);
                   fresh tail-only page → flows from the top (no top void). */}
               {isLast ? (
@@ -841,53 +1038,79 @@ export function EInvoiceDocument({
                     {/* ── left column (60%): amount in words + bank details ── */}
                     <div className={`col-span-3 ${plan.roomy ? 'space-y-2.5' : 'space-y-2'}`}>
                       <div
-                        className={`rounded border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
-                        style={{ borderColor: BORDER }}
+                        className={`rounded-lg border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
+                        style={{ borderColor: BORDER, background: 'white' }}
                       >
-                        <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
-                          Amount in Words <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <p
+                          className="flex items-center gap-2 text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          style={{ color: DARK_GOLD }}
+                        >
+                          Amount in Words
+                          <GoldDiamond size={4} />
                           <span lang="ar" dir="rtl" className="tracking-normal">
                             المبلغ كتابةً
                           </span>
                         </p>
-                        <p className="mt-1 text-[9.5px] font-semibold leading-snug" style={{ color: NAVY }}>
+                        <p
+                          className="mt-1 text-[9.5px] font-semibold leading-snug"
+                          style={{ color: NAVY }}
+                        >
                           {words.en}
                         </p>
-                        <p lang="ar" dir="rtl" className="mt-0.5 text-[10.5px] font-semibold leading-snug" style={{ color: NAVY }}>
+                        <p
+                          lang="ar"
+                          dir="rtl"
+                          className="mt-0.5 text-[10.5px] font-semibold leading-snug"
+                          style={{ color: NAVY }}
+                        >
                           {words.ar}
                         </p>
                       </div>
 
                       <div
-                        className={`rounded border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
-                        style={{ borderColor: BORDER }}
+                        className={`rounded-lg border ${plan.roomy ? 'p-3.5' : 'p-2.5'}`}
+                        style={{ borderColor: BORDER, background: 'white' }}
                       >
-                        <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
-                          Bank Details <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <p
+                          className="flex items-center gap-2 text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          style={{ color: DARK_GOLD }}
+                        >
+                          Bank Details
+                          <GoldDiamond size={4} />
                           <span lang="ar" dir="rtl" className="tracking-normal">
-                            تفاصيل البنك
+                            بيانات البنك
                           </span>
                         </p>
-                        {settings.bankName || settings.bankIban || settings.bankAccountName || settings.bankSwiftCode ? (
-                          <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[8.5px] leading-[1.35]">
-                            <div>
-                              <p className="font-semibold" style={{ color: MUTED }}>
-                                Bank Name · <span lang="ar" dir="rtl">اسم البنك</span>
-                              </p>
-                              <p className="font-semibold" style={{ color: NAVY }}>{settings.bankName || '—'}</p>
-                            </div>
+                        {settings.bankName ||
+                        settings.bankIban ||
+                        settings.bankAccountNumber ||
+                        settings.bankAccountName ||
+                        settings.bankSwiftCode ? (
+                          <div
+                            className={`mt-1.5 grid grid-cols-2 gap-x-4 ${plan.roomy ? 'gap-y-2' : 'gap-y-1.5'} text-[8.5px] leading-[1.35]`}
+                          >
                             <div>
                               <p className="font-semibold" style={{ color: MUTED }}>
                                 Account Name · <span lang="ar" dir="rtl">اسم الحساب</span>
                               </p>
-                              <p className="font-semibold" style={{ color: NAVY }}>{settings.bankAccountName || '—'}</p>
+                              <p className="font-semibold" style={{ color: NAVY }}>
+                                {settings.bankAccountName || '—'}
+                              </p>
                             </div>
                             <div>
                               <p className="font-semibold" style={{ color: MUTED }}>
-                                IBAN · <span lang="ar" dir="rtl">الآيبان</span>
+                                Bank · <span lang="ar" dir="rtl">البنك</span>
                               </p>
-                              <p className="break-all font-mono font-semibold" style={{ color: NAVY }}>
-                                {settings.bankIban || '—'}
+                              <p className="font-semibold" style={{ color: NAVY }}>
+                                {settings.bankName || '—'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                Account No. · <span lang="ar" dir="rtl">رقم الحساب</span>
+                              </p>
+                              <p className="font-mono font-semibold" style={{ color: NAVY }}>
+                                {settings.bankAccountNumber || '—'}
                               </p>
                             </div>
                             <div>
@@ -896,6 +1119,14 @@ export function EInvoiceDocument({
                               </p>
                               <p className="font-mono font-semibold" style={{ color: NAVY }}>
                                 {settings.bankSwiftCode || '—'}
+                              </p>
+                            </div>
+                            <div className="col-span-2">
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                IBAN · <span lang="ar" dir="rtl">الآيبان</span>
+                              </p>
+                              <p className="break-all font-mono font-semibold" style={{ color: NAVY }}>
+                                {settings.bankIban || '—'}
                               </p>
                             </div>
                           </div>
@@ -908,14 +1139,17 @@ export function EInvoiceDocument({
                     </div>
 
                     {/* ── right column (40%): totals box ── */}
-                    <div className="col-span-2 overflow-hidden rounded border" style={{ borderColor: BORDER }}>
+                    <div
+                      className="col-span-2 overflow-hidden rounded-lg border"
+                      style={{ borderColor: BORDER, background: 'white' }}
+                    >
                       {(
                         [
-                          ['Subtotal', 'المجموع', money(inv.subtotal), false],
-                          ['Total Discount', 'إجمالي الخصم', inv.totalDiscount > 0 ? `-${money(inv.totalDiscount)}` : money(0), false],
-                          ['Taxable Amount', 'المبلغ الخاضع للضريبة', money(inv.taxableAmount), false],
-                          [`VAT ${vatLabel}`.trim(), 'ضريبة القيمة المضافة', money(inv.vatAmount), false],
-                        ] as Array<[string, string, string, boolean]>
+                          ['Subtotal', 'المجموع', money(inv.subtotal)],
+                          ['Discount', 'الخصم', inv.totalDiscount > 0 ? `-${money(inv.totalDiscount)}` : money(0)],
+                          ['Taxable Amount', 'المبلغ الخاضع للضريبة', money(inv.taxableAmount)],
+                          [`VAT ${vatLabel}`.trim(), 'ضريبة القيمة المضافة', money(inv.vatAmount)],
+                        ] as Array<[string, string, string]>
                       ).map(([en, ar, value]) => (
                         <div
                           key={en}
@@ -930,15 +1164,20 @@ export function EInvoiceDocument({
                           </span>
                         </div>
                       ))}
-                      {/* TOTAL DUE — highlighted row */}
+                      {/* TOTAL DUE — navy row, white label, gold amount */}
                       <div
                         className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[9px]' : 'py-[7px]'}`}
                         style={{ borderColor: BORDER, background: DARK_NAVY }}
                       >
-                        <span className="text-[9.5px] font-extrabold uppercase tracking-wide" style={{ color: LIGHT_GOLD }}>
+                        <span
+                          className="text-[9.5px] font-extrabold uppercase tracking-wide text-white"
+                        >
                           Total Due <span lang="ar" dir="rtl" className="tracking-normal">الإجمالي المستحق</span>
                         </span>
-                        <span className="text-[13px] font-extrabold tabular-nums" style={{ color: LIGHT_GOLD }}>
+                        <span
+                          className="text-[13px] font-extrabold tabular-nums"
+                          style={{ color: LIGHT_GOLD }}
+                        >
                           {money(inv.totalDue)}
                         </span>
                       </div>
@@ -967,16 +1206,16 @@ export function EInvoiceDocument({
                     </div>
                   </div>
 
-                  {/* 7 ─ signature row: QR | Receiver | Authorized | Stamp */}
+                  {/* 8 ─ signature row: QR | Receiver | Authorized | dashed stamp */}
                   <div
                     className={`mt-3 grid items-end ${plan.roomy ? 'gap-4' : 'gap-3'} ${
                       inv.showReceiverSignature ? 'grid-cols-4' : 'grid-cols-3'
-                    }`
-                  }>
+                    }`}
+                  >
                     {/* ZATCA QR — 32×32mm, pure black/white, no frame inside the quiet zone */}
                     <div className="flex flex-col items-center">
                       {qrDataUrl ? (
-                         
+                        
                         <img
                           src={qrDataUrl}
                           alt="ZATCA QR code"
@@ -998,8 +1237,8 @@ export function EInvoiceDocument({
                         </div>
                       )}
                       <p className="mt-1 text-center text-[7px] leading-tight" style={{ color: MUTED }}>
-                        ZATCA QR <span className="mx-0.5 text-neutral-300">|</span>{' '}
-                        <span lang="ar" dir="rtl">رمز الاستجابة السريعة</span>
+                        Scan to verify <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                        <span lang="ar" dir="rtl">امسح للتحقق</span>
                       </p>
                     </div>
 
@@ -1010,7 +1249,10 @@ export function EInvoiceDocument({
                           Receiver Signature <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl">توقيع المستلم</span>
                         </p>
-                        <div className={`${plan.roomy ? 'mt-12' : 'mt-9'} w-full border-t-2`} style={{ borderColor: NAVY }} />
+                        <div
+                          className={`${plan.roomy ? 'mt-12' : 'mt-9'} w-full border-t-2`}
+                          style={{ borderColor: NAVY }}
+                        />
                         <p className="mt-1 text-center text-[7px]" style={{ color: MUTED }}>
                           Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
                           <span lang="ar" dir="rtl">الاسم والتاريخ</span>
@@ -1022,7 +1264,7 @@ export function EInvoiceDocument({
                     <div className="flex flex-col justify-end">
                       <div className={`${plan.roomy ? 'h-14' : 'h-12'} flex items-end justify-center`}>
                         {config.signature ? (
-                           
+                          
                           <img
                             src={config.signature}
                             alt="Authorized signature"
@@ -1041,14 +1283,14 @@ export function EInvoiceDocument({
                       </p>
                     </div>
 
-                    {/* Company stamp */}
+                    {/* Company stamp — dashed gold circle, per the template */}
                     <div className="flex flex-col items-center justify-end">
                       <div
-                        className={`${plan.roomy ? 'h-24 w-24' : 'h-20 w-20'} flex items-center justify-center overflow-hidden rounded-full border-2`}
+                        className={`${plan.roomy ? 'h-24 w-24' : 'h-20 w-20'} flex items-center justify-center overflow-hidden rounded-full border-2 border-dashed`}
                         style={{ borderColor: GOLD }}
                       >
                         {config.stamp ? (
-                           
+                          
                           <img
                             src={config.stamp}
                             alt="Company stamp"

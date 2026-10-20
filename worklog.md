@@ -2010,3 +2010,29 @@ Stage Summary:
   - tsc: 0 app errors (only pre-existing skills/ folder errors); `bun run lint`: clean.
 - 15-min webDevReview cron already exists (job 469520) — not duplicated (currently system-disabled due to exec limits).
 - Next-round candidates: (1) link existing un-linked P.O.s to directory entries (match by name backfill); (2) supplier detail drawer with P.O. history; (3) CSV export of suppliers directory; (4) show supplier chips in P.O. list rows for linked entries.
+
+---
+Task ID: EI-MIRROR-TEMPLATE
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "E-Invoice E ei tampelet ta add koro and A4 size one page e" — apply the uploaded E-Invoice_Mirror_EN-AR.png template to the E-Invoice module, printing as ONE A4 page.
+
+Work Log:
+- Analyzed the uploaded template (VLM, full-page + 4 section crops): striped letterhead placeholder zones (top 35mm / bottom 22mm, 45° light-grey hatching + dashed boundary + bilingual captions), 3-part MIRROR title row (TAX INVOICE bold navy left · center pill badge = gold outer ring + navy fill with small gold "Invoice No. رقم الفاتورة" over big white mono number · Arabic title right), gold rule broken by a centre diamond, cream rounded date & currency bar (Issue/Supply/Due/Currency SAR · ريال سعودي), SUPPLIER ◆ / CUSTOMER ◆ cards (cream headers, gold diamond, white body, dotted field separators), project info strip, 9-column items table (navy thead with white EN over GOLD Arabic two-line headers; gold-ring index circles; horizontal-only row separators; no vertical body lines; subtle zebra #FAFBFD), tail split (Amount in Words + Bank Details incl. Account No. left | totals right with navy TOTAL DUE, white label, GOLD amount), signature row (32mm ZATCA QR "Scan to verify | امسح للتحقق" · Receiver + Authorized lines · DASHED gold stamp circle), Page X of Y footer.
+- FULL REWRITE of src/components/app/print/e-invoice-print.tsx document section to the Mirror EN-AR design (dialog chrome, DRAFT watermark, planPages flow-fill engine kept).
+- Letterhead behaviour change: removed the compact 12/14mm no-artwork fallback — the configured 35/22mm bands now ALWAYS render: uploaded artwork fills them, otherwise the striped placeholder zones print exactly like the boss's mockup ("Letterhead Header Area | مساحة رأس الخطاب" captions, no mm annotations). Settings hints in e-invoice-settings.tsx updated to describe this.
+- Table: 10-col → 9-col per template (VAT% + VAT amount merged into "VAT 15%" header; mixed rates → per-cell tiny "x%" line + plain "VAT" header). Gold circle = inline-flex rounded-full border-[1.3px] GOLD around sr.
+- Estimator fixes: (1) CRITICAL BUG — cardsMm ADDED all 4 address wraps but the party cards sit side-by-side → now Math.max(supplierWraps, customerWraps) with base 37→34 (this bug alone pushed INV-2026-00003 to 2 pages); (2) calibration vs real Chrome renders: title 13→11, dateBar 10→10.5, thead 11→8, gaps 10→8, projectBar base 9.5→9; (3) ROOMY_SLACK_MM 40→34, ROOMY_TAIL_DELTA_MM 22→12 (real roomy extras ≈6mm, not 22).
+- OPS: dev server died mid-session (silent reaper kill) → restarted with the documented double-fork pattern `( ( setsid bun run dev >> dev.log 2>&1 < /dev/null & ) ; )` — verified stable HTTP 200.
+
+Stage Summary:
+- QA all green (agent-browser, 0 console/page errors; tsc src 0 errors; bun run lint exit 0; dev.log only prisma + 200s):
+  * ALL 7 demo documents (INV-00001…00005, CRN-00001, DBN-00001) print as EXACTLY 1 A4 page, zero clipping (content scrollHeight check), tail pinned to content bottom 268.5mm.
+  * Fill quality: 2-3 item docs mid-gap ≈ 9mm (tight), 1-item docs ≈ 25mm breathing (within the approved ≤35mm standard); rows stretch (16mm on sparse docs, 10.8-16mm on dense).
+  * VLM design verification vs template spec: top half 11/11 checks YES (striped zones, mirror title row, pill badge, gold divider + diamond, cream date bar, SUPPLIER/CUSTOMER cards with dotted fields, project strip); bottom half: totals sequence + navy TOTAL DUE gold amount + QR/Scan-to-verify + dual signatures + DASHED stamp circle + Page 1 of 1 bilingual + striped footer zone all YES; items table: navy/gold two-line thead, 9 columns, gold-ring index, horizontal-only separators, right-aligned numbers, no clipping all YES.
+  * DRAFT watermark (EN+AR diagonal) verified on INV-2026-00002; solid QR renders even on draft preview.
+  * CDP print-to-PDF: INV-2026-00002 (draft) and INV-2026-00001 (partially paid) = exactly 1 PDF page each; rendered PDF ≈ 90% filled, nothing cut off.
+  * 25-item stress invoice (created + deleted via API): 3 clean pages, zero overflow, continuation strip + repeated thead on pages 2-3, tail right after rows on page 3 with Page X of Y footers.
+  * Mobile 390px: list + preview dialog, 0 horizontal scroll; session persistence after dev-server restart verified.
+- Verification artifacts: /tmp/ei_new_preview.png, /tmp/ei_bottom2.png, /tmp/ei_middle.png (3-view VLM checks), /tmp/ei_mirror_draft.pdf + /tmp/ei_mirror_inv1.pdf (1-page PDFs), /tmp/ei_mirror_p1_full.png (PDF render), /tmp/ei_final_list.png, /tmp/ei_final_preview_top/bottom.png, /tmp/ei_mobile.png.
+- Behaviour notes: (1) letterhead bands always print (striped placeholder without artwork — upload artwork in Settings → E-Invoice to replace); (2) 9-col table merges VAT rate+amount (rate still visible per-cell when mixed); (3) margins settings now always honoured at configured values.
+- Open follow-ups if boss asks: (1) when he uploads real letterhead artwork, re-check fill; (2) the striped placeholder captions are intentional design markers — removable if he prefers plain bands; (3) server-side direct PDF download; (4) quotation → e-invoice conversion.
