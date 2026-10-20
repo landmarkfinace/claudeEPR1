@@ -2,8 +2,8 @@
 
 // E-Invoice ZATCA Phase 2 submission dialog — the e-invoice "connect system":
 //   • read-only connection profile summary (environment badge, EGS serial,
-//     CSID token state, gateway URL, last connection test) — shared with the
-//     classic Invoice module (Settings → ZATCA e-Invoicing)
+//     CSID token state, gateway URL, last connection test) — configured under
+//     Settings → ZATCA e-Invoicing (shared infrastructure)
 //   • big "Submit to ZATCA" action → POST /api/e-invoices/[id]/zatca/report
 //     with the full validation checklist rendered from the response
 //     (severity-colored: error = rose, warning = amber, pass = emerald)
@@ -44,7 +44,7 @@ import {
   ZatcaStatusBadge,
   type ZatcaCheck,
   type ZatcaProfile,
-} from '@/components/app/views/invoice-zatca-submit'
+} from '@/components/app/views/zatca-shared'
 
 /** POST /api/e-invoices/[id]/zatca/report success payload. */
 type EReportResult = {
@@ -300,7 +300,7 @@ export function EInvoiceZatcaSubmitDialog({
               </dl>
             ) : null}
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Same connection as the Invoices module — configure it under{' '}
+              Configure the gateway under{' '}
               <span className="font-medium text-foreground">Settings → ZATCA e-Invoicing</span>.
             </p>
           </div>

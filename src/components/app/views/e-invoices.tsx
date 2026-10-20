@@ -51,6 +51,7 @@ import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from 
 import { can, useAppStore } from '@/lib/store'
 import type { ClientRow, EInvoiceConfig, EInvoiceRow, Paginated } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
+import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
 
 import {
@@ -112,7 +113,7 @@ import {
   EInvoiceZatcaSubmitDialog,
   downloadEInvoiceUbl,
 } from './e-invoice-zatca-submit'
-import { ZatcaStatusBadge } from './invoice-zatca-submit'
+import { ZatcaStatusBadge } from './zatca-shared'
 
 // ── List response shapes ────────────────────────────────────────────────────
 
@@ -842,6 +843,12 @@ export function EInvoicesView() {
     void loadIssuedInvoices()
     void loadConfig()
   }
+
+  // Deep-open the create dialog when arriving via the command palette
+  const shouldOpenCreate = useViewIntent('e-invoices', 'create')
+  useEffect(() => {
+    if (shouldOpenCreate) void openAdd()
+  }, [shouldOpenCreate])
 
   async function openEdit(row: EInvoiceRow) {
     try {

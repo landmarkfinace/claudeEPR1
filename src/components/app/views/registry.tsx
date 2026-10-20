@@ -20,7 +20,6 @@ import { TransactionCategoriesView } from './transaction-categories'
 import { VatReturnExpenseView } from './vat-return-expense'
 import { QuotationsView } from './quotations'
 import { EInvoicesView } from './e-invoices'
-import { InvoicesView } from './invoices'
 import { NameListView } from './name-list'
 import { SupplierPosView } from './supplier-pos'
 import { AgreementsView } from './agreements'
@@ -70,8 +69,6 @@ export function ViewRouter() {
       return <QuotationsView />
     case 'e-invoices':
       return <EInvoicesView />
-    case 'invoices':
-      return <InvoicesView />
     case 'name-list':
       return <NameListView />
     case 'supplier-pos':

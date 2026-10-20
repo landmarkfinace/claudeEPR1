@@ -78,7 +78,6 @@ model Client {
 
   projects    Project[]
   quotations  Quotation[]
-  invoices    Invoice[]
   agreements  Agreement[]
   eInvoices   EInvoice[] @relation("EInvoiceClient")
 
@@ -451,82 +450,6 @@ model QuotationItem {
   lineTotal   Float     @default(0) // qty × unitPrice − discount
 
   @@index([quotationId])
-}
-
-model Invoice {
-  id            String    @id @default(cuid())
-  invoiceNumber String    @unique // e.g. INV-2026-0001
-  clientId      String?
-  client        Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  clientName    String
-  subject       String?
-  issueDate     DateTime
-  dueDate       DateTime?
-  status        String    @default("draft") // draft | issued | paid | cancelled
-  // standard = B2B tax invoice (must carry buyer VAT number in Phase 2)
-  // simplified = B2C (QR-only, no buyer VAT requirement)
-  invoiceType   String    @default("standard") // standard | simplified
-  subtotal      Float     @default(0)
-  vatRate       Float     @default(0.15)
-  vatAmount     Float     @default(0)
-  total         Float     @default(0)
-  paidAmount    Float     @default(0)
-  notes         String?
-  createdByName String?
-  // ---- ZATCA Phase 2 (Fatoora integration-ready) ----
-  // Cryptographic stamp chain: each issued invoice stores its UUID, the
-  // base64 SHA-256 hash of its UBL XML, the previous invoice's hash (PIH)
-  // and the base64 ECDSA signature over that hash. The QR code then carries
-  // all 8 TLV tags (Phase 1 tags 1-5 + Phase 2 tags 6-8).
-  uuid          String?   @unique // ZATCA invoice UUID (uuid v4)
-  invoiceHash   String?   // base64 SHA-256 of the invoice UBL XML (QR tag 6)
-  previousHash  String?   // base64 hash of the previous issued invoice (PIH chain)
-  signature     String?   // base64 ECDSA-SHA256 signature over the hash (QR tag 7)
-  // ---- ZATCA phase designation (boss requirement: Phase 1 and Phase 2 SEPARATE) ----
-  // 1 = Phase 1 (Generation): QR with TLV tags 1-5 only, no portal submission
-  // 2 = Phase 2 (Integration): QR with all 8 TLV tags + UBL XML + reporting/clearance to Fatoora
-  zatcaPhase    Int       @default(1)
-  // Phase 2 submission lifecycle: null/"" = not submitted | reported | cleared | rejected
-  zatcaStatus   String?
-  // JSON string of the last ZATCA gateway response (validation results, status, timestamps)
-  zatcaResponse String?
-  zatcaSubmittedAt DateTime?
-  zatcaSubmissionMode String? // simulation | production (which mode was used for last submission)
-  // ---- Signatures (boss requirement: Approved By + Received By) ----
-  approvedBy    String? // name over the "Approved By" line (default: settings.authorizedSignatory)
-  approvedByTitle String? // title under Approved By
-  receivedBy    String? // name over the "Received By" line (client side)
-  receivedByTitle String? // title under Received By
-  // ---- Per-invoice bank details override (null = fall back to company Settings) ----
-  bankName        String?
-  bankAccountName String?
-  bankAccountNumber String?
-  bankIban        String?
-  bankSwiftCode   String?
-  bankAddress     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  items InvoiceItem[]
-
-  @@index([issueDate])
-  @@index([status])
-  @@index([zatcaPhase])
-  @@index([zatcaStatus])
-}
-
-model InvoiceItem {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  sr          Int      @default(1)
-  description String
-  unit        String?
-  quantity    Float    @default(1)
-  unitPrice   Float    @default(0)
-  lineTotal   Float    @default(0)
-
-  @@index([invoiceId])
 }
 
 // Simple company/person directory (clients, suppliers, subcontractors, others)

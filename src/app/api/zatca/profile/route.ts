@@ -1,5 +1,5 @@
 // ZATCA connection profile API — GET / PUT.
-// GET  (invoices.view)  → the Phase 2 gateway profile (env, EGS serial,
+// GET  (einvoices.view) → the Phase 2 gateway profile (env, EGS serial,
 //                         apiBase, last connection test, csidTokenSet flag —
 //                         the raw CSID token NEVER leaves the server).
 // PUT  (settings.edit)  → update env / EGS serial / CSID token / apiBase.
@@ -30,7 +30,7 @@ const profileSchema = z.object({
 
 export async function GET() {
   try {
-    const auth = await requirePermission('invoices.view')
+    const auth = await requirePermission('einvoices.view')
     if (isResponse(auth)) return auth
     return ok(await readZatcaProfile())
   } catch {

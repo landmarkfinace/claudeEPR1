@@ -30,7 +30,7 @@ type LocalCheck = { name: string; ok: boolean; detail: string }
 
 export async function POST() {
   try {
-    const auth = await requirePermission('invoices.view')
+    const auth = await requirePermission('einvoices.view')
     if (isResponse(auth)) return auth
 
     const startedAt = Date.now()

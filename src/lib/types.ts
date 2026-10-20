@@ -809,7 +809,6 @@ export type ViewKey =
   | 'vat-return-expense'
   | 'quotations'
   | 'e-invoices'
-  | 'invoices'
   | 'name-list'
   | 'supplier-pos'
   | 'agreements'
@@ -829,7 +828,7 @@ export const PAY_TYPE_LABELS: Record<PayType, string> = {
   cheque: 'Cheque',
 }
 
-// ── Business Documents (Quotations, Invoices, Name List, Supplier P.O., Agreements) ──
+// ── Business Documents (Quotations, E-Invoices, Name List, Supplier P.O., Agreements) ──
 
 /** Shared line-item shape used by quotations, invoices, supplier POs and agreements */
 export type DocItemRow = {
@@ -888,63 +887,6 @@ export type QuotationRow = {
   createdAt: string
   items?: DocItemRow[]
   assets?: QuotationAssetRow[]
-}
-
-export type InvoiceRow = {
-  id: string
-  invoiceNumber: string
-  clientId: string | null
-  clientName: string
-  subject: string | null
-  issueDate: string
-  dueDate: string | null
-  status: string
-  /** standard = B2B tax invoice · simplified = B2C (ZATCA) */
-  invoiceType: string
-  subtotal: number
-  vatRate: number
-  vatAmount: number
-  total: number
-  paidAmount: number
-  notes: string | null
-  createdByName: string | null
-  createdAt: string
-  items?: DocItemRow[]
-  /** Per-invoice ZATCA designation: 1 = Generation (5-tag QR) · 2 = Integration (full stamp + gateway) */
-  zatcaPhase: number
-  /** Phase 2 submission lifecycle: null = not submitted | reported | cleared | rejected */
-  zatcaStatus: string | null
-  /** ISO timestamp of the last ZATCA submission (Phase 2) */
-  zatcaSubmittedAt: string | null
-  /** "Approved By" signature block — name */
-  approvedBy: string | null
-  approvedByTitle: string | null
-  /** "Received By" signature block (client side) — name */
-  receivedBy: string | null
-  receivedByTitle: string | null
-  /** Per-invoice bank details override (null = fall back to company Settings) */
-  bankName: string | null
-  bankAccountName: string | null
-  bankAccountNumber: string | null
-  bankIban: string | null
-  bankSwiftCode: string | null
-  bankAddress: string | null
-}
-
-/** GET /api/invoices/[id]/zatca — ZATCA stamp (phase-dependent payload) */
-export type ZatcaStamp = {
-  /** 1 = Phase 1 QR (TLV tags 1-5) · 2 = Phase 2 full cryptographic stamp */
-  phase: number
-  uuid: string
-  invoiceHash: string
-  previousHash: string
-  signature: string
-  qrPayload: string
-  qrDataUrl: string
-  publicKeyBase64: string
-  icv: number
-  sellerVatNumber: string
-  warnings: string[]
 }
 
 export type NameListRow = {
@@ -1021,7 +963,6 @@ export type AgreementRow = {
 }
 
 export const QUOTATION_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'expired'] as const
-export const INVOICE_STATUSES = ['draft', 'issued', 'paid', 'cancelled'] as const
 export const SUPPLIER_PO_STATUSES = ['draft', 'ordered', 'received', 'cancelled'] as const
 export const AGREEMENT_STATUSES = ['draft', 'final', 'signed', 'expired'] as const
 export const AGREEMENT_TYPES = ['labor_supply', 'service', 'subcontract'] as const

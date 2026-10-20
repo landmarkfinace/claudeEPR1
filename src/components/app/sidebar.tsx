@@ -30,7 +30,6 @@ import {
   Network,
   ReceiptText,
   FileText,
-  BookCheck,
   Package,
   FileSignature,
   BookUser,
@@ -132,7 +131,6 @@ const MENU: MenuGroup[] = [
     items: [
       { view: 'quotations', label: 'Quotations', icon: FileText, perm: 'quotations.view' },
       { view: 'e-invoices', label: 'E-Invoice', icon: FileOutput, perm: 'einvoices.view' },
-      { view: 'invoices', label: 'Invoices', icon: BookCheck, perm: 'invoices.view' },
       { view: 'supplier-pos', label: 'Supplier P.O.', icon: Package, perm: 'supplierpo.view' },
       { view: 'agreements', label: 'Agreements', icon: FileSignature, perm: 'agreements.view' },
       { view: 'name-list', label: 'Name List', icon: BookUser, perm: 'namelist.view' },

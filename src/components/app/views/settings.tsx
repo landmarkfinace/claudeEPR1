@@ -30,7 +30,7 @@ import {
   type ZatcaEnv,
   type ZatcaProfile,
   type ZatcaTestResult,
-} from '@/components/app/views/invoice-zatca-submit'
+} from '@/components/app/views/zatca-shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

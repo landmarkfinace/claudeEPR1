@@ -1818,3 +1818,28 @@ Stage Summary:
 - Phase semantics: phase is a PER-INVOICE designation chosen while draft, locked at issue — exactly "zkn phase 1 lagbe use korbo zkn 2 lagbe use korbo".
 - Phase 2 connect system reuses the Invoice module's ZATCA profile (Settings → ZATCA e-Invoicing): simulation works out of the box; switching env to preprod/production + CSID token makes real gateway calls with zero code change.
 - Next-phase ideas: (1) bulk ZATCA submission for all pending Phase 2 e-invoices; (2) quotation → e-invoice conversion; (3) server-side direct PDF download; (4) ZATCA response viewer with gateway messages drill-down.
+
+---
+Task ID: EI-DELMOD
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "Sudu E-Invoice Modiul reke. Invoices Modiul delete kore daw." — keep ONLY the E-Invoice module, delete the classic Invoices module entirely.
+
+Work Log:
+- Mapped every reference to the old Invoices module first (api/invoices/** routes, views/invoices.tsx, views/invoice-zatca-submit.tsx, print/invoice-print.tsx, sidebar/registry/command-palette wiring, permissions.ts module block, types.ts InvoiceRow/ZatcaStamp/INVOICE_STATUSES/'invoices' view, lib/zatca.ts invoice-specific adapters, prisma Invoice/InvoiceItem models, Client.invoices relation). Confirmed dashboard/search/quotations have NO dependency on the old module.
+- NEW src/components/app/views/zatca-shared.tsx — extracted the shared ZATCA UI primitives the E-Invoice module reuses (ZatcaStatusBadge, ZatcaChecksList, ZatcaEnv/ZATCA_ENV_GATEWAYS/ENV_LABELS, ZatcaProfile/ZatcaCheck/ZatcaTestResult types) so invoice-zatca-submit.tsx could be deleted.
+- Updated imports: e-invoice-zatca-submit.tsx, settings.tsx and e-invoices.tsx now import from ./zatca-shared.
+- DELETED: src/app/api/invoices/ (5 route files), views/invoices.tsx (3200+ lines), views/invoice-zatca-submit.tsx, print/invoice-print.tsx.
+- Wiring cleanup: sidebar 'invoices' entry + BookCheck icon removed; registry.tsx case + import removed; command-palette old entries removed AND new E-Invoice entries added (nav "E-Invoice" + quick action "New E-Invoice" with create intent — e-invoices.tsx gained useViewIntent('e-invoices','create') → openAdd deep-open); permissions.ts 'invoices' module block removed; types.ts cleaned.
+- lib/zatca.ts trimmed 757→255 lines: kept TLV encoder, seller info, Fatoora connection profile (env/EGS/CSID/last-test), EC P-256 keypair + ECDSA helpers (getZatcaKeys/signHash/ecPublicKeyBase64 used by lib/e-invoice.ts); removed Invoice-specific UBL builder, record adapters, stamp/submission builders (E-Invoice has its own in lib/e-invoice.ts). Header comment rewritten.
+- /api/zatca/profile + /api/zatca/test-connection: requirePermission switched invoices.view → einvoices.view.
+- Fixed stale UI text in the ZATCA submit dialog ("Same connection as the Invoices module" → "Configure the gateway under Settings → ZATCA e-Invoicing").
+- Prisma: dropped Invoice + InvoiceItem models + Client.invoices relation; bun run db:push (old tables dropped — only 1 stale demo row each), client regenerated.
+- Dev server had died during the session → restarted in background (port 3000, HTTP 200).
+- QA via agent-browser: sidebar shows Business Documents = Quotations / E-Invoice / Supplier P.O. / Agreements / Name List (NO Invoices); E-Invoice list renders all 5 demo invoices with KPIs (442,360 invoiced / 110,000 collected / 332,360 outstanding / 76,500 overdue), bilingual clients, P1/P2 chips, Cleared badge, Overdue derivation; print preview of INV-2026-00001 verified full 10-section bilingual layout (TAX INVOICE|فاتورة ضريبية, seller/buyer boxes, 10-col items table w/ discount, EN+AR amount in words, bank details, TOTAL DUE 126,500 + paid 50,000 + balance 76,500, QR + Receiver + Authorized + Stamp, Page 1 of 1); LIVE Phase 2 submission test: INV-2026-00004 submitted via the dialog → CLEARED (simulation) with all 5 validation checks passing (seller/buyer VAT, totals consistent, line items, crypto stamp ICV 3); command palette "invoice" search returns only E-Invoice entries; old API /api/invoices → 404, /api/e-invoices + /api/zatca/profile → 200; Settings renders ZATCA + E-Invoice sections; regression Dashboard/Quotations/Clients OK; mobile 390px zero horizontal overflow; ZERO console errors; dev.log clean (200s only); tsc (src) clean + lint clean. Screenshots: /tmp/qa/ (einvoice-list, einvoice-preview-full, einvoice-zatca-dialog, einvoice-zatca-result, einvoice-mobile, final-einvoice-desktop).
+
+Stage Summary:
+- The classic Invoices module is FULLY REMOVED (routes, views, print template, permissions, types, prisma models/tables, sidebar/registry/palette wiring). E-Invoice is now the ONLY invoicing module — exactly "sudu E-Invoice Modiul reke".
+- Shared ZATCA infrastructure survives in lib/zatca.ts (connection profile + crypto) + zatca-shared.tsx (UI primitives) + /api/zatca/* (now gated on einvoices.view). Phase 2 connect system verified LIVE after the removal (submit → cleared, all checks pass).
+- Demo data intact for the boss to preview: 5 e-invoices (P1 issued/overdue partially-paid, P1 draft, P2 cleared ×2 now incl. 00004, P2 draft) + 3 bilingual demo clients (Al Rushaid / Gulf Steel / Jubail Technical).
+- Command palette gained E-Invoice entries (nav + New E-Invoice quick action with deep-open create dialog).
+- Next-phase ideas: (1) bulk ZATCA submission for pending Phase 2 e-invoices; (2) quotation → e-invoice conversion; (3) server-side direct PDF download; (4) ZATCA response drill-down viewer.
