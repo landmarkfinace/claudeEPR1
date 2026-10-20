@@ -20,6 +20,10 @@ import { PAY_TYPE_LABELS, type AppSettings, type PayType } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import {
+  EInvoiceSettingsSection,
+  GlossarySettingsSection,
+} from '@/components/app/settings/e-invoice-settings'
+import {
   ENV_LABELS,
   ZATCA_ENV_GATEWAYS,
   ZatcaChecksList,
@@ -960,6 +964,12 @@ export function SettingsView() {
             </span>
           </div>
         </SectionCard>
+
+        {/* ---- E-Invoice print template + translation provider ---- */}
+        <EInvoiceSettingsSection />
+
+        {/* ---- EN→AR translation glossary ---- */}
+        <GlossarySettingsSection />
 
         <SectionCard className="p-6">
           <h2 className="text-base font-semibold">About</h2>

@@ -16,6 +16,7 @@ import {
   CalendarClock,
   Wallet,
   FileSpreadsheet,
+  FileOutput,
   BarChart3,
   TrendingUp,
   TrendingDown,
@@ -130,6 +131,7 @@ const MENU: MenuGroup[] = [
     label: 'Business Documents',
     items: [
       { view: 'quotations', label: 'Quotations', icon: FileText, perm: 'quotations.view' },
+      { view: 'e-invoices', label: 'E-Invoice', icon: FileOutput, perm: 'einvoices.view' },
       { view: 'invoices', label: 'Invoices', icon: BookCheck, perm: 'invoices.view' },
       { view: 'supplier-pos', label: 'Supplier P.O.', icon: Package, perm: 'supplierpo.view' },
       { view: 'agreements', label: 'Agreements', icon: FileSignature, perm: 'agreements.view' },

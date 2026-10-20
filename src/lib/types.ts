@@ -808,6 +808,7 @@ export type ViewKey =
   | 'transaction-categories'
   | 'vat-return-expense'
   | 'quotations'
+  | 'e-invoices'
   | 'invoices'
   | 'name-list'
   | 'supplier-pos'
@@ -1025,3 +1026,106 @@ export const SUPPLIER_PO_STATUSES = ['draft', 'ordered', 'received', 'cancelled'
 export const AGREEMENT_STATUSES = ['draft', 'final', 'signed', 'expired'] as const
 export const AGREEMENT_TYPES = ['labor_supply', 'service', 'subcontract'] as const
 export const NAME_LIST_TYPES = ['client', 'supplier', 'subcontractor', 'other'] as const
+
+// ═══════════ E-INVOICE MODULE (bilingual ZATCA-style) ═══════════
+export const EINVOICE_DOC_TYPES = ['invoice', 'credit_note', 'debit_note'] as const
+export const EINVOICE_STATUSES = ['draft', 'issued', 'partially_paid', 'paid'] as const
+// Derived status — not stored: dueDate < today AND status IN (issued, partially_paid) AND paid < total
+export const EINVOICE_FILTER_STATUSES = ['draft', 'issued', 'partially_paid', 'paid', 'overdue'] as const
+
+export type EInvoiceItemRow = {
+  id: string
+  sr: number
+  descriptionEn: string
+  descriptionAr: string
+  descArManual: boolean
+  unitEn: string | null
+  unitAr: string | null
+  unitArManual: boolean
+  quantity: number
+  unitPrice: number
+  discount: number
+  vatPercent: number
+  taxableAmount: number
+  vatAmount: number
+  lineTotal: number
+}
+export type EInvoicePaymentRow = {
+  id: string
+  amount: number
+  paymentDate: string
+  methodEn: string | null
+  methodAr: string | null
+  reference: string | null
+  notes: string | null
+  createdByName: string | null
+  createdAt: string
+}
+export type EInvoiceRow = {
+  id: string
+  invoiceNumber: string
+  docType: string
+  clientId: string | null
+  clientNameEn: string
+  clientNameAr: string
+  clientVatNumber: string | null
+  clientCrNumber: string | null
+  clientAddressEn: string | null
+  clientAddressAr: string | null
+  poRef: string | null
+  contractRef: string | null
+  projectEn: string | null
+  projectAr: string | null
+  paymentTermsEn: string | null
+  paymentTermsAr: string | null
+  paymentMethodEn: string | null
+  paymentMethodAr: string | null
+  issueDate: string
+  supplyDate: string | null
+  dueDate: string | null
+  status: string
+  subtotal: number
+  totalDiscount: number
+  taxableAmount: number
+  vatAmount: number
+  totalDue: number
+  paidAmount: number
+  notesEn: string | null
+  notesAr: string | null
+  arManualFlags: string[] // header field keys manually edited in Arabic (auto-translate must not overwrite)
+  showReceiverSignature: boolean
+  relatedInvoiceId: string | null
+  uuid: string | null
+  icv: number | null
+  invoiceHash: string | null
+  previousHash: string | null
+  issuedAt: string | null
+  issuedByName: string | null
+  signedCopyImage: string | null
+  createdAt: string
+  updatedAt: string
+  // derived
+  overdue: boolean
+  clientName?: string // = clientNameEn (list display convenience)
+  itemCount?: number
+  items?: EInvoiceItemRow[]
+  payments?: EInvoicePaymentRow[]
+  relatedInvoiceNumber?: string | null
+}
+export type EInvoiceConfig = {
+  letterhead: string
+  topMm: number
+  bottomMm: number
+  signature: string
+  stamp: string
+  showReceiverSignature: boolean
+  translateProvider: string
+  translateApiKeySet: boolean
+}
+export type GlossaryTermRow = {
+  id: string
+  termEn: string
+  termAr: string
+  notes: string | null
+  createdAt: string
+}

@@ -1,0 +1,1007 @@
+'use client'
+
+// E-Invoice print preview — bilingual (EN/AR) ZATCA-style A4 portrait tax
+// invoice / credit note / debit note, modelled on the boss's approved design:
+// gold chevron title banner, 4-cell meta row, Seller|Buyer boxes, reference
+// row, 10-column items table, Amount-in-words + bank details, totals with a
+// Dark-Navy/Gold TOTAL DUE highlight, and the signature row with the 32mm
+// ZATCA QR.
+//
+// Pagination model mirrors quotation-print.tsx: EXPLICIT A4 pages
+// (210mm × 296.5mm — the 0.5mm slack prevents blank interleaved pages in
+// Chrome's print pipeline), a conservative row-height estimator chunks items
+// across pages, the thead repeats on every page, the bottom split + signature
+// row live on the LAST page only, and each page carries the letterhead
+// artwork plus a "Page X of Y | صفحة X من Y" footer.
+//
+// The component is purely presentational: the parent (e-invoices view)
+// fetches the document, the e-invoice print config (letterhead / margins /
+// signature / stamp) and the ZATCA QR data URL and passes them as props —
+// no data fetching happens in here (lint forbids fetch-in-effect in dialogs).
+import { useState } from 'react'
+import { Paperclip, Printer, X } from 'lucide-react'
+import { toast } from 'sonner'
+
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { usePageRule } from '@/components/app/print/print-page-rule'
+import { amountInWordsBoth } from '@/lib/arabic-words'
+import { formatNumber, round2 } from '@/lib/format'
+import { useAppStore } from '@/lib/store'
+import type { AppSettings, EInvoiceConfig, EInvoiceItemRow, EInvoiceRow } from '@/lib/types'
+
+// ── Brand palette (exact codes from the boss) ───────────────────────────────
+const NAVY = '#132A4A'
+const DARK_NAVY = '#0C1D33'
+const GOLD = '#C0934C'
+const LIGHT_GOLD = '#E1B169'
+const DARK_GOLD = '#8E6420'
+const LIGHT_BG = '#F2F5FA'
+const BORDER = '#DDE3EC'
+const MUTED = '#6B7488'
+
+const DOC_FONT = "'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif"
+
+export const DEFAULT_EI_CONFIG: EInvoiceConfig = {
+  letterhead: '',
+  topMm: 35,
+  bottomMm: 22,
+  signature: '',
+  stamp: '',
+  showReceiverSignature: true,
+  translateProvider: 'builtin',
+  translateApiKeySet: false,
+}
+
+// ── A4 pagination geometry ──────────────────────────────────────────────────
+const PAGE_W_MM = 210
+const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see header comment)
+const SIDE_PAD_MM = 8
+const FOOTER_MM = 6 // page footer strip reserved above the bottom letterhead band
+
+const DOC_TITLES: Record<string, { en: string; ar: string }> = {
+  invoice: { en: 'TAX INVOICE', ar: 'فاتورة ضريبية' },
+  credit_note: { en: 'CREDIT NOTE', ar: 'إشعار دائن' },
+  debit_note: { en: 'DEBIT NOTE', ar: 'إشعار مدين' },
+}
+
+/** DD / MM / YYYY — the e-invoice document date format. */
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—'
+  const date = new Date(d)
+  if (isNaN(date.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(date.getDate())} / ${pad(date.getMonth() + 1)} / ${date.getFullYear()}`
+}
+
+/** Quantity: integers stay clean, fractions keep 2 decimals. */
+function fmtQty(n: number): string {
+  return Number.isInteger(n) ? n.toLocaleString('en-US') : formatNumber(n)
+}
+
+/** Bilingual label: English left, Arabic right (rtl). */
+function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
+  return (
+    <span
+      className={`flex gap-1.5 text-[7px] font-semibold uppercase leading-tight tracking-[0.08em] ${center ? 'justify-center' : ''}`}
+      style={{ color: MUTED }}
+    >
+      <span>{en}</span>
+      <span className="text-neutral-300">|</span>
+      <span lang="ar" dir="rtl" className="normal-case tracking-normal">
+        {ar}
+      </span>
+    </span>
+  )
+}
+
+/** Rotated status stamp chip — top-right corner of the meta row. */
+function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) {
+  const map: Record<string, { label: string; border: string; color: string }> = {
+    draft: { label: 'DRAFT', border: '#737373', color: '#525252' },
+    issued: { label: 'ISSUED', border: '#d97706', color: '#b45309' },
+    partially_paid: { label: 'PARTIALLY PAID', border: '#0d9488', color: '#0f766e' },
+    paid: { label: 'PAID', border: '#059669', color: '#047857' },
+  }
+  const entry = overdue
+    ? { label: 'OVERDUE', border: '#e11d48', color: '#be123c' }
+    : (map[status] ?? map.draft)
+  return (
+    <span
+      className="absolute -top-3 right-1 z-10 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
+    >
+      {entry.label}
+    </span>
+  )
+}
+
+// ── Height estimators (conservative — over-estimate = safe page breaks) ─────
+function estLines(text: string | null | undefined, charsPerLine: number): number {
+  if (!text) return 0
+  return text
+    .split('\n')
+    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / charsPerLine)), 0)
+}
+
+function rowHeightMm(it: EInvoiceItemRow): number {
+  const lines = Math.max(
+    1,
+    estLines(it.descriptionEn, 34),
+    estLines(it.descriptionAr, 30),
+  )
+  return 8 + 3.4 * (lines - 1)
+}
+
+/**
+ * Greedy pagination: chunk items into explicit pages, then verify the tail
+ * (bottom split + signature row) fits on the final page — if not, the tail
+ * moves to its own page.
+ */
+function paginate(
+  items: EInvoiceItemRow[],
+  topMm: number,
+  bottomMm: number,
+  page1FixedMm: number,
+  tailMm: number
+): EInvoiceItemRow[][] {
+  const availFirst = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - page1FixedMm
+  const availRest = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - 9 // continuation strip
+  const pages: EInvoiceItemRow[][] = []
+  let cur: EInvoiceItemRow[] = []
+  let used = 0
+  let limit = availFirst
+
+  for (const it of items) {
+    const h = rowHeightMm(it)
+    if (used + h > limit && cur.length > 0) {
+      pages.push(cur)
+      cur = []
+      used = 0
+      limit = availRest
+    }
+    cur.push(it)
+    used += h
+  }
+  pages.push(cur)
+
+  // Tail must fit on the last page — otherwise it moves to a fresh page
+  const lastAvail = pages.length === 1 ? availFirst : availRest
+  if (used + tailMm > lastAvail) {
+    pages.push([]) // empty items chunk = tail-only page
+  }
+  return pages
+}
+
+// ── Print dialog ────────────────────────────────────────────────────────────
+
+/**
+ * Full-screen dialog rendering the paginated A4 e-invoice. Parent supplies:
+ * the full EInvoiceRow (items included), the e-invoice print config, and the
+ * ZATCA QR data URL (null for the unsaved-draft preview → placeholder box).
+ * Print button calls window.print() — only the `.print-area` is printed.
+ */
+export function EInvoicePrintDialog({
+  invoice,
+  config,
+  qrDataUrl,
+  open,
+  onOpenChange,
+}: {
+  invoice: EInvoiceRow | null
+  config: EInvoiceConfig | null
+  qrDataUrl: string | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const settings = useAppStore((s) => s.settings)
+  const [signedOpen, setSignedOpen] = useState(false)
+
+  usePageRule(open, 'size: A4 portrait; margin: 0;')
+
+  const isDraft = !invoice || invoice.id === 'draft'
+
+  function handlePrint() {
+    toast.info("Choose 'Save as PDF' in the print dialog for the PDF copy")
+    window.print()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[92vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[900px] print:static print:max-h-none print:w-full print:max-w-none print:translate-x-0 print:translate-y-0 print:overflow-visible print:rounded-none print:border-0 print:p-0 print:shadow-none"
+      >
+        <DialogTitle className="sr-only">E-Invoice print preview</DialogTitle>
+        <DialogDescription className="sr-only">
+          Printable A4 bilingual tax invoice with letterhead, items, totals, ZATCA QR and signatures.
+        </DialogDescription>
+
+        {/* Top button bar — hidden when printing */}
+        <div className="print-hidden flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">
+              {invoice ? `E-Invoice — ${invoice.invoiceNumber}` : 'E-Invoice'}
+              {isDraft && invoice ? (
+                <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                  Draft preview
+                </span>
+              ) : null}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              A4 · Bilingual EN/AR · ZATCA QR
+              {invoice ? ` · ${invoice.clientNameEn}` : ''}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {invoice?.signedCopyImage ? (
+              <Button variant="outline" size="sm" onClick={() => setSignedOpen(true)}>
+                <Paperclip className="h-4 w-4" />
+                Signed copy
+              </Button>
+            ) : null}
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              <X className="h-4 w-4" />
+              Close
+            </Button>
+            <Button size="sm" onClick={handlePrint} disabled={!invoice}>
+              <Printer className="h-4 w-4" />
+              Print / Save PDF
+            </Button>
+          </div>
+        </div>
+
+        {/* Scrollable preview area — stacked A4 pages */}
+        <div className="nice-scrollbar min-h-0 flex-1 overflow-auto bg-neutral-100 p-4 dark:bg-neutral-900 print:flex-none print:overflow-visible print:bg-transparent print:p-0">
+          {invoice ? (
+            <EInvoiceDocument
+              invoice={invoice}
+              config={config ?? DEFAULT_EI_CONFIG}
+              settings={settings}
+              qrDataUrl={qrDataUrl}
+            />
+          ) : (
+            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
+              No e-invoice selected.
+            </div>
+          )}
+        </div>
+
+        {/* Signed copy preview (proof of delivery) */}
+        {invoice?.signedCopyImage ? (
+          <Dialog open={signedOpen} onOpenChange={setSignedOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogTitle className="text-base">
+                Signed copy — {invoice.invoiceNumber}
+              </DialogTitle>
+              <DialogDescription>
+                Signed / stamped delivery copy attached to this issued e-invoice.
+              </DialogDescription>
+              <div className="overflow-hidden rounded-lg border bg-white">
+                { }
+                <img
+                  src={invoice.signedCopyImage}
+                  alt={`Signed copy of ${invoice.invoiceNumber}`}
+                  className="max-h-[60vh] w-full object-contain"
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── The document ────────────────────────────────────────────────────────────
+
+export function EInvoiceDocument({
+  invoice,
+  config,
+  settings,
+  qrDataUrl,
+}: {
+  invoice: EInvoiceRow
+  config: EInvoiceConfig
+  settings: AppSettings
+  qrDataUrl: string | null
+}) {
+  const currency = settings.currency || 'SAR'
+  const inv = invoice
+  const items = inv.items ?? []
+  const title = DOC_TITLES[inv.docType] ?? DOC_TITLES.invoice
+  const companyName = settings.companyName || 'Landmark Inter Gulf'
+  const balanceDue = round2(inv.totalDue - inv.paidAmount)
+
+  // Seller identity from the shared company settings
+  const seller = {
+    nameEn: companyName,
+    nameAr: settings.companyNameAr || '',
+    vat: settings.vatNumber || '',
+    cr: settings.crNumber || '',
+    addressEn: settings.address || '',
+    addressAr: settings.addressAr || '',
+  }
+
+  // Actual VAT rate label — mixed rates collapse to a plain "VAT" label
+  const rates = [...new Set(items.map((it) => Math.round(it.vatPercent)))]
+  const vatLabel = rates.length === 1 ? `${rates[0]}%` : ''
+
+  const words = amountInWordsBoth(inv.totalDue, currency)
+
+  const money = (n: number) => formatNumber(n)
+
+  // ---- pagination ----
+  // Page-1 fixed sections (title + meta + seller/buyer + reference row + thead)
+  const sellerBuyerMm =
+    26 +
+    2.8 * estLines(seller.addressEn, 52) +
+    2.4 * estLines(seller.addressAr, 46) +
+    2.8 * estLines(inv.clientAddressEn, 52) +
+    2.4 * estLines(inv.clientAddressAr, 46)
+  const refRowMm =
+    12 +
+    2.6 *
+      Math.max(
+        estLines(inv.poRef, 18),
+        estLines(inv.projectEn, 22),
+        estLines(inv.projectAr, 20),
+        estLines(inv.paymentTermsEn, 22),
+        estLines(inv.paymentTermsAr, 20),
+        estLines(inv.paymentMethodEn, 22),
+        estLines(inv.paymentMethodAr, 20),
+      )
+  const page1FixedMm = 13 + (inv.relatedInvoiceNumber ? 4 : 0) + 17 + sellerBuyerMm + refRowMm + 9 + 6
+
+  // Tail = bottom split + signature row (last page only)
+  const tailMm = 48 + 40 + 6
+
+  const pages = paginate(items, config.topMm, config.bottomMm, page1FixedMm, tailMm)
+
+  // ---- table cell styles ----
+  const th =
+    'border px-1 py-1 text-[7.5px] font-bold leading-[1.25] text-white'
+  const td = 'border px-1 py-[3px] align-top text-[8.5px] leading-[1.35] text-neutral-900'
+  const tdR = `${td} text-right tabular-nums`
+  const cellBorder = { borderColor: BORDER }
+
+  const printedAt = new Date()
+
+  return (
+    <div
+      className="print-area mx-auto flex w-full flex-col items-center gap-6 bg-transparent [print-color-adjust:exact] [-webkit-print-color-adjust:exact] print:gap-0"
+      style={{ fontFamily: DOC_FONT }}
+    >
+      {pages.map((chunk, pageIdx) => {
+        const isLast = pageIdx === pages.length - 1
+        return (
+          <div
+            key={pageIdx}
+            className="doc-page relative shrink-0 overflow-hidden bg-white text-neutral-900 shadow-sm print:shadow-none"
+            style={{
+              width: `${PAGE_W_MM}mm`,
+              height: `${PAGE_H_MM}mm`,
+              breakAfter: isLast ? 'auto' : 'page',
+              breakInside: 'avoid',
+            }}
+          >
+            {/* ── letterhead artwork (full-page A4 design, every page) ── */}
+            {config.letterhead ? (
+               
+              <img
+                src={config.letterhead}
+                alt=""
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-0 h-full w-full object-fill"
+              />
+            ) : null}
+
+            {/* ── DRAFT watermark (drafts only — subtle, behind content) ── */}
+            {inv.status === 'draft' ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-[5] flex flex-col items-center justify-center gap-10"
+                aria-hidden
+              >
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="select-none whitespace-nowrap text-[46px] font-black uppercase tracking-[0.3em] text-neutral-400/20"
+                    style={{ transform: `rotate(-22deg) scale(${i === 1 ? 1 : 0.55})` }}
+                  >
+                    DRAFT · <span lang="ar" dir="rtl">مسودة</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {/* ── content ── */}
+            <div
+              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col"
+              style={{
+                paddingTop: `${config.topMm}mm`,
+                paddingBottom: `${config.bottomMm + FOOTER_MM}mm`,
+                paddingLeft: `${SIDE_PAD_MM}mm`,
+                paddingRight: `${SIDE_PAD_MM}mm`,
+              }}
+            >
+              {pageIdx === 0 ? (
+                <>
+                  {/* 1 ─ gold chevron title banner */}
+                  <div className="flex justify-center">
+                    <div
+                      className="px-14 py-[5px] text-center"
+                      style={{
+                        background: `linear-gradient(105deg, ${DARK_GOLD} 0%, ${GOLD} 32%, ${LIGHT_GOLD} 50%, ${GOLD} 68%, ${DARK_GOLD} 100%)`,
+                        clipPath:
+                          'polygon(9mm 0%, calc(100% - 9mm) 0%, 100% 50%, calc(100% - 9mm) 100%, 9mm 100%, 0% 50%)',
+                      }}
+                    >
+                      <p className="text-[12.5px] font-extrabold uppercase tracking-[0.12em] text-white">
+                        {title.en}
+                        <span className="mx-2 opacity-60">|</span>
+                        <span lang="ar" dir="rtl" className="tracking-normal">
+                          {title.ar}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  {inv.relatedInvoiceNumber ? (
+                    <p className="mt-1 text-center text-[8.5px] font-semibold" style={{ color: MUTED }}>
+                      Original Invoice:{' '}
+                      <span className="font-mono font-bold" style={{ color: NAVY }}>
+                        {inv.relatedInvoiceNumber}
+                      </span>
+                      <span className="mx-1.5 text-neutral-300">|</span>
+                      <span lang="ar" dir="rtl">الفاتورة الأصلية: </span>
+                      <span lang="ar" dir="rtl" className="font-mono font-bold" style={{ color: NAVY }}>
+                        {inv.relatedInvoiceNumber}
+                      </span>
+                    </p>
+                  ) : null}
+
+                  {/* 2 ─ meta row (4 cells) + status stamp */}
+                  <div
+                    className="relative mt-2 grid grid-cols-4 overflow-visible rounded border"
+                    style={{ borderColor: BORDER, background: LIGHT_BG }}
+                  >
+                    <StatusStamp status={inv.status} overdue={inv.overdue} />
+                    {(
+                      [
+                        ['Invoice No', 'رقم الفاتورة', inv.invoiceNumber, true],
+                        ['Issue Date', 'تاريخ الإصدار', fmtDate(inv.issueDate), false],
+                        ['Supply Date', 'تاريخ التوريد', fmtDate(inv.supplyDate), false],
+                        ['Due Date', 'تاريخ الاستحقاق', fmtDate(inv.dueDate), false],
+                      ] as Array<[string, string, string, boolean]>
+                    ).map(([en, ar, value, mono]) => (
+                      <div
+                        key={en}
+                        className="border-r px-1.5 py-1.5 text-center last:border-r-0"
+                        style={{ borderColor: BORDER }}
+                      >
+                        <BiLabel en={en} ar={ar} center />
+                        <p
+                          className={`mt-0.5 text-[10px] font-bold ${mono ? 'font-mono' : 'tabular-nums'}`}
+                          style={{ color: NAVY }}
+                        >
+                          {value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 3 ─ Seller | Buyer boxes */}
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        {
+                          label: 'SELLER',
+                          labelAr: 'البائع',
+                          nameEn: seller.nameEn,
+                          nameAr: seller.nameAr,
+                          vat: seller.vat,
+                          cr: seller.cr,
+                          addressEn: seller.addressEn,
+                          addressAr: seller.addressAr,
+                        },
+                        {
+                          label: 'BUYER',
+                          labelAr: 'المشتري',
+                          nameEn: inv.clientNameEn,
+                          nameAr: inv.clientNameAr,
+                          vat: inv.clientVatNumber,
+                          cr: inv.clientCrNumber,
+                          addressEn: inv.clientAddressEn,
+                          addressAr: inv.clientAddressAr,
+                        },
+                      ] as Array<{
+                        label: string
+                        labelAr: string
+                        nameEn: string
+                        nameAr: string
+                        vat: string | null
+                        cr: string | null
+                        addressEn: string | null
+                        addressAr: string | null
+                      }>
+                    ).map((box) => (
+                      <div key={box.label} className="overflow-hidden rounded border" style={{ borderColor: BORDER }}>
+                        <div
+                          className="border-b px-2.5 py-1"
+                          style={{ borderColor: BORDER, background: LIGHT_BG }}
+                        >
+                          <p
+                            className="text-[8.5px] font-extrabold uppercase tracking-[0.16em]"
+                            style={{ color: DARK_GOLD }}
+                          >
+                            {box.label}
+                            <span className="mx-1.5 text-neutral-300">|</span>
+                            <span lang="ar" dir="rtl" className="tracking-normal">
+                              {box.labelAr}
+                            </span>
+                          </p>
+                        </div>
+                        <div className="space-y-1 px-2.5 py-1.5">
+                          <p className="text-[10.5px] font-bold leading-snug" style={{ color: NAVY }}>
+                            {box.nameEn || '—'}
+                          </p>
+                          {box.nameAr ? (
+                            <p lang="ar" dir="rtl" className="text-[10px] font-semibold leading-snug" style={{ color: NAVY }}>
+                              {box.nameAr}
+                            </p>
+                          ) : null}
+                          <div className="space-y-[3px] border-t pt-1 text-[8.5px] leading-[1.4]" style={{ borderColor: BORDER }}>
+                            <p>
+                              <span className="font-semibold" style={{ color: MUTED }}>
+                                VAT No. <span lang="ar" dir="rtl">الرقم الضريبي</span>:{' '}
+                              </span>
+                              <span className="font-mono font-semibold">{box.vat || '—'}</span>
+                            </p>
+                            <p>
+                              <span className="font-semibold" style={{ color: MUTED }}>
+                                C.R. No. <span lang="ar" dir="rtl">السجل التجاري</span>:{' '}
+                              </span>
+                              <span className="font-mono font-semibold">{box.cr || '—'}</span>
+                            </p>
+                            <p>
+                              <span className="font-semibold" style={{ color: MUTED }}>
+                                Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
+                              </span>
+                              <span className="text-neutral-800">{box.addressEn || '—'}</span>
+                            </p>
+                            {box.addressAr ? (
+                              <p lang="ar" dir="rtl" className="text-neutral-800">
+                                {box.addressAr}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 4 ─ reference row (4 cells) */}
+                  <div
+                    className="mt-2 grid grid-cols-4 rounded border"
+                    style={{ borderColor: BORDER, background: LIGHT_BG }}
+                  >
+                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                      <BiLabel en="P.O. / Contract Ref" ar="رقم أمر الشراء" center />
+                      <p className="mt-0.5 break-words text-[9px] font-bold" style={{ color: NAVY }}>
+                        {inv.poRef || '—'}
+                      </p>
+                      {inv.contractRef ? (
+                        <p className="break-words text-[8px]" style={{ color: MUTED }}>
+                          Contract <span lang="ar" dir="rtl">العقد</span>: {inv.contractRef}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                      <BiLabel en="Project" ar="المشروع" center />
+                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                        {inv.projectEn || '—'}
+                      </p>
+                      {inv.projectAr ? (
+                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                          {inv.projectAr}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="border-r px-1.5 py-1.5 text-center last:border-r-0" style={{ borderColor: BORDER }}>
+                      <BiLabel en="Payment Terms" ar="شروط الدفع" center />
+                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                        {inv.paymentTermsEn || '—'}
+                      </p>
+                      {inv.paymentTermsAr ? (
+                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                          {inv.paymentTermsAr}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="px-1.5 py-1.5 text-center">
+                      <BiLabel en="Payment Method" ar="طريقة الدفع" center />
+                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                        {inv.paymentMethodEn || '—'}
+                      </p>
+                      {inv.paymentMethodAr ? (
+                        <p lang="ar" dir="rtl" className="break-words text-[8.5px]" style={{ color: MUTED }}>
+                          {inv.paymentMethodAr}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* 5 ─ items table heading spacing */}
+                  <div className="mt-2" />
+                </>
+              ) : (
+                /* continuation header on later item pages (tail-only pages skip it) */
+                chunk.length > 0 ? (
+                  <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
+                      {companyName} — {title.en} <span className="font-mono">{inv.invoiceNumber}</span>
+                    </p>
+                    <p className="text-[8.5px] italic" style={{ color: MUTED }}>
+                      continued · <span lang="ar" dir="rtl">تابع</span>
+                    </p>
+                  </div>
+                ) : null
+              )}
+
+              {/* 5 ─ items chunk — thead repeats on every page (tail-only pages skip the table) */}
+              {chunk.length > 0 || pageIdx === 0 ? (
+                <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '4.5%' }} />
+                    <col style={{ width: '27.5%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '6.5%' }} />
+                    <col style={{ width: '9.5%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '6.5%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9.5%' }} />
+                  </colgroup>
+                  <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
+                    <tr>
+                      <th className={`${th} text-center`} style={cellBorder}>#</th>
+                      <th className={th} style={cellBorder}>
+                        Description <span lang="ar" dir="rtl">الوصف</span>
+                      </th>
+                      <th className={th} style={cellBorder}>
+                        Unit <span lang="ar" dir="rtl">الوحدة</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        Qty <span lang="ar" dir="rtl">الكمية</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        Unit Price <span lang="ar" dir="rtl">سعر الوحدة</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        Discount <span lang="ar" dir="rtl">الخصم</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        Taxable Amt. <span lang="ar" dir="rtl">الخضوع للضريبة</span>
+                      </th>
+                      <th className={`${th} text-center`} style={cellBorder}>
+                        VAT % <span lang="ar" dir="rtl">النسبة</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        VAT Amt. <span lang="ar" dir="rtl">الضريبة</span>
+                      </th>
+                      <th className={`${th} text-right`} style={cellBorder}>
+                        Total ({currency}) <span lang="ar" dir="rtl">الإجمالي</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chunk.length === 0 ? (
+                      <tr>
+                        <td className={`${td} text-center text-neutral-400`} colSpan={10} style={cellBorder}>
+                          No line items yet
+                        </td>
+                      </tr>
+                    ) : (
+                      chunk.map((it, i) => (
+                        <tr
+                          key={it.id ?? `${it.sr}-${i}`}
+                          className="break-inside-avoid"
+                          style={{ background: i % 2 === 1 ? LIGHT_BG : 'white' }}
+                        >
+                          <td className={`${td} text-center tabular-nums`} style={cellBorder}>
+                            {it.sr}
+                          </td>
+                          <td className={td} style={cellBorder}>
+                            <p className="text-neutral-900">{it.descriptionEn}</p>
+                            {it.descriptionAr ? (
+                              <p lang="ar" dir="rtl" className="mt-px text-[8px]" style={{ color: MUTED }}>
+                                {it.descriptionAr}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className={td} style={cellBorder}>
+                            <p>{it.unitEn || '—'}</p>
+                            {it.unitAr ? (
+                              <p lang="ar" dir="rtl" className="text-[7.5px]" style={{ color: MUTED }}>
+                                {it.unitAr}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className={tdR} style={cellBorder}>{fmtQty(it.quantity)}</td>
+                          <td className={tdR} style={cellBorder}>{money(it.unitPrice)}</td>
+                          <td className={tdR} style={cellBorder}>
+                            {it.discount > 0 ? `-${money(it.discount)}` : '—'}
+                          </td>
+                          <td className={tdR} style={cellBorder}>{money(it.taxableAmount)}</td>
+                          <td className={`${td} text-center tabular-nums`} style={cellBorder}>
+                            {Math.round(it.vatPercent)}%
+                          </td>
+                          <td className={tdR} style={cellBorder}>{money(it.vatAmount)}</td>
+                          <td className={`${tdR} font-bold`} style={cellBorder}>{money(it.lineTotal)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              ) : null}
+
+              {/* 6 + 7 ─ bottom split + signature row — last page only */}
+              {isLast ? (
+                <div className="mt-auto flex flex-col">
+                  <div className="mt-3 grid grid-cols-5 gap-2.5 break-inside-avoid">
+                    {/* ── left column (60%): amount in words + bank details ── */}
+                    <div className="col-span-3 space-y-2">
+                      <div className="rounded border p-2.5" style={{ borderColor: BORDER }}>
+                        <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
+                          Amount in Words <span className="mx-1 text-neutral-300">|</span>{' '}
+                          <span lang="ar" dir="rtl" className="tracking-normal">
+                            المبلغ كتابةً
+                          </span>
+                        </p>
+                        <p className="mt-1 text-[9.5px] font-semibold leading-snug" style={{ color: NAVY }}>
+                          {words.en}
+                        </p>
+                        <p lang="ar" dir="rtl" className="mt-0.5 text-[10.5px] font-semibold leading-snug" style={{ color: NAVY }}>
+                          {words.ar}
+                        </p>
+                      </div>
+
+                      <div className="rounded border p-2.5" style={{ borderColor: BORDER }}>
+                        <p className="text-[8px] font-extrabold uppercase tracking-[0.14em]" style={{ color: DARK_GOLD }}>
+                          Bank Details <span className="mx-1 text-neutral-300">|</span>{' '}
+                          <span lang="ar" dir="rtl" className="tracking-normal">
+                            تفاصيل البنك
+                          </span>
+                        </p>
+                        {settings.bankName || settings.bankIban || settings.bankAccountName || settings.bankSwiftCode ? (
+                          <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[8.5px] leading-[1.35]">
+                            <div>
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                Bank Name · <span lang="ar" dir="rtl">اسم البنك</span>
+                              </p>
+                              <p className="font-semibold" style={{ color: NAVY }}>{settings.bankName || '—'}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                Account Name · <span lang="ar" dir="rtl">اسم الحساب</span>
+                              </p>
+                              <p className="font-semibold" style={{ color: NAVY }}>{settings.bankAccountName || '—'}</p>
+                            </div>
+                            <div>
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                IBAN · <span lang="ar" dir="rtl">الآيبان</span>
+                              </p>
+                              <p className="break-all font-mono font-semibold" style={{ color: NAVY }}>
+                                {settings.bankIban || '—'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="font-semibold" style={{ color: MUTED }}>
+                                SWIFT · <span lang="ar" dir="rtl">السويفت</span>
+                              </p>
+                              <p className="font-mono font-semibold" style={{ color: NAVY }}>
+                                {settings.bankSwiftCode || '—'}
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-[8.5px]" style={{ color: MUTED }}>
+                            —
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ── right column (40%): totals box ── */}
+                    <div className="col-span-2 overflow-hidden rounded border" style={{ borderColor: BORDER }}>
+                      {(
+                        [
+                          ['Subtotal', 'المجموع', money(inv.subtotal), false],
+                          ['Total Discount', 'إجمالي الخصم', inv.totalDiscount > 0 ? `-${money(inv.totalDiscount)}` : money(0), false],
+                          ['Taxable Amount', 'المبلغ الخاضع للضريبة', money(inv.taxableAmount), false],
+                          [`VAT ${vatLabel}`.trim(), 'ضريبة القيمة المضافة', money(inv.vatAmount), false],
+                        ] as Array<[string, string, string, boolean]>
+                      ).map(([en, ar, value]) => (
+                        <div
+                          key={en}
+                          className="flex items-center justify-between gap-2 border-b px-2.5 py-[5px] text-[9px]"
+                          style={{ borderColor: BORDER, background: LIGHT_BG }}
+                        >
+                          <span className="font-semibold" style={{ color: MUTED }}>
+                            {en} <span lang="ar" dir="rtl">{ar}</span>
+                          </span>
+                          <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                      {/* TOTAL DUE — highlighted row */}
+                      <div
+                        className="flex items-center justify-between gap-2 border-b px-2.5 py-[7px]"
+                        style={{ borderColor: BORDER, background: DARK_NAVY }}
+                      >
+                        <span className="text-[9.5px] font-extrabold uppercase tracking-wide" style={{ color: LIGHT_GOLD }}>
+                          Total Due <span lang="ar" dir="rtl" className="tracking-normal">الإجمالي المستحق</span>
+                        </span>
+                        <span className="text-[13px] font-extrabold tabular-nums" style={{ color: LIGHT_GOLD }}>
+                          {money(inv.totalDue)}
+                        </span>
+                      </div>
+                      <div
+                        className="flex items-center justify-between gap-2 border-b px-2.5 py-[5px] text-[9px]"
+                        style={{ borderColor: BORDER, background: 'white' }}
+                      >
+                        <span className="font-semibold" style={{ color: MUTED }}>
+                          Amount Paid <span lang="ar" dir="rtl">المدفوع</span>
+                        </span>
+                        <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                          {money(inv.paidAmount)}
+                        </span>
+                      </div>
+                      <div
+                        className="flex items-center justify-between gap-2 px-2.5 py-[6px] text-[9.5px]"
+                        style={{ background: LIGHT_BG }}
+                      >
+                        <span className="font-bold" style={{ color: NAVY }}>
+                          Balance Due <span lang="ar" dir="rtl">الرصيد المستحق</span>
+                        </span>
+                        <span className="font-extrabold tabular-nums" style={{ color: NAVY }}>
+                          {money(balanceDue)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 7 ─ signature row: QR | Receiver | Authorized | Stamp */}
+                  <div
+                    className={`mt-3 grid items-end gap-3 ${
+                      inv.showReceiverSignature ? 'grid-cols-4' : 'grid-cols-3'
+                    }`}
+                  >
+                    {/* ZATCA QR — 32×32mm, pure black/white, no frame inside the quiet zone */}
+                    <div className="flex flex-col items-center">
+                      {qrDataUrl ? (
+                         
+                        <img
+                          src={qrDataUrl}
+                          alt="ZATCA QR code"
+                          style={{ width: '32mm', height: '32mm' }}
+                        />
+                      ) : (
+                        <div
+                          className="flex flex-col items-center justify-center gap-1 rounded border border-dashed p-2 text-center"
+                          style={{ width: '32mm', height: '32mm', borderColor: BORDER }}
+                        >
+                          <span className="text-[7px] font-semibold" style={{ color: MUTED }}>
+                            QR available
+                            <br />
+                            after save
+                          </span>
+                          <span lang="ar" dir="rtl" className="text-[7px]" style={{ color: MUTED }}>
+                            الرمز بعد الحفظ
+                          </span>
+                        </div>
+                      )}
+                      <p className="mt-1 text-center text-[7px] leading-tight" style={{ color: MUTED }}>
+                        ZATCA QR <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                        <span lang="ar" dir="rtl">رمز الاستجابة السريعة</span>
+                      </p>
+                    </div>
+
+                    {/* Receiver signature (only when enabled) */}
+                    {inv.showReceiverSignature ? (
+                      <div className="flex flex-col justify-end">
+                        <p className="text-center text-[8px] font-bold" style={{ color: NAVY }}>
+                          Receiver Signature <span className="mx-1 text-neutral-300">|</span>{' '}
+                          <span lang="ar" dir="rtl">توقيع المستلم</span>
+                        </p>
+                        <div className="mt-9 w-full border-t-2" style={{ borderColor: NAVY }} />
+                        <p className="mt-1 text-center text-[7px]" style={{ color: MUTED }}>
+                          Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
+                          <span lang="ar" dir="rtl">الاسم والتاريخ</span>
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {/* Authorized signature */}
+                    <div className="flex flex-col justify-end">
+                      <div className="flex h-12 items-end justify-center">
+                        {config.signature ? (
+                           
+                          <img
+                            src={config.signature}
+                            alt="Authorized signature"
+                            className="max-h-12 object-contain"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="mt-1 w-full border-t-2" style={{ borderColor: NAVY }} />
+                      <p className="mt-1 text-center text-[8px] font-bold" style={{ color: NAVY }}>
+                        Authorized Signature <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <span lang="ar" dir="rtl">التوقيع المعتمد</span>
+                      </p>
+                      <p className="text-center text-[7px]" style={{ color: MUTED }}>
+                        Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <span lang="ar" dir="rtl">الاسم والتاريخ</span>
+                      </p>
+                    </div>
+
+                    {/* Company stamp */}
+                    <div className="flex flex-col items-center justify-end">
+                      <div
+                        className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2"
+                        style={{ borderColor: GOLD }}
+                      >
+                        {config.stamp ? (
+                           
+                          <img
+                            src={config.stamp}
+                            alt="Company stamp"
+                            className="h-[70px] w-[70px] object-contain"
+                          />
+                        ) : (
+                          <p
+                            className="px-2 text-center text-[6px] font-bold uppercase leading-[1.3]"
+                            style={{ color: DARK_GOLD }}
+                          >
+                            Company Stamp
+                            <br />
+                            <span lang="ar" dir="rtl" className="normal-case">
+                              ختم الشركة
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* ── page footer strip — sits above the reserved bottom band ── */}
+            <div
+              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between border-t pt-[1mm] text-[7px]"
+              style={{ bottom: `${config.bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
+            >
+              <span className="truncate">
+                {companyName} · {inv.invoiceNumber}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                Page {pageIdx + 1} of {pages.length} <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                <span lang="ar" dir="rtl">
+                  صفحة {pageIdx + 1} من {pages.length}
+                </span>
+              </span>
+              <span className="shrink-0 tabular-nums">Printed {fmtDate(printedAt.toISOString())}</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}

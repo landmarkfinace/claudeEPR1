@@ -80,6 +80,7 @@ model Client {
   quotations  Quotation[]
   invoices    Invoice[]
   agreements  Agreement[]
+  eInvoices   EInvoice[] @relation("EInvoiceClient")
 
   @@index([status])
 }
@@ -651,4 +652,128 @@ model AgreementClause {
   body        String
 
   @@index([agreementId])
+}
+
+// ═══════════ E-INVOICE MODULE (bilingual ZATCA-style) ═══════════
+
+model EInvoice {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique // INV-2026-00001 | CRN-2026-00001 | DBN-2026-00001
+  docType       String   @default("invoice") // invoice | credit_note | debit_note
+  clientId      String?
+  client        Client?  @relation("EInvoiceClient", fields: [clientId], references: [id], onDelete: SetNull)
+  clientNameEn  String
+  clientNameAr  String   @default("")
+  clientVatNumber String?
+  clientCrNumber  String?
+  clientAddressEn String?
+  clientAddressAr String?
+  poRef         String?
+  contractRef   String?
+  projectEn     String?
+  projectAr     String?
+  paymentTermsEn String?
+  paymentTermsAr String?
+  paymentMethodEn String?
+  paymentMethodAr String?
+  issueDate     DateTime
+  supplyDate    DateTime?
+  dueDate       DateTime?
+  status        String   @default("draft") // draft | issued | partially_paid | paid  (overdue = derived)
+  subtotal      Float    @default(0)  // Σ qty × unitPrice
+  totalDiscount Float    @default(0)  // Σ line discounts
+  taxableAmount Float    @default(0)  // subtotal − discount
+  vatAmount     Float    @default(0)  // Σ per-line VAT
+  totalDue      Float    @default(0)  // taxable + VAT
+  paidAmount    Float    @default(0)  // Σ payments (recomputed from EInvoicePayment)
+  notesEn       String?
+  notesAr       String?
+  // JSON string array of header field keys the user manually edited in Arabic
+  // (e.g. ["project","paymentTerms"]) — auto-translate must not overwrite these
+  arManualFlags String   @default("[]")
+  showReceiverSignature Boolean @default(true) // per-invoice override of the config default
+  // Credit/Debit note linkage — corrections reference the original invoice
+  relatedInvoiceId String?
+  relatedInvoice   EInvoice? @relation("NoteRef", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  relatedNotes     EInvoice[] @relation("NoteRef")
+  // ---- ZATCA Phase 2 readiness (assigned at Issue time) ----
+  uuid          String?  @unique // uuid v4
+  icv           Int?     // invoice counter (sequential across all issued e-invoices)
+  invoiceHash   String?  // base64 SHA-256 of the invoice UBL XML
+  previousHash  String?  // base64 hash of the previously issued e-invoice (PIH chain)
+  issuedAt      DateTime?
+  issuedByName  String?
+  // Scanned signed copy uploaded after issuing (proof of delivery) — does NOT unlock editing
+  signedCopyImage String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items    EInvoiceItem[]
+  payments EInvoicePayment[]
+
+  @@index([status])
+  @@index([issueDate])
+  @@index([clientId])
+  @@index([docType])
+}
+
+model EInvoiceItem {
+  id           String   @id @default(cuid())
+  eInvoiceId   String
+  eInvoice     EInvoice @relation(fields: [eInvoiceId], references: [id], onDelete: Cascade)
+  sr           Int      @default(1)
+  descriptionEn String
+  descriptionAr String  @default("")
+  descArManual  Boolean @default(false) // manual Arabic edit — skip auto-translate
+  unitEn       String?
+  unitAr       String?
+  unitArManual Boolean @default(false)
+  quantity     Float    @default(1)
+  unitPrice    Float    @default(0)
+  discount     Float    @default(0) // per-line discount amount
+  vatPercent   Float    @default(15) // 15 standard, 0 for exempt/zero-rated lines
+  taxableAmount Float  @default(0) // qty × price − discount
+  vatAmount    Float   @default(0) // taxable × vat%
+  lineTotal    Float   @default(0) // taxable + vat
+
+  @@index([eInvoiceId])
+}
+
+model EInvoicePayment {
+  id           String   @id @default(cuid())
+  eInvoiceId   String
+  eInvoice     EInvoice @relation(fields: [eInvoiceId], references: [id], onDelete: Cascade)
+  amount       Float
+  paymentDate  DateTime
+  methodEn     String?
+  methodAr     String?
+  reference    String?
+  notes        String?
+  createdByName String?
+  createdAt    DateTime @default(now())
+
+  @@index([eInvoiceId])
+}
+
+// Fixed translations that always win over machine translation
+model GlossaryTerm {
+  id        String   @id @default(cuid())
+  termEn    String   @unique
+  termAr    String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Reused translations (translation memory)
+model TranslationMemory {
+  id         String   @id @default(cuid())
+  sourceText String
+  translatedText String
+  fieldContext String? // client_name | address | description | unit | project | payment_terms | payment_method | notes | bank_name | generic
+  usageCount Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([sourceText, fieldContext])
 }
