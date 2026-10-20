@@ -1,13 +1,18 @@
 'use client'
 
-// Supplier P.O. view — purchase orders sent TO suppliers:
+// Supplier P.O. view — manpower purchase orders sent TO suppliers:
 //   • stat cards (count, P.O. value, received value, open orders)
 //   • filter bar (search + status + year) with the shared mobile collapse
 //   • desktop table + mobile stacked cards, row actions Edit / Delete / Print
-//   • add/edit dialog with a live line-items editor (server always recomputes
-//     the final money figures — the in-dialog math is only a preview),
-//     supplier name / phone / attention fields
+//   • add/edit dialog following the boss's Manpower P.O. template: supplier
+//     details (address / VAT / C.R.), ORDER fields (quotation ref, payment
+//     terms), ASSIGNMENT fields (work site, start date, duration, working
+//     hours) and a manpower items editor (TRADE / WORKERS / HOURLY RATE →
+//     AMOUNT = workers × rate × hours-per-month, default 260). The server
+//     always recomputes the final money figures — the in-dialog math is only
+//     a preview. Draft preview renders the print document unsaved.
 //   • CSV export of the filtered list, A4 print via SupplierPoPrintDialog
+//     (reads the shared company letterhead config)
 // Role-based: add/edit/delete/print only with supplierpo.* permissions.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -16,6 +21,7 @@ import {
   Calculator,
   Clock,
   Download,
+  Eye,
   Hash,
   Package,
   PackageCheck,
@@ -30,7 +36,7 @@ import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
-import type { Paginated, SupplierPoRow } from '@/lib/types'
+import type { LetterheadConfig, Paginated, SupplierPoRow } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -70,7 +76,7 @@ import { EmptyState, TableSkeleton } from '../shared/empty-state'
 import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
-import { SupplierPoPrintDialog } from '../print/supplier-po-print'
+import { SupplierPoPrintDialog, DEFAULT_LETTERHEAD } from '../print/supplier-po-print'
 import type { SupplierPoDetail } from '../print/supplier-po-print'
 
 type PoListRow = SupplierPoRow & { itemCount: number }
@@ -153,10 +159,19 @@ type PoForm = {
   supplierName: string
   supplierPhone: string
   attention: string
+  supplierAddress: string
+  supplierVat: string
+  supplierCr: string
   issueDate: string
-  expectedDate: string
+  quotationRef: string
+  paymentTerms: string
   status: string
   vatPercent: string
+  workSite: string
+  startDate: string
+  durationMonths: string
+  workingHours: string
+  hoursPerMonth: string
   notes: string
   items: ItemForm[]
 }
@@ -164,7 +179,13 @@ type PoForm = {
 let itemKeySeq = 0
 function newItemForm(): ItemForm {
   itemKeySeq += 1
-  return { key: `po-item-${itemKeySeq}`, description: '', unit: '', quantity: '1', unitPrice: '' }
+  return {
+    key: `po-item-${itemKeySeq}`,
+    description: '',
+    unit: '',
+    quantity: '1',
+    unitPrice: '',
+  }
 }
 
 function emptyForm(vatPercent: number): PoForm {
@@ -172,10 +193,19 @@ function emptyForm(vatPercent: number): PoForm {
     supplierName: '',
     supplierPhone: '',
     attention: '',
+    supplierAddress: '',
+    supplierVat: '',
+    supplierCr: '',
     issueDate: toDateInputValue(new Date()),
-    expectedDate: '',
+    quotationRef: '',
+    paymentTerms: 'Net 30 Days',
     status: 'draft',
     vatPercent: String(vatPercent),
+    workSite: '',
+    startDate: '',
+    durationMonths: '',
+    workingHours: '10 hrs × 26 days',
+    hoursPerMonth: '260',
     notes: '',
     items: [newItemForm()],
   }
@@ -225,6 +255,19 @@ export function SupplierPosView() {
   const [printOpen, setPrintOpen] = useState(false)
   const [printPo, setPrintPo] = useState<SupplierPoDetail | null>(null)
   const [printLoading, setPrintLoading] = useState(false)
+  // draft preview (unsaved form state rendered by the same print component)
+  const [draftPreview, setDraftPreview] = useState<SupplierPoDetail | null>(null)
+
+  // company letterhead config — the printed P.O. reads it from here
+  const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
+  useEffect(() => {
+    api
+      .get<LetterheadConfig>('/api/letterhead')
+      .then((res) => setLetterhead({ ...DEFAULT_LETTERHEAD, ...res }))
+      .catch(() => {
+        // fall back to the styled typed header
+      })
+  }, [])
 
   // guard against out-of-order responses when filters/page change quickly
   const requestId = useRef(0)
@@ -310,10 +353,19 @@ export function SupplierPosView() {
         supplierName: full.supplierName,
         supplierPhone: full.supplierPhone ?? '',
         attention: full.attention ?? '',
+        supplierAddress: full.supplierAddress ?? '',
+        supplierVat: full.supplierVat ?? '',
+        supplierCr: full.supplierCr ?? '',
         issueDate: toDateInputValue(full.issueDate),
-        expectedDate: full.expectedDate ? toDateInputValue(full.expectedDate) : '',
+        quotationRef: full.quotationRef ?? '',
+        paymentTerms: full.paymentTerms ?? 'Net 30 Days',
         status: full.status,
         vatPercent: String(Math.round(full.vatRate * 100)),
+        workSite: full.workSite ?? '',
+        startDate: full.startDate ? toDateInputValue(full.startDate) : '',
+        durationMonths: full.durationMonths ? String(full.durationMonths) : '',
+        workingHours: full.workingHours ?? '',
+        hoursPerMonth: full.hoursPerMonth ? String(full.hoursPerMonth) : '',
         notes: full.notes ?? '',
         items: (full.items ?? []).map((it) => {
           itemKeySeq += 1
@@ -359,24 +411,45 @@ export function SupplierPosView() {
   }
 
   // -----------------------------------------------------------------------
-  // LIVE totals preview — mirrors the server-side computation exactly
+  // LIVE totals preview — mirrors the server-side computation exactly.
+  // Manpower mode (hours/month set): AMOUNT = workers × rate × hrs/month.
   // -----------------------------------------------------------------------
   const calc = useMemo(() => {
+    const hoursRaw = parseNum(form.hoursPerMonth)
+    const hoursPerMonth = hoursRaw !== null && hoursRaw > 0 ? Math.round(hoursRaw) : null
     const items = form.items.map((it) => {
       const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
       const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
-      return { quantity, unitPrice, lineTotal: round2(quantity * unitPrice) }
+      return {
+        quantity,
+        unitPrice,
+        lineTotal: round2(quantity * unitPrice * (hoursPerMonth ?? 1)),
+      }
     })
     const subtotal = round2(items.reduce((s, it) => s + it.lineTotal, 0))
     const percent = parseNum(form.vatPercent)
     const vatRate = percent !== null && percent >= 0 && percent <= 100 ? percent / 100 : defaultVatPercent / 100
     const vatAmount = round2(subtotal * vatRate)
     const total = round2(subtotal + vatAmount)
-    return { items, subtotal, vatAmount, total, vatRate }
+    const monthsRaw = parseNum(form.durationMonths)
+    const durationMonths = monthsRaw !== null && monthsRaw > 0 ? Math.round(monthsRaw) : null
+    const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
+    return {
+      items,
+      subtotal,
+      vatAmount,
+      total,
+      vatRate,
+      hoursPerMonth,
+      durationMonths,
+      totalWorkers,
+      poValue: durationMonths ? round2(total * durationMonths) : null,
+    }
   }, [form, defaultVatPercent])
 
   const money = (n: number) => formatMoney(n, currency)
   const vatPercentLabel = Math.round(calc.vatRate * 100)
+  const isManpower = calc.hoursPerMonth !== null
 
   async function handleSubmit() {
     // Friendly client-side validation before hitting the API
@@ -396,15 +469,15 @@ export function SupplierPosView() {
       unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
     }))
     if (items.length === 0 || items.some((it) => !it.description)) {
-      toast.error('Every line item needs a description')
+      toast.error('Every line item needs a trade / description')
       return
     }
     if (items.some((it) => it.quantity <= 0)) {
-      toast.error('Every line item needs a quantity greater than 0')
+      toast.error(isManpower ? 'Every trade needs workers greater than 0' : 'Every line item needs a quantity greater than 0')
       return
     }
     if (items.some((it) => it.unitPrice < 0)) {
-      toast.error('Unit prices cannot be negative')
+      toast.error('Hourly rates cannot be negative')
       return
     }
 
@@ -412,8 +485,17 @@ export function SupplierPosView() {
       supplierName,
       supplierPhone: form.supplierPhone.trim() || null,
       attention: form.attention.trim() || null,
+      supplierAddress: form.supplierAddress.trim() || null,
+      supplierVat: form.supplierVat.trim() || null,
+      supplierCr: form.supplierCr.trim() || null,
       issueDate: form.issueDate,
-      expectedDate: form.expectedDate || null,
+      quotationRef: form.quotationRef.trim() || null,
+      paymentTerms: form.paymentTerms.trim() || null,
+      workSite: form.workSite.trim() || null,
+      startDate: form.startDate || null,
+      durationMonths: calc.durationMonths,
+      workingHours: form.workingHours.trim() || null,
+      hoursPerMonth: calc.hoursPerMonth,
       status: form.status,
       vatRate: calc.vatRate,
       notes: form.notes.trim() || null,
@@ -522,6 +604,7 @@ export function SupplierPosView() {
     setPrintLoading(true)
     try {
       const full = await api.get<SupplierPoDetail>(`/api/supplier-pos/${row.id}`)
+      setDraftPreview(null)
       setPrintPo(full)
       setPrintOpen(true)
     } catch (e) {
@@ -529,6 +612,64 @@ export function SupplierPosView() {
     } finally {
       setPrintLoading(false)
     }
+  }
+
+  /** Build an unsaved P.O. from the current form state for the print preview. */
+  function buildDraftPreview(): SupplierPoDetail | null {
+    const supplierName = form.supplierName.trim()
+    if (!supplierName) {
+      toast.error('Fill the supplier name before previewing')
+      return null
+    }
+    if (form.items.some((it) => !it.description.trim())) {
+      toast.error('Every line item needs a trade / description')
+      return null
+    }
+    const items = form.items.map((it, i) => ({
+      id: `draft-${i}`,
+      sr: i + 1,
+      description: it.description.trim(),
+      unit: it.unit.trim() || null,
+      quantity: Math.max(0, parseNum(it.quantity) ?? 0),
+      unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
+      lineTotal: calc.items[i]?.lineTotal ?? 0,
+    }))
+    return {
+      id: 'draft',
+      poNumber: 'DRAFT',
+      supplierName,
+      supplierPhone: form.supplierPhone.trim() || null,
+      attention: form.attention.trim() || null,
+      issueDate: form.issueDate ? new Date(form.issueDate).toISOString() : new Date().toISOString(),
+      expectedDate: null,
+      status: form.status,
+      quotationRef: form.quotationRef.trim() || null,
+      paymentTerms: form.paymentTerms.trim() || null,
+      workSite: form.workSite.trim() || null,
+      startDate: form.startDate ? new Date(form.startDate).toISOString() : null,
+      durationMonths: calc.durationMonths,
+      workingHours: form.workingHours.trim() || null,
+      hoursPerMonth: calc.hoursPerMonth,
+      supplierAddress: form.supplierAddress.trim() || null,
+      supplierVat: form.supplierVat.trim() || null,
+      supplierCr: form.supplierCr.trim() || null,
+      subtotal: calc.subtotal,
+      vatRate: calc.vatRate,
+      vatAmount: calc.vatAmount,
+      total: calc.total,
+      notes: form.notes.trim() || null,
+      createdByName: user?.name ?? null,
+      createdAt: new Date().toISOString(),
+      items,
+    }
+  }
+
+  function openDraftPreview() {
+    const draft = buildDraftPreview()
+    if (!draft) return
+    setPrintPo(null)
+    setDraftPreview(draft)
+    setPrintOpen(true)
   }
 
   // -----------------------------------------------------------------------
@@ -899,92 +1040,204 @@ export function SupplierPosView() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="po-supplier">
-                Supplier Name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="po-supplier"
-                value={form.supplierName}
-                onChange={(e) => setField('supplierName', e.target.value)}
-                placeholder="Supplier / company name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-phone">Supplier Phone</Label>
-              <Input
-                id="po-phone"
-                value={form.supplierPhone}
-                onChange={(e) => setField('supplierPhone', e.target.value)}
-                placeholder="+966 …"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-attention">Attention</Label>
-              <Input
-                id="po-attention"
-                value={form.attention}
-                onChange={(e) => setField('attention', e.target.value)}
-                placeholder="Contact person at the supplier"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-vat">VAT %</Label>
-              <Input
-                id="po-vat"
-                type="number"
-                min={0}
-                max={100}
-                step="0.5"
-                value={form.vatPercent}
-                onChange={(e) => setField('vatPercent', e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-issue-date">
-                Issue Date <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="po-issue-date"
-                type="date"
-                value={form.issueDate}
-                onChange={(e) => setField('issueDate', e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-expected-date">Expected Delivery</Label>
-              <Input
-                id="po-expected-date"
-                type="date"
-                value={form.expectedDate}
-                onChange={(e) => setField('expectedDate', e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="po-status">Status</Label>
-              <Select value={form.status} onValueChange={(v) => setField('status', v)}>
-                <SelectTrigger id="po-status" className="w-full" aria-label="Status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {/* ---- Supplier details ---- */}
+          <div className="space-y-3">
+            <p className="text-sm font-semibold">Supplier</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="po-supplier">
+                  Supplier Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="po-supplier"
+                  value={form.supplierName}
+                  onChange={(e) => setField('supplierName', e.target.value)}
+                  placeholder="Supplier / company name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-phone">Supplier Phone</Label>
+                <Input
+                  id="po-phone"
+                  value={form.supplierPhone}
+                  onChange={(e) => setField('supplierPhone', e.target.value)}
+                  placeholder="+966 …"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-attention">Contact Person</Label>
+                <Input
+                  id="po-attention"
+                  value={form.attention}
+                  onChange={(e) => setField('attention', e.target.value)}
+                  placeholder="e.g. Mr. Faisal Al-Otaibi"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-supplier-address">Supplier Address</Label>
+                <Input
+                  id="po-supplier-address"
+                  value={form.supplierAddress}
+                  onChange={(e) => setField('supplierAddress', e.target.value)}
+                  placeholder="District, City, Country"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-supplier-vat">Supplier VAT No.</Label>
+                <Input
+                  id="po-supplier-vat"
+                  value={form.supplierVat}
+                  onChange={(e) => setField('supplierVat', e.target.value)}
+                  placeholder="300000000000003"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-supplier-cr">Supplier C.R. No.</Label>
+                <Input
+                  id="po-supplier-cr"
+                  value={form.supplierCr}
+                  onChange={(e) => setField('supplierCr', e.target.value)}
+                  placeholder="1010 000 000"
+                />
+              </div>
             </div>
           </div>
 
-          {/* ---- Line items editor ---- */}
+          {/* ---- P.O. details (ORDER strip) ---- */}
+          <div className="space-y-3">
+            <p className="text-sm font-semibold">P.O. Details</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="po-issue-date">
+                  PO Date <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="po-issue-date"
+                  type="date"
+                  value={form.issueDate}
+                  onChange={(e) => setField('issueDate', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-quote-ref">Quotation Ref.</Label>
+                <Input
+                  id="po-quote-ref"
+                  value={form.quotationRef}
+                  onChange={(e) => setField('quotationRef', e.target.value)}
+                  placeholder="e.g. QT-RS-2214"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-payment-terms">Payment Terms</Label>
+                <Input
+                  id="po-payment-terms"
+                  value={form.paymentTerms}
+                  onChange={(e) => setField('paymentTerms', e.target.value)}
+                  placeholder="Net 30 Days"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-status">Status</Label>
+                <Select value={form.status} onValueChange={(v) => setField('status', v)}>
+                  <SelectTrigger id="po-status" className="w-full" aria-label="Status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-vat">VAT %</Label>
+                <Input
+                  id="po-vat"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.5"
+                  value={form.vatPercent}
+                  onChange={(e) => setField('vatPercent', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ---- Assignment ---- */}
+          <div className="space-y-3">
+            <p className="text-sm font-semibold">Assignment</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="po-work-site">Work Site</Label>
+                <Input
+                  id="po-work-site"
+                  value={form.workSite}
+                  onChange={(e) => setField('workSite', e.target.value)}
+                  placeholder="e.g. Dammam - Al Faisaliyah"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-start-date">Start Date</Label>
+                <Input
+                  id="po-start-date"
+                  type="date"
+                  value={form.startDate}
+                  onChange={(e) => setField('startDate', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-duration">Duration (months)</Label>
+                <Input
+                  id="po-duration"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={form.durationMonths}
+                  onChange={(e) => setField('durationMonths', e.target.value)}
+                  placeholder="e.g. 6"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-working-hours">Working Hours</Label>
+                <Input
+                  id="po-working-hours"
+                  value={form.workingHours}
+                  onChange={(e) => setField('workingHours', e.target.value)}
+                  placeholder="10 hrs × 26 days"
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="po-hours-month">Hours / Month (rate basis)</Label>
+                <Input
+                  id="po-hours-month"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={form.hoursPerMonth}
+                  onChange={(e) => setField('hoursPerMonth', e.target.value)}
+                  placeholder="260"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {isManpower
+                    ? `Amount = No. of Workers × Hourly Rate × ${calc.hoursPerMonth} hours / month`
+                    : 'Blank = direct amounts (Qty × Unit Price) — for non-manpower purchases'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ---- Manpower items editor ---- */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <Label className="text-sm">Line Items</Label>
+                <Label className="text-sm">Manpower — Trades</Label>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Line totals, VAT and the grand total update live as you type.
+                  {isManpower
+                    ? `Amount = workers × hourly rate × ${calc.hoursPerMonth} hrs/month — totals update live.`
+                    : 'Direct amounts (Qty × Unit Price) — totals update live.'}
                 </p>
               </div>
               <Button
@@ -995,7 +1248,7 @@ export function SupplierPosView() {
                 onClick={() => addItemAt(form.items.length - 1)}
               >
                 <Plus className="h-4 w-4" />
-                Add Item
+                Add Trade
               </Button>
             </div>
 
@@ -1009,9 +1262,9 @@ export function SupplierPosView() {
                     <Input
                       value={it.description}
                       onChange={(e) => setItemField(it.key, 'description', e.target.value)}
-                      placeholder="Description of goods / services"
+                      placeholder="Trade / category — e.g. Electrician"
                       className="min-w-0 flex-1"
-                      aria-label={`Item ${i + 1} description`}
+                      aria-label={`Trade ${i + 1} name`}
                     />
                     <Button
                       type="button"
@@ -1020,24 +1273,14 @@ export function SupplierPosView() {
                       className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => removeItemAt(i)}
                       disabled={form.items.length <= 1}
-                      aria-label={`Remove item ${i + 1}`}
+                      aria-label={`Remove trade ${i + 1}`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 pl-8 sm:grid-cols-4">
+                  <div className="mt-2 grid grid-cols-3 gap-2 pl-8">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Unit</Label>
-                      <Input
-                        value={it.unit}
-                        onChange={(e) => setItemField(it.key, 'unit', e.target.value)}
-                        placeholder="e.g. box"
-                        className="h-9"
-                        aria-label={`Item ${i + 1} unit`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Qty</Label>
+                      <Label className="text-[11px] text-muted-foreground">No. of Workers</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1045,11 +1288,13 @@ export function SupplierPosView() {
                         value={it.quantity}
                         onChange={(e) => setItemField(it.key, 'quantity', e.target.value)}
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} quantity`}
+                        aria-label={`Trade ${i + 1} number of workers`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Unit Price</Label>
+                      <Label className="text-[11px] text-muted-foreground">
+                        Hourly Rate ({currency})
+                      </Label>
                       <Input
                         type="number"
                         min={0}
@@ -1058,11 +1303,13 @@ export function SupplierPosView() {
                         onChange={(e) => setItemField(it.key, 'unitPrice', e.target.value)}
                         placeholder="0.00"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} unit price`}
+                        aria-label={`Trade ${i + 1} hourly rate`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Line Total</Label>
+                      <Label className="text-[11px] text-muted-foreground">
+                        Amount ({currency})
+                      </Label>
                       <p className="flex h-9 items-center rounded-md border bg-background px-2.5 text-sm font-semibold tabular-nums">
                         {formatNumber(calc.items[i]?.lineTotal ?? 0)}
                       </p>
@@ -1076,7 +1323,9 @@ export function SupplierPosView() {
             <div className="rounded-lg border bg-muted/40 p-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Subtotal</p>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    {isManpower ? 'Monthly Subtotal' : 'Subtotal'}
+                  </p>
                   <p className="text-sm font-semibold tabular-nums">{money(calc.subtotal)}</p>
                 </div>
                 <div>
@@ -1084,27 +1333,56 @@ export function SupplierPosView() {
                   <p className="text-sm font-semibold tabular-nums">{money(calc.vatAmount)}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Total</p>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    {isManpower ? 'Total / Month' : 'Total'}
+                  </p>
                   <p className="text-base font-bold tabular-nums">{money(calc.total)}</p>
                 </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs text-muted-foreground">
+                {isManpower ? (
+                  <span>
+                    Total Workers:{' '}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {calc.totalWorkers.toLocaleString('en-US')}
+                    </span>
+                  </span>
+                ) : null}
+                {calc.durationMonths ? (
+                  <span>
+                    PO Value ({calc.durationMonths} months):{' '}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {money(calc.poValue ?? 0)}
+                    </span>
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="po-notes">Notes</Label>
+            <Label htmlFor="po-notes">Terms &amp; Conditions (one per line)</Label>
             <Textarea
               id="po-notes"
               value={form.notes}
               onChange={(e) => setField('notes', e.target.value)}
-              placeholder="Optional notes shown on the printed purchase order"
-              rows={3}
+              placeholder={'e.g.\nValid Iqama / work permit / GOSI for every worker before mobilization.\nAccommodation, transport and food are the supplier\u2019s responsibility.'}
+              rows={4}
             />
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={openDraftPreview}
+              disabled={saving}
+            >
+              <Eye className="h-4 w-4" />
+              Preview
             </Button>
             <Button onClick={() => void handleSubmit()} disabled={saving}>
               {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create P.O.'}
@@ -1113,8 +1391,19 @@ export function SupplierPosView() {
         </DialogContent>
       </Dialog>
 
-      {/* ---- Print dialog ---- */}
-      <SupplierPoPrintDialog po={printPo} open={printOpen} onOpenChange={setPrintOpen} />
+      {/* ---- Print dialog (saved documents + live drafts) ---- */}
+      <SupplierPoPrintDialog
+        po={printPo ?? draftPreview}
+        letterhead={letterhead}
+        open={printOpen}
+        onOpenChange={(v) => {
+          setPrintOpen(v)
+          if (!v) {
+            setPrintPo(null)
+            setDraftPreview(null)
+          }
+        }}
+      />
     </div>
   )
 }

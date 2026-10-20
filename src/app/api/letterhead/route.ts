@@ -3,18 +3,22 @@
 // header/footer/full-page artwork, layout mode, reserved heights and the
 // textual company-details toggle. Images arrive as base64 data URLs and are
 // validated (PNG/JPEG only, magic-byte sniffed, ≤ 2 MB decoded).
-// GET requires quotations.view (print needs it); PUT requires quotations.edit.
+// GET requires quotations.view OR supplierpo.view (both print documents read
+// this config); PUT requires quotations.edit.
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { getSessionUser, hasPermission } from '@/lib/auth'
 import { validateImageDataUrl } from '@/lib/image-data-url'
 import {
   ok,
   badRequest,
+  forbidden,
   serverError,
   requirePermission,
   isResponse,
   logActivity,
+  unauthorized,
 } from '@/lib/api-helpers'
 import type { LetterheadConfig } from '@/lib/types'
 
@@ -51,8 +55,13 @@ async function readConfig(): Promise<LetterheadConfig> {
 
 export async function GET() {
   try {
-    const auth = await requirePermission('quotations.view')
-    if (isResponse(auth)) return auth
+    const user = await getSessionUser()
+    if (!user) return unauthorized()
+    // The company letterhead powers the printed Quotation AND Supplier P.O.
+    // documents — either module's view permission grants read access.
+    if (!hasPermission(user, 'quotations.view') && !hasPermission(user, 'supplierpo.view')) {
+      return forbidden()
+    }
     return ok(await readConfig())
   } catch (err) {
     console.error('[api/letterhead GET]', err)

@@ -1,7 +1,11 @@
 // Supplier P.O. API — GET (paginated list + totals + year options) / POST (create).
-// Purchase orders sent TO suppliers: po numbers auto-generated (PO-YYYY-NNNN)
-// and every money figure (line totals, subtotal, VAT, total) is recomputed
-// SERVER-side from the items — the client's math is only a live preview.
+// Manpower purchase orders sent TO suppliers: po numbers auto-generated
+// (MPO-YYYY-NNNN) and every money figure (line totals, subtotal, VAT, total)
+// is recomputed SERVER-side from the items — the client's math is only a
+// live preview.
+//   • manpower mode (hoursPerMonth set, e.g. 260):
+//       AMOUNT = No. of Workers × Hourly Rate × hours/month
+//   • direct mode (hoursPerMonth null): AMOUNT = Qty × Unit Price
 // Filters: ?search (po no / supplier / attention) ?status ?year ?page ?pageSize
 import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
@@ -43,6 +47,16 @@ const poSchema = z.object({
   issueDate: z.string().min(1, 'Issue date is required'),
   expectedDate: z.string().nullable().optional(),
   status: z.enum(PO_STATUSES).optional(),
+  quotationRef: z.string().nullable().optional(),
+  paymentTerms: z.string().nullable().optional(),
+  workSite: z.string().nullable().optional(),
+  startDate: z.string().nullable().optional(),
+  durationMonths: z.coerce.number().int().min(1).max(600).nullable().optional(),
+  workingHours: z.string().nullable().optional(),
+  hoursPerMonth: z.coerce.number().int().min(1).max(744).nullable().optional(),
+  supplierAddress: z.string().nullable().optional(),
+  supplierVat: z.string().nullable().optional(),
+  supplierCr: z.string().nullable().optional(),
   vatRate: z.coerce
     .number()
     .min(0, 'VAT rate cannot be negative')
@@ -52,9 +66,9 @@ const poSchema = z.object({
   items: z.array(itemSchema).min(1, 'At least one line item is required').max(200, 'Too many line items'),
 })
 
-/** Next PO number for a year: PO-YYYY-NNNN (max existing + 1). */
+/** Next PO number for a year: MPO-YYYY-NNNN (max existing + 1). */
 async function nextPoNumber(tx: Prisma.TransactionClient, year: number): Promise<string> {
-  const prefix = `PO-${year}-`
+  const prefix = `MPO-${year}-`
   const existing = await tx.supplierPo.findMany({
     where: { poNumber: { startsWith: prefix } },
     select: { poNumber: true },
@@ -181,10 +195,15 @@ export async function POST(req: NextRequest) {
     const expectedDate = parseDate(body.expectedDate)
     if (body.expectedDate && !expectedDate) return badRequest('Invalid expected date')
 
+    const startDate = parseDate(body.startDate)
+    if (body.startDate && !startDate) return badRequest('Invalid start date')
+
     const supplierName = body.supplierName.trim()
     if (!supplierName) return badRequest('Supplier name is required')
 
-    // Server-side math — line totals, subtotal, VAT, total
+    // Server-side math — line totals, subtotal, VAT, total.
+    // Manpower mode: AMOUNT = workers × hourly rate × hours/month.
+    const hoursPerMonth = body.hoursPerMonth ?? null
     const items = body.items.map((it, i) => {
       const quantity = round2(it.quantity)
       const unitPrice = round2(it.unitPrice)
@@ -194,7 +213,7 @@ export async function POST(req: NextRequest) {
         unit: it.unit?.trim() || null,
         quantity,
         unitPrice,
-        lineTotal: round2(quantity * unitPrice),
+        lineTotal: round2(quantity * unitPrice * (hoursPerMonth ?? 1)),
       }
     })
     const vatRate = body.vatRate ?? 0.15
@@ -214,6 +233,16 @@ export async function POST(req: NextRequest) {
           issueDate,
           expectedDate,
           status: body.status ?? 'draft',
+          quotationRef: body.quotationRef?.trim() || null,
+          paymentTerms: body.paymentTerms?.trim() || null,
+          workSite: body.workSite?.trim() || null,
+          startDate,
+          durationMonths: body.durationMonths ?? null,
+          workingHours: body.workingHours?.trim() || null,
+          hoursPerMonth,
+          supplierAddress: body.supplierAddress?.trim() || null,
+          supplierVat: body.supplierVat?.trim() || null,
+          supplierCr: body.supplierCr?.trim() || null,
           subtotal,
           vatRate,
           vatAmount,

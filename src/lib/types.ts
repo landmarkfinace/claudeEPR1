@@ -930,6 +930,16 @@ export type SupplierPoRow = {
   issueDate: string
   expectedDate: string | null
   status: string
+  quotationRef: string | null
+  paymentTerms: string | null
+  workSite: string | null
+  startDate: string | null
+  durationMonths: number | null
+  workingHours: string | null
+  hoursPerMonth: number | null
+  supplierAddress: string | null
+  supplierVat: string | null
+  supplierCr: string | null
   subtotal: number
   vatRate: number
   vatAmount: number

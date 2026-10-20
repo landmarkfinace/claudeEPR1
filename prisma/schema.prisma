@@ -487,18 +487,29 @@ model NameListEntry {
 
 model SupplierPo {
   id            String    @id @default(cuid())
-  poNumber      String    @unique // e.g. PO-2026-0001
+  poNumber      String    @unique // e.g. MPO-2026-0001
   supplierName  String
   supplierPhone String?
   attention     String?
   issueDate     DateTime
   expectedDate  DateTime?
   status        String    @default("draft") // draft | ordered | received | cancelled
+  // ── manpower P.O. template fields ──
+  quotationRef  String? // ORDER — linked quotation reference
+  paymentTerms  String? // ORDER — e.g. "Net 30 Days"
+  workSite      String? // ASSIGNMENT — e.g. "Dammam - Al Faisaliyah"
+  startDate     DateTime? // ASSIGNMENT — mobilization start
+  durationMonths Int? // ASSIGNMENT — e.g. 6 → PO Value = total × months
+  workingHours  String? // ASSIGNMENT — e.g. "10 hrs × 26 days"
+  hoursPerMonth Int? // MANPOWER basis — null = direct amounts, 260 = hourly manpower mode
+  supplierAddress String? // PARTIES — supplier address line
+  supplierVat   String? // PARTIES — supplier VAT number
+  supplierCr    String? // PARTIES — supplier C.R. number
   subtotal      Float     @default(0)
   vatRate       Float     @default(0.15)
   vatAmount     Float     @default(0)
   total         Float     @default(0)
-  notes         String?
+  notes         String? // TERMS — one condition per line, auto-numbered on print
   createdByName String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

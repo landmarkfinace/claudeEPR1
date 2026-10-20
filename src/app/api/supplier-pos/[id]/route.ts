@@ -43,6 +43,16 @@ const poUpdateSchema = z.object({
   issueDate: z.string().min(1, 'Issue date is required'),
   expectedDate: z.string().nullable().optional(),
   status: z.enum(PO_STATUSES),
+  quotationRef: z.string().nullable().optional(),
+  paymentTerms: z.string().nullable().optional(),
+  workSite: z.string().nullable().optional(),
+  startDate: z.string().nullable().optional(),
+  durationMonths: z.coerce.number().int().min(1).max(600).nullable().optional(),
+  workingHours: z.string().nullable().optional(),
+  hoursPerMonth: z.coerce.number().int().min(1).max(744).nullable().optional(),
+  supplierAddress: z.string().nullable().optional(),
+  supplierVat: z.string().nullable().optional(),
+  supplierCr: z.string().nullable().optional(),
   vatRate: z.coerce
     .number()
     .min(0, 'VAT rate cannot be negative')
@@ -99,10 +109,15 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const expectedDate = parseDate(body.expectedDate)
     if (body.expectedDate && !expectedDate) return badRequest('Invalid expected date')
 
+    const startDate = parseDate(body.startDate)
+    if (body.startDate && !startDate) return badRequest('Invalid start date')
+
     const supplierName = body.supplierName.trim()
     if (!supplierName) return badRequest('Supplier name is required')
 
-    // Server-side math — line totals, subtotal, VAT, total
+    // Server-side math — line totals, subtotal, VAT, total.
+    // Manpower mode: AMOUNT = workers × hourly rate × hours/month.
+    const hoursPerMonth = body.hoursPerMonth ?? null
     const items = body.items.map((it, i) => {
       const quantity = round2(it.quantity)
       const unitPrice = round2(it.unitPrice)
@@ -112,7 +127,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
         unit: it.unit?.trim() || null,
         quantity,
         unitPrice,
-        lineTotal: round2(quantity * unitPrice),
+        lineTotal: round2(quantity * unitPrice * (hoursPerMonth ?? 1)),
       }
     })
     const vatRate = body.vatRate ?? 0.15
@@ -145,6 +160,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
           issueDate,
           expectedDate,
           status: body.status,
+          quotationRef: body.quotationRef?.trim() || null,
+          paymentTerms: body.paymentTerms?.trim() || null,
+          workSite: body.workSite?.trim() || null,
+          startDate,
+          durationMonths: body.durationMonths ?? null,
+          workingHours: body.workingHours?.trim() || null,
+          hoursPerMonth,
+          supplierAddress: body.supplierAddress?.trim() || null,
+          supplierVat: body.supplierVat?.trim() || null,
+          supplierCr: body.supplierCr?.trim() || null,
           subtotal,
           vatRate,
           vatAmount,
