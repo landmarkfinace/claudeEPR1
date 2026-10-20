@@ -19,7 +19,12 @@
 //
 // Pagination model: EXPLICIT A4 pages (210 × 296.5mm — 0.5mm slack prevents
 // blank interleaved pages in Chrome's print pipeline). Items are chunked with
-// a conservative row-height estimator; every page repeats the table header,
+// a conservative row-height estimator. The tail (terms|totals → included|
+// excluded → signatures) then FLOWS block-by-block onto the last items page
+// while it fits, and continues on a fresh page that starts at the TOP under a
+// "Continued" strip — no stranded voids. Leftover room on each items page is
+// given back to the table rows (capped stretch) so short documents fill the
+// A4 nicely instead of leaving a hole. Every page repeats the table header,
 // carries the letterhead artwork and a "Page X of Y" footer. Signature/stamp
 // assets are absolutely positioned on the LAST page using percent-of-page
 // coordinates saved per quotation — exactly reproducing the AssetPlacer canvas.
@@ -91,51 +96,71 @@ const PAGE_W_MM = 210
 const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see header comment)
 const SIDE_PAD_MM = 12
 
+// "Continued" strip reserved at the top of every page ≥ 2
+const CONT_HEADER_MM = 12
+// head-room required before a tail block may join the last items page
+const PLACE_BUFFER_MM = 5
+// slack kept in reserve when stretching rows (estimator safety)
+const STRETCH_SAFE_MM = 5
+// per-row stretch cap — keeps the stretched table tasteful
+const MAX_ROW_STRETCH = 6.5
+// items-table TOTAL row height
+const TOTAL_ROW_MM = 8
+// signatures + computer-generated line (calibrated against real prints)
+const SIGNATURES_MM = 48
+// a final page with this much slack gets the roomier signature treatment
+const ROOMY_SLACK_MM = 70
+
 type PageGeometry = {
   padTop: number
   padBottom: number
   page1Fixed: number
 }
 
+// page1Fixed values are calibrated against real Chrome A4 prints of this
+// template (typed header ≈ 23mm + chevron ≈ 23mm + party boxes ≈ 35mm +
+// items heading ≈ 7mm + inter-section margins). Over-reserving is safe
+// (rows are themselves over-estimated); under-reserving clips content.
 function geometryFor(letterhead: LetterheadConfig): PageGeometry {
   switch (letterhead.mode) {
     case 'full':
       return {
         padTop: letterhead.headerHeightMm + 4,
         padBottom: Math.max(letterhead.footerHeightMm + 4, 12),
-        page1Fixed: 62,
+        page1Fixed: 80,
       }
     case 'header':
       return {
         padTop: letterhead.headerHeightMm + 3,
         padBottom: 12,
-        page1Fixed: 62,
+        page1Fixed: 80,
       }
     case 'header_footer':
       return {
         padTop: letterhead.headerHeightMm + 3,
         padBottom: letterhead.footerHeightMm + 3,
-        page1Fixed: 62,
+        page1Fixed: 80,
       }
     default:
-      return { padTop: 10, padBottom: 13, page1Fixed: 78 }
+      return { padTop: 10, padBottom: 13, page1Fixed: 90 }
   }
 }
 
 /** Conservative table-row height estimate in mm (over-estimate = safe page breaks). */
 function rowHeightMm(it: DocItemRow): number {
   const CHARS_PER_LINE = 46
+  const SUB_CHARS_PER_LINE = 60
   const lines = Math.max(1, Math.ceil(it.description.length / CHARS_PER_LINE))
-  return 7 + 4 * (lines - 1) + (it.subText ? 3.2 : 0)
+  const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / SUB_CHARS_PER_LINE)) : 0
+  return 7 + 4 * (lines - 1) + 3.5 * subLines
 }
 
-function textBlockMm(text: string | null | undefined, baseOverheadMm: number): number {
+/** Wrapped line count for a text block at ~charsPerLine characters per line. */
+function lineCount(text: string | null | undefined, charsPerLine: number): number {
   if (!text) return 0
-  const CHARS_PER_LINE = 78
-  const lines = text
+  return text
     .split('\n')
-    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / CHARS_PER_LINE)), 0)
-  return baseOverheadMm + 4.2 * lines
+    .reduce((n, line) => n + Math.max(1, Math.ceil(line.trim().length / charsPerLine)), 0)
 }
 
 /** Split a bullet-list text into trimmed non-empty lines. */
@@ -165,27 +190,47 @@ function numberedTerms(terms: string): Array<{ n: string; text: string }> {
   })
 }
 
+/** Tail sections that flow after the items table, in document order. */
+type TailBlock = 'termsTotals' | 'incExc' | 'signatures'
+
+/** One explicit A4 page: its item chunk, stretched row height and tail blocks. */
+type PagePlan = {
+  items: DocItemRow[]
+  /** extra mm given to every item row on this page (fills the A4 nicely) */
+  rowExtraMm: number
+  /** tail blocks rendered on this page, in order */
+  blocks: TailBlock[]
+  /** final page with lots of slack → roomier signature area */
+  roomy: boolean
+}
+
 /**
- * Greedy pagination: chunk items into explicit pages, then verify the tail
- * (terms/totals + boxes + signatures) fits on the final page — if not, the
- * tail moves to its own page.
+ * Flow-fill pagination:
+ *   1. chunk items across pages (conservative row estimates → safe breaks);
+ *   2. flow the tail blocks, in order, onto the last items page while they
+ *      fit (with a placement buffer); the rest continues on a fresh page
+ *      that starts at the TOP — signatures never strand alone on a page;
+ *   3. hand each page's leftover room back to its item rows (capped), so
+ *      pages fill nicely instead of ending two-thirds down;
+ *   4. flag a sparse final page so the signature area can breathe.
  */
-function paginate(
+function planPages(
   items: DocItemRow[],
   geo: PageGeometry,
-  tailMm: number
-): DocItemRow[][] {
+  tail: { termsTotals: number; incExc: number; hasIncExc: boolean }
+): PagePlan[] {
   const availFirst = PAGE_H_MM - geo.padTop - geo.padBottom - geo.page1Fixed
-  const availRest = PAGE_H_MM - geo.padTop - geo.padBottom
-  const pages: DocItemRow[][] = []
+  const availRest = PAGE_H_MM - geo.padTop - geo.padBottom - CONT_HEADER_MM
+
+  // 1) chunk items
+  const chunks: DocItemRow[][] = []
   let cur: DocItemRow[] = []
   let used = 0
   let limit = availFirst
-
   for (const it of items) {
     const h = rowHeightMm(it)
     if (used + h > limit && cur.length > 0) {
-      pages.push(cur)
+      chunks.push(cur)
       cur = []
       used = 0
       limit = availRest
@@ -193,13 +238,69 @@ function paginate(
     cur.push(it)
     used += h
   }
-  pages.push(cur)
+  chunks.push(cur)
 
-  // Tail must fit on the last page — otherwise it moves to a fresh page
-  const lastAvail = pages.length === 1 ? availFirst : availRest
-  if (used + tailMm > lastAvail) {
-    pages.push([]) // empty items chunk = tail-only page
+  // 2) flow tail blocks onto the last items page while they fit
+  const cap = chunks.length === 1 ? availFirst : availRest
+  const blockH: Record<TailBlock, number> = {
+    termsTotals: tail.termsTotals,
+    incExc: tail.incExc,
+    signatures: SIGNATURES_MM,
   }
+  const order: TailBlock[] = [
+    'termsTotals',
+    ...(tail.hasIncExc ? (['incExc'] as TailBlock[]) : []),
+    'signatures',
+  ]
+  const blocks: TailBlock[] = []
+  const deferred: TailBlock[] = []
+  let flowing = true
+  for (const b of order) {
+    if (flowing && used + TOTAL_ROW_MM + blockH[b] + PLACE_BUFFER_MM <= cap) {
+      blocks.push(b)
+      used += blockH[b]
+    } else {
+      flowing = false
+      deferred.push(b)
+    }
+  }
+  // signatures should not be stranded alone on a fresh page
+  if (deferred.length === 1 && deferred[0] === 'signatures' && blocks.length > 0) {
+    deferred.unshift(blocks.pop() as TailBlock)
+  }
+
+  const pages: PagePlan[] = chunks.map((c) => ({
+    items: c,
+    rowExtraMm: 0,
+    blocks: [] as TailBlock[],
+    roomy: false,
+  }))
+  pages[pages.length - 1].blocks = blocks
+  if (deferred.length > 0) {
+    pages.push({ items: [], rowExtraMm: 0, blocks: deferred, roomy: false })
+  }
+
+  // 3) give leftover room back to the rows (fills the A4 nicely)
+  for (let i = 0; i < pages.length; i++) {
+    const p = pages[i]
+    if (p.items.length === 0) continue
+    const pageCap = i === 0 ? availFirst : availRest
+    const rowsMm = p.items.reduce((s, it) => s + rowHeightMm(it), 0) + TOTAL_ROW_MM
+    const blocksMm = p.blocks.reduce((s, b) => s + blockH[b], 0)
+    const slack = pageCap - rowsMm - blocksMm
+    if (slack > STRETCH_SAFE_MM) {
+      p.rowExtraMm = Math.min((slack - STRETCH_SAFE_MM) / p.items.length, MAX_ROW_STRETCH)
+    }
+  }
+
+  // 4) sparse final page → roomier signature treatment
+  const fin = pages[pages.length - 1]
+  const finCap = pages.length === 1 ? availFirst : availRest
+  const finRows =
+    fin.items.reduce((s, it) => s + rowHeightMm(it), 0) + (fin.items.length ? TOTAL_ROW_MM : 0)
+  const finBlocks = fin.blocks.reduce((s, b) => s + blockH[b], 0)
+  fin.roomy = finCap - finRows - finBlocks > ROOMY_SLACK_MM
+
   return pages
 }
 
@@ -356,16 +457,22 @@ export function QuotationDocument({
   const contractValue = contractMonths ? round2(q.total * contractMonths) : null
   const subjectLine = (q.subject || 'Manpower Supply Proposal').toUpperCase()
 
-  // Tail = everything after the items table on the last page
-  const tailMm =
-    44 + // terms | totals row (+ amount in words)
-    (inclusions.length || exclusions.length ? 24 : 0) + // INCLUDED | EXCLUDED boxes
-    textBlockMm(q.notes, 10) +
-    38 + // signature blocks with dashed stamp circles
-    4
-  const pages = paginate(items, geo, tailMm)
+  // Tail block heights — calibrated against real Chrome A4 prints (kept a
+  // touch generous so page breaks stay safe), fed to the flow-fill paginator.
+  const termsLines = terms.reduce((n, t) => n + lineCount(t.text, 66), 0)
+  const notesLines = lineCount(q.notes, 66)
+  const termsBoxMm = 11.4 + termsLines * 4.2 + (q.notes ? 12.8 + notesLines * 4.2 : 0)
+  const totalsBoxMm = (2 + (q.discount > 0 ? 2 : 0) + (contractMonths ? 1 : 0)) * 6.2 + 21
+  const hasIncExc = inclusions.length > 0 || exclusions.length > 0
+  const incLines = inclusions.reduce((n, l) => n + lineCount(l, 64), 0)
+  const excLines = exclusions.reduce((n, l) => n + lineCount(l, 64), 0)
+  const plans = planPages(items, geo, {
+    termsTotals: Math.max(termsBoxMm, totalsBoxMm) + 10.5,
+    incExc: 13.7 + Math.max(incLines, excLines) * 3.4,
+    hasIncExc,
+  })
   // The last page that actually carries items — the table's TOTAL row goes there
-  const lastItemsPageIdx = pages.reduce((acc, p, i) => (p.length > 0 ? i : acc), 0)
+  const lastItemsPageIdx = plans.reduce((acc, p, i) => (p.items.length > 0 ? i : acc), 0)
 
   // Shared box style: gold left accent + light background (template boxes)
   const boxCls = 'rounded-[4px] border border-l-[1.4mm] p-[3mm]'
@@ -394,8 +501,9 @@ export function QuotationDocument({
 
   return (
     <div className="print-area mx-auto flex w-full flex-col items-center gap-6 bg-transparent [print-color-adjust:exact] [-webkit-print-color-adjust:exact] print:gap-0">
-      {pages.map((chunk, pageIdx) => {
-        const isLast = pageIdx === pages.length - 1
+      {plans.map((plan, pageIdx) => {
+        const chunk = plan.items
+        const isLast = pageIdx === plans.length - 1
         return (
           <div
             key={pageIdx}
@@ -615,16 +723,43 @@ export function QuotationDocument({
                   </h3>
                 </>
               ) : (
-                /* continuation header on later item pages (tail-only pages skip it) */
-                chunk.length > 0 ? (
-                  <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
-                    <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: NAVY }}>
-                      {companyName} — Quotation{' '}
-                      <span className="font-mono">{q.quoteNumber}</span>
+                /* continuation strip on EVERY later page — items or tail-only */
+                <div
+                  className="mb-[3mm] flex items-center justify-between gap-3 border-b-2 pb-[1.8mm]"
+                  style={{ borderColor: NAVY }}
+                >
+                  <div className="flex min-w-0 items-center gap-[2.5mm]">
+                    {letterhead.mode === 'none' ? (
+                      <img
+                        src={settings.logo ?? '/logo-mark.png'}
+                        alt=""
+                        aria-hidden
+                        className="h-[8mm] w-[8mm] shrink-0 object-contain"
+                      />
+                    ) : null}
+                    <p
+                      className="truncate text-[11px] font-extrabold uppercase tracking-[0.12em]"
+                      style={{ color: NAVY }}
+                    >
+                      {companyName} — Quotation <span className="font-mono">{q.quoteNumber}</span>
+                      <span className="mx-[2mm] font-normal" style={{ color: MUTED }}>
+                        ·
+                      </span>
+                      <span
+                        className="font-semibold normal-case tracking-normal"
+                        style={{ color: DARK_NAVY }}
+                      >
+                        {q.clientName}
+                      </span>
                     </p>
-                    <p className="text-[10px] italic" style={{ color: MUTED }}>continued</p>
                   </div>
-                ) : null
+                  <p
+                    className="shrink-0 rounded-[2px] px-[2mm] py-[0.7mm] text-[7.5px] font-bold uppercase tracking-[0.22em] text-white"
+                    style={{ background: GOLD }}
+                  >
+                    Continued
+                  </p>
+                </div>
               )}
 
               {/* items chunk — thead repeats on every page (tail-only pages skip the table) */}
@@ -677,6 +812,10 @@ export function QuotationDocument({
                           style={{
                             background: i % 2 === 1 ? LIGHT_BG : '#FFFFFF',
                             borderBottom: `0.3mm solid ${BORDER}`,
+                            // flow-fill: leftover page room → taller, airier rows
+                            ...(plan.rowExtraMm > 0.4
+                              ? { height: `${rowHeightMm(it) + plan.rowExtraMm}mm` }
+                              : null),
                           }}
                         >
                           <td className={`${tdCls} text-center tabular-nums`} style={{ color: MUTED }}>
@@ -745,9 +884,9 @@ export function QuotationDocument({
                 </table>
               ) : null}
 
-              {/* ── tail (terms | totals / boxes / signatures) — last page only ── */}
-              {isLast ? (
-                <div className="mt-auto flex flex-col">
+              {/* ── tail blocks — flow after the items table, page by page ── */}
+              {plan.blocks.includes('termsTotals') ? (
+                <>
                   {/* TERMS (left) | TOTALS box (right) */}
                   <section className="mt-[3.5mm] grid grid-cols-[1fr_86mm] items-start gap-[3mm]">
                     <div className={boxCls} style={boxStyle}>
@@ -836,16 +975,21 @@ export function QuotationDocument({
                     <span className="font-semibold not-italic uppercase tracking-wide">Amount in words:</span>{' '}
                     {amountInWords(q.total, currency)}
                   </p>
+                </>
+              ) : null}
 
-                  {/* INCLUDED | EXCLUDED */}
-                  {inclusions.length > 0 || exclusions.length > 0 ? (
-                    <section className="mt-[2.5mm] grid grid-cols-2 gap-[3mm]">
-                      <div className={boxCls} style={boxStyle}>
+              {/* INCLUDED | EXCLUDED — breathes a little more on a sparse
+                  final page (roomy) so the top of the page carries weight */}
+              {plan.blocks.includes('incExc') ? (
+                    <section
+                      className={`mt-[2.5mm] grid grid-cols-2 gap-[3mm] ${plan.roomy ? 'gap-y-[1mm]' : ''}`}
+                    >
+                      <div className={plan.roomy ? 'rounded-[4px] border border-l-[1.4mm] p-[4.5mm]' : boxCls} style={boxStyle}>
                         <p className={boxHeaderCls} style={{ color: DARK_GOLD }}>
                           Included
                         </p>
                         {inclusions.length > 0 ? (
-                          <ul className="mt-[1.2mm] space-y-[0.8mm]">
+                          <ul className={`mt-[1.2mm] ${plan.roomy ? 'space-y-[1.8mm]' : 'space-y-[0.8mm]'}`}>
                             {inclusions.map((l) => (
                               <li key={l} className="flex gap-[1.5mm] text-[9px] leading-snug text-neutral-700">
                                 <span className="mt-[0.7mm] h-[1.4mm] w-[1.4mm] shrink-0 rounded-full" style={{ background: GOLD }} />
@@ -857,12 +1001,12 @@ export function QuotationDocument({
                           <p className="mt-[1.2mm] text-[9px]" style={{ color: MUTED }}>—</p>
                         )}
                       </div>
-                      <div className={boxCls} style={boxStyle}>
+                      <div className={plan.roomy ? 'rounded-[4px] border border-l-[1.4mm] p-[4.5mm]' : boxCls} style={boxStyle}>
                         <p className={boxHeaderCls} style={{ color: DARK_GOLD }}>
                           Excluded
                         </p>
                         {exclusions.length > 0 ? (
-                          <ul className="mt-[1.2mm] space-y-[0.8mm]">
+                          <ul className={`mt-[1.2mm] ${plan.roomy ? 'space-y-[1.8mm]' : 'space-y-[0.8mm]'}`}>
                             {exclusions.map((l) => (
                               <li key={l} className="flex gap-[1.5mm] text-[9px] leading-snug text-neutral-700">
                                 <span className="mt-[0.7mm] h-[1.4mm] w-[1.4mm] shrink-0 rounded-full" style={{ background: MUTED }} />
@@ -875,17 +1019,22 @@ export function QuotationDocument({
                         )}
                       </div>
                     </section>
-                  ) : null}
+              ) : null}
 
-                  {/* SIGNATURES — APPROVED BY | ACCEPTED BY (dashed stamp circles) */}
-                  <section className="mt-[4mm] grid grid-cols-2 gap-[6mm]">
+              {/* SIGNATURES — APPROVED BY | ACCEPTED BY (dashed stamp circles).
+                  mt-auto pins them to the foot of the page; on a sparse final
+                  page (roomy) the signature lines and stamp circles grow so the
+                  bottom of the document carries more presence. */}
+              {plan.blocks.includes('signatures') ? (
+                <div className="mt-auto" style={{ paddingTop: plan.roomy ? '10mm' : '4mm' }}>
+                  <section className="grid grid-cols-2 gap-[6mm]">
                     <div className="rounded-[4px] border p-[3mm]" style={{ borderColor: BORDER }}>
                       <p className={boxHeaderCls} style={{ color: DARK_GOLD }}>
                         Approved By &mdash; {companyName}
                       </p>
                       <div className="mt-[2.5mm] flex items-end justify-between gap-2">
                         <div className="min-w-0 flex-1 space-y-[1.6mm]">
-                          <div className="border-b border-neutral-500" style={{ height: '9mm' }} />
+                          <div className="border-b border-neutral-500" style={{ height: plan.roomy ? '12.5mm' : '9mm' }} />
                           <p className="text-[9px] text-neutral-700">
                             <span className="font-semibold" style={{ color: MUTED }}>Name: </span>
                             {settings.authorizedSignatory || q.createdByName || preparedBy || '_____________________'}
@@ -900,7 +1049,7 @@ export function QuotationDocument({
                           </p>
                         </div>
                         <div
-                          className="flex h-[22mm] w-[22mm] shrink-0 items-center justify-center rounded-full border-[0.5mm] border-dashed text-center text-[7px] font-bold uppercase leading-tight tracking-wide"
+                          className={`flex ${plan.roomy ? 'h-[26mm] w-[26mm]' : 'h-[22mm] w-[22mm]'} shrink-0 items-center justify-center rounded-full border-[0.5mm] border-dashed text-center text-[7px] font-bold uppercase leading-tight tracking-wide`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           Company
@@ -916,7 +1065,7 @@ export function QuotationDocument({
                       </p>
                       <div className="mt-[2.5mm] flex items-end justify-between gap-2">
                         <div className="min-w-0 flex-1 space-y-[1.6mm]">
-                          <div className="border-b border-neutral-500" style={{ height: '9mm' }} />
+                          <div className="border-b border-neutral-500" style={{ height: plan.roomy ? '12.5mm' : '9mm' }} />
                           <p className="text-[9px] text-neutral-700">
                             <span className="font-semibold" style={{ color: MUTED }}>Name: </span>
                             _____________________
@@ -931,7 +1080,7 @@ export function QuotationDocument({
                           </p>
                         </div>
                         <div
-                          className="flex h-[22mm] w-[22mm] shrink-0 items-center justify-center rounded-full border-[0.5mm] border-dashed text-center text-[7px] font-bold uppercase leading-tight tracking-wide"
+                          className={`flex ${plan.roomy ? 'h-[26mm] w-[26mm]' : 'h-[22mm] w-[22mm]'} shrink-0 items-center justify-center rounded-full border-[0.5mm] border-dashed text-center text-[7px] font-bold uppercase leading-tight tracking-wide`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           Client
@@ -979,7 +1128,7 @@ export function QuotationDocument({
                 {q.referenceNo ? ` · Ref ${q.referenceNo}` : ''}
               </span>
               <span className="shrink-0 tabular-nums">
-                Page {pageIdx + 1} of {pages.length}
+                Page {pageIdx + 1} of {plans.length}
               </span>
             </div>
           </div>

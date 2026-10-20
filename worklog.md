@@ -1864,3 +1864,34 @@ Stage Summary:
 - Demo data: QTN-2026-00001 for Al Noor Development Company (Residential Complex – Dammam, 12 months, 8 trades, template-exact numbers) — boss can open Quotations → print icon to see it.
 - Old generic quotations still render (columns auto-fallback when no rate basis).
 - Next-phase ideas: (1) letterhead artwork upload for quotations matching the template's header/footer zones; (2) quotation → e-invoice conversion; (3) rate-card library of standard trades to speed up new quotes.
+
+---
+Task ID: EI-QTFILL
+Agent: main (Z.ai Code)
+Task: Boss uploaded QT-26.pdf (printed QTN-2026-0001) complaining "Quotations PDF ER MAJE ONEK FAKA. A4 SUNDOR VABE JNI HOI ZDI BORO HOI TAW 2ND PAGE JANI MACING HOI" — too much empty space in the Quotations PDF; A4 should fill nicely, and big content should flow naturally to page 2.
+
+Work Log:
+- Measured the uploaded PDF precisely (pdftotext -bbox, mm mapping) + VLM analysis of both pages:
+  * Page 1: content ended at 200mm of 296.5 (67%) → 83mm bottom void. Root cause: conservative tailMm estimate (≈124mm) forced the WHOLE tail to page 2.
+  * Page 2: tail pinned to bottom via mt-auto → 148mm TOP void, no continuation header (content started at 158mm).
+- Rewrote pagination in src/components/app/print/quotation-print.tsx:
+  * Replaced "tail moves entirely to fresh page" with FLOW-FILL paginator `planPages()` returning PagePlan[] (items chunk + rowExtraMm stretch + tail blocks + roomy flag).
+  * Tail now splits into blocks (termsTotals → incExc → signatures) that flow IN ORDER onto the last items page while they fit (PLACE_BUFFER_MM 5), rest continues on a fresh page FROM THE TOP.
+  * "Signatures never stranded alone" rule: if only signatures defer, the preceding block is pulled with them.
+  * Leftover page room is given back to item rows via explicit <tr height> (capped +6.5mm/row, 5mm reserve) — short docs now fill the A4 with taller, airier template-style rows.
+  * Sparse final page (>70mm slack) → roomy mode: taller signature lines (9→12.5mm), bigger stamp circles (22→26mm), thicker incExc boxes (p-4.5mm, space-y-1.8mm).
+  * Calibrated page1Fixed against real Chrome prints: 'none' 78→90, artwork modes 62→80 (old values under-reserved → overflow risk).
+  * Fixed rowHeightMm: subText now wraps (ceil(len/60) lines × 3.5mm) — was assuming 1 line, causing 18mm real rows estimated at 14.2mm → page overflow with long subTexts (verified with 30-item test quote: page 2 was 124% → fixed to 98%).
+  * New tail-block estimators (termsBox/totalsBox/incExc) calibrated from the real PDF measurements.
+- Continuation strip now renders on EVERY page ≥ 2 (was items-only): logo (none mode) + "Company — Quotation QTN-xxxx · Client" + gold CONTINUED chip.
+- Signatures section keeps mt-auto (pins to page foot — standard business look).
+
+Stage Summary:
+- QA on QTN-2026-0001 (letterhead 'none', 8 items, terms+notes+inc/exc+contract 12mo):
+  * Page 1: content 3%→92% (table rows 10.3→12.4mm stretched; terms|totals + amount-in-words at bottom). Printed PDF bbox: content ends 268.5mm of 296.5 = 90.5% (was 67%).
+  * Page 2: continuation header at 12mm (was 158mm!), incExc right below, signatures pinned bottom (roomy). VLM: "professionally filled, no defects".
+  * Zero overflow (scrollHeight == clientHeight on all pages); CDP print-to-PDF (A4, print media) = 2 pages exactly like preview.
+- QA on 30-item heavy test quote (created via API, then deleted): 4 pages, fills 96/98/84/96%, zero overflow, repeated table headers + continuation strips on every page.
+- tsc --noEmit clean, bun run lint clean, dev.log no errors, dashboard/quotations regression OK.
+- Verification artifacts: /tmp/qtqa/ (printed-A4.pdf, newprt-*.png, bbox html).
+- Assets (signature/stamp percent-positioning) untouched — still pinned to last page, signatures stay at the foot so existing placements remain aligned.
