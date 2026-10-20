@@ -692,6 +692,16 @@ model EInvoice {
   // (e.g. ["project","paymentTerms"]) — auto-translate must not overwrite these
   arManualFlags String   @default("[]")
   showReceiverSignature Boolean @default(true) // per-invoice override of the config default
+  // ---- ZATCA phase designation (PER INVOICE — Phase 1 & Phase 2 are separate) ----
+  // 1 = Phase 1 (Generation): QR with TLV tags 1-5 only, no crypto, no portal
+  // 2 = Phase 2 (Integration): 8-tag cryptographic stamp + UBL + Fatoora submission
+  zatcaPhase    Int      @default(1)
+  // Phase 2 submission outcome (set by /zatca/report): reported | cleared | rejected
+  zatcaStatus        String?
+  zatcaResponse      String? // full gateway JSON (simulation or production)
+  zatcaSubmittedAt   DateTime?
+  zatcaSubmissionMode String? // simulation | production
+  signature    String?  // base64 ECDSA signature of the invoice hash (Phase 2 stamp)
   // Credit/Debit note linkage — corrections reference the original invoice
   relatedInvoiceId String?
   relatedInvoice   EInvoice? @relation("NoteRef", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)

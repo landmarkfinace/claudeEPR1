@@ -1785,3 +1785,36 @@ Stage Summary:
 - E-Invoice module COMPLETE per the boss's 10-section spec: exact-image design (brand colors Navy #132A4A / Dark Navy #0C1D33 / Gold #C0934C family, A4 portrait), full-page letterhead w/ editable 35/22mm reserved bands on every page + repeated table header + Page X of Y | صفحة X من Y, EVERY label AND value bilingual (EN left / AR right, _en/_ar DB fields), auto Arabic translation (blur + per-field button + Translate All; manual edits marked & never overwritten; glossary always wins; translation memory reuses; drafts only — locked after issue; z-ai builtin / Google / DeepL providers w/ API key in Settings), 10-column items table w/ per-line discount + VAT 15%/0% + 2-decimal thousands separators, EN+AR amount in words, bank details box (Bank+IBAN left / Account+SWIFT right), totals box w/ highlighted TOTAL DUE + Amount Paid + Balance Due, bottom row QR | Receiver (optional, per-invoice + default toggle) | Authorized (settings image) | Stamp (settings image, circle), ZATCA 5-tag TLV QR (≥30mm — 32mm actual, black on white, quiet zone 4 modules, ECC M, 600px PNG), draft→Issue→LOCKED (400s) w/ UUID + ICV + previous-invoice-hash chain stored, credit/debit notes referencing the original invoice number, scanned signed-copy uploads post-issue (no unlock), invoice list w/ search + client/date/status(overdue) filters, Preview/Print-Save-PDF/Duplicate, payment recording updating status (Partially Paid/Paid).
 - PDF: browser Print → "Save as PDF" at 100% A4 (letterhead prints as full-page background; margins 0 in @page so the letterhead IS the page).
 - Next-phase ideas: (1) convert accepted quotation → e-invoice; (2) e-invoice PDF direct server-side download; (3) ZATCA Phase 2 report/clearance submission UI for e-invoices (chain data already stored); (4) translation memory viewer/cleanup page; (5) recurring invoice templates.
+
+---
+Task ID: EI-P12 (E-Invoice Phase 1/2 separation + ZATCA connect + client quick-add + demo data)
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "E-Invoice e Phase 1 and phase 2 alada thakbe and phase 2 zatca connect korar system banabe. zkn phase 1 lagbe use korbo zkn 2 lagbe use korbo. emn banaw ar client add kore save rakha jabe. demo invoice banaio kicu jeno dekte pari kmn holo."
+
+Work Log:
+- Prisma: EInvoice += zatcaPhase (1|2, default 1), zatcaStatus (reported|cleared|rejected), zatcaResponse, zatcaSubmittedAt, zatcaSubmissionMode (simulation|production), signature (base64 ECDSA of invoice hash). db:push OK.
+- lib/zatca.ts: exported getZatcaKeys / signHash / ecPublicKeyBase64 (was private).
+- lib/e-invoice.ts: buildEInvoiceQrPayload now PHASE-AWARE — P1 = 5 TLV tags; P2 with complete stamp = full 8-tag crypto QR (hash + signature + public key). NEW buildEInvoiceSubmission(): deterministic UBL rebuild + stamp reuse; re-signs + persists when the stored stamp drifts (Settings changes after issue).
+- Issue route: Phase 2 documents get the ECDSA signature at issue time (8-tag QR ready); activity log records the phase.
+- NEW /api/e-invoices/[id]/zatca/report: Phase 2 only (P1 → 400 with a clear "switch while draft" message), draft → 400. Local validation checklist (seller VAT, buyer VAT warning, totals vs recomputed items, line items, crypto stamp). Simulation mode → realistic CLEARED response persisted; production (preprod/prod + CSID token) → real POST to Fatoora clearance endpoint (standard B2B), 15s timeout, 502 on network failure. Shares the SAME connection profile as the Invoices module (Settings → ZATCA).
+- NEW /api/e-invoices/[id]/zatca/ubl: UBL 2.1 XML download (attachment; P2 only).
+- QR route: phase-aware (P2 unsigned draft gracefully falls back to 5 tags until issued+stamped).
+- e-invoices route GET: ?zatcaPhase=1|2 filter; POST/[id] PUT accept zatcaPhase (draft only).
+- mappers/types: zatcaPhase/zatcaStatus/zatcaSubmittedAt/zatcaSubmissionMode mapped end-to-end (EInvoiceRow + zod schema).
+- Frontend e-invoices.tsx: ZATCA Phase selector (two info cards: P1 Generation navy/gold, P2 Integration emerald) in the form; PhaseChip (P1/P2) + ZatcaStatusBadge in list rows (desktop table + mobile cards); phase FilterSelect; CloudUpload row action for issued P2 (amber pending / emerald cleared); overflow menu gains "Submit to ZATCA" (mobile) + "Download UBL XML" (P2 issued).
+- NEW e-invoice-zatca-submit.tsx: EInvoiceZatcaSubmitDialog (connection profile summary w/ env badge + EGS + CSID state + gateway + last test; current status; submit → validation checklist; UBL download) + downloadEInvoiceUbl helper. Reuses ZatcaChecksList/ZatcaStatusBadge from the Invoice module dialog.
+- Quick-Add Client: "New Client" button inside the E-Invoice form → dialog (name EN/AR, contact, phone, email, city, VAT, CR, address) → POST /api/clients → saved permanently → auto-selected + fields filled. Tested full flow (saved → auto-fill → verified), test record cleaned up after.
+- Print preview header: "PHASE 2" chip + "ZATCA cleared (date)" indicator (screen-only, never on paper).
+- Demo data scripts/ei-demo-seed.ts (IDEMPOTENT by unique P.O. ref; API-driven so all stamps/chain come from real server logic): 3 bilingual demo clients (Al Rushaid / Gulf Steel / Jubail Technical) + 5 demo e-invoices:
+  * INV-2026-00001 P1 issued · partially paid · OVERDUE (SAR 126,500, paid 50k)
+  * INV-2026-00002 P1 draft (welders 15% + export QA/QC 0% VAT line)
+  * INV-2026-00003 P2 issued · ZATCA cleared (simulation) · partially paid
+  * INV-2026-00004 P2 issued · PENDING submission (boss can click Submit himself)
+  * INV-2026-00005 P2 draft
+- Fixed dev server that had died (restarted in background, port 3000).
+
+Stage Summary:
+- QA 100% via agent-browser + API scripts: QR tags decoded per phase (P1=1-5, P2 issued=1-8, P2 draft=1-5 fallback); Phase 1 gateway submission correctly rejected; UBL download returns valid UBL 2.1 XML w/ PIH+ICV; phase filter; phase radio round-trip; ZATCA dialog shows shared Simulation profile (EGS 1-landmarkintergulf|2-SRV|3-001); quick-add client e2e; mobile stacked cards + overflow menu; sticky footer flush; dev.log clean; tsc clean; lint clean.
+- Phase semantics: phase is a PER-INVOICE designation chosen while draft, locked at issue — exactly "zkn phase 1 lagbe use korbo zkn 2 lagbe use korbo".
+- Phase 2 connect system reuses the Invoice module's ZATCA profile (Settings → ZATCA e-Invoicing): simulation works out of the box; switching env to preprod/production + CSID token makes real gateway calls with zero code change.
+- Next-phase ideas: (1) bulk ZATCA submission for all pending Phase 2 e-invoices; (2) quotation → e-invoice conversion; (3) server-side direct PDF download; (4) ZATCA response viewer with gateway messages drill-down.

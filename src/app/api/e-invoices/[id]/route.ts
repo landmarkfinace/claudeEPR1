@@ -147,6 +147,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
           notesAr: body.notesAr?.trim() || null,
           arManualFlags: JSON.stringify(body.arManualFlags ?? []),
           showReceiverSignature: body.showReceiverSignature ?? true,
+          // Phase is editable while draft (the route only runs for drafts)
+          ...(body.zatcaPhase ? { zatcaPhase: body.zatcaPhase } : {}),
           relatedInvoiceId,
           items: { create: items },
         },

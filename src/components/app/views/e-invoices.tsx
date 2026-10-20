@@ -24,8 +24,10 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CircleDollarSign,
+  CloudUpload,
   Copy,
   Eye,
+  FileCode,
   FileOutput,
   Languages,
   Loader2,
@@ -33,8 +35,11 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  QrCode,
   Send,
+  ShieldCheck,
   Trash2,
+  UserPlus,
   Wallet,
   X,
 } from 'lucide-react'
@@ -103,6 +108,11 @@ import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { MobileFab, PageHeader, SectionCard } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
 import { EInvoicePrintDialog } from '../print/e-invoice-print'
+import {
+  EInvoiceZatcaSubmitDialog,
+  downloadEInvoiceUbl,
+} from './e-invoice-zatca-submit'
+import { ZatcaStatusBadge } from './invoice-zatca-submit'
 
 // ── List response shapes ────────────────────────────────────────────────────
 
@@ -221,6 +231,29 @@ function DocTypeChip({ docType }: { docType: string }) {
   return null
 }
 
+/** Compact ZATCA phase chip — P1 (Generation) / P2 (Integration). */
+function PhaseChip({ phase }: { phase: number | null | undefined }) {
+  const isP2 = (phase ?? 1) === 2
+  return (
+    <Badge
+      variant="outline"
+      title={
+        isP2
+          ? 'ZATCA Phase 2 (Integration) — 8-tag cryptographic QR + Fatoora submission'
+          : 'ZATCA Phase 1 (Generation) — 5-tag QR, no portal submission'
+      }
+      className={cn(
+        'whitespace-nowrap font-semibold',
+        isP2
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
+          : 'border-[#132A4A]/25 bg-[#132A4A]/5 text-[#132A4A] dark:border-[#E1B169]/30 dark:bg-[#0C1D33]/60 dark:text-[#E1B169]'
+      )}
+    >
+      {isP2 ? 'P2 · Integration' : 'P1 · Generation'}
+    </Badge>
+  )
+}
+
 // ── Form model ──────────────────────────────────────────────────────────────
 
 /** Header Arabic field keys — MUST match the backend arManualFlags contract. */
@@ -242,6 +275,7 @@ type EItemForm = {
 
 type EIForm = {
   docType: 'invoice' | 'credit_note' | 'debit_note'
+  zatcaPhase: 1 | 2
   relatedInvoiceId: string
   clientId: string
   clientNameEn: string
@@ -363,6 +397,7 @@ function emptyForm(showReceiverSignature: boolean): EIForm {
   const due = new Date(today.getTime() + 30 * 86_400_000)
   return {
     docType: 'invoice',
+    zatcaPhase: 1,
     relatedInvoiceId: '',
     clientId: '',
     clientNameEn: '',
@@ -560,6 +595,7 @@ export function EInvoicesView() {
   const debouncedSearch = useDebounce(search)
   const [statusFilter, setStatusFilter] = useState('all')
   const [clientFilter, setClientFilter] = useState('all')
+  const [phaseFilter, setPhaseFilter] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [yearFilter, setYearFilter] = useState('all')
@@ -612,6 +648,25 @@ export function EInvoicesView() {
   // ---- note creation ----
   const [noteBusy, setNoteBusy] = useState(false)
 
+  // ---- ZATCA Phase 2 submission (connect system) ----
+  const [zatcaTarget, setZatcaTarget] = useState<EInvoiceRow | null>(null)
+  const [zatcaOpen, setZatcaOpen] = useState(false)
+
+  // ---- quick add client (saved to the Clients module) ----
+  const [clientAddOpen, setClientAddOpen] = useState(false)
+  const [clientAddSaving, setClientAddSaving] = useState(false)
+  const [clientForm, setClientForm] = useState(() => ({
+    name: '',
+    nameAr: '',
+    contactPerson: '',
+    phone: '',
+    email: '',
+    city: '',
+    address: '',
+    vatNumber: '',
+    crNumber: '',
+  }))
+
   // ---- print / preview ----
   const [printOpen, setPrintOpen] = useState(false)
   const [printLoading, setPrintLoading] = useState(false)
@@ -637,6 +692,7 @@ export function EInvoicesView() {
           search: debouncedSearch,
           status: statusFilter === 'all' ? '' : statusFilter,
           clientId: clientFilter === 'all' ? '' : clientFilter,
+          zatcaPhase: phaseFilter === 'all' ? '' : phaseFilter,
           dateFrom,
           dateTo,
           year: yearFilter === 'all' ? '' : yearFilter,
@@ -668,6 +724,7 @@ export function EInvoicesView() {
     debouncedSearch,
     statusFilter,
     clientFilter,
+    phaseFilter,
     dateFrom,
     dateTo,
     yearFilter,
@@ -808,6 +865,7 @@ export function EInvoicesView() {
         )
           ? (full.docType as EIForm['docType'])
           : 'invoice',
+        zatcaPhase: full.zatcaPhase === 2 ? 2 : 1,
         relatedInvoiceId: full.relatedInvoiceId ?? '',
         clientId: full.clientId ?? '',
         clientNameEn: full.clientNameEn,
@@ -903,6 +961,65 @@ export function EInvoicesView() {
       // values now come from the client record — no longer "manually typed"
       arManual: { ...f.arManual, clientName: false, clientAddress: false },
     }))
+  }
+
+  /** Quick-add a client from inside the e-invoice form — saved to Clients. */
+  async function handleQuickAddClient() {
+    const name = clientForm.name.trim()
+    if (!name) {
+      toast.error('Client name (English) is required')
+      return
+    }
+    if (clientAddSaving) return
+    setClientAddSaving(true)
+    try {
+      const created = await api.post<ClientRow>('/api/clients', {
+        name,
+        nameAr: clientForm.nameAr.trim() || null,
+        contactPerson: clientForm.contactPerson.trim() || null,
+        phone: clientForm.phone.trim() || null,
+        email: clientForm.email.trim() || null,
+        city: clientForm.city.trim() || null,
+        address: clientForm.address.trim() || null,
+        vatNumber: clientForm.vatNumber.trim() || null,
+        crNumber: clientForm.crNumber.trim() || null,
+      })
+      toast.success(`Client "${created.name}" saved`)
+      setClientAddOpen(false)
+      // refresh the picker, then auto-select + fill from the new record
+      try {
+        const res = await api.get<Paginated<ClientRow>>('/api/clients?pageSize=100')
+        setClients(res.data)
+      } catch {
+        // non-fatal — the picker refreshes next time it opens
+      }
+      setForm((f) => ({
+        ...f,
+        clientId: created.id,
+        clientNameEn: created.name,
+        clientNameAr: created.nameAr ?? '',
+        clientVatNumber: created.vatNumber ?? '',
+        clientCrNumber: created.crNumber ?? '',
+        clientAddressEn: created.address ?? '',
+        clientAddressAr: created.addressAr ?? '',
+        arManual: { ...f.arManual, clientName: false, clientAddress: false },
+      }))
+      setClientForm({
+        name: '',
+        nameAr: '',
+        contactPerson: '',
+        phone: '',
+        email: '',
+        city: '',
+        address: '',
+        vatNumber: '',
+        crNumber: '',
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the client')
+    } finally {
+      setClientAddSaving(false)
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -1166,6 +1283,7 @@ export function EInvoicesView() {
 
     const body = {
       docType: form.docType,
+      zatcaPhase: form.zatcaPhase,
       clientId: form.clientId || null,
       clientNameEn,
       clientNameAr: form.clientNameAr.trim(),
@@ -1451,6 +1569,10 @@ export function EInvoicesView() {
       id: 'draft',
       invoiceNumber: editing?.invoiceNumber ?? nextNumber ?? `${prefix}-${year}-00001`,
       docType: form.docType,
+      zatcaPhase: form.zatcaPhase,
+      zatcaStatus: null,
+      zatcaSubmittedAt: null,
+      zatcaSubmissionMode: null,
       clientId: form.clientId || null,
       clientNameEn: form.clientNameEn.trim() || 'Client name',
       clientNameAr: form.clientNameAr.trim(),
@@ -1543,13 +1665,29 @@ export function EInvoicesView() {
     }
   }
 
+  /** Open the Phase 2 "connect system" submission dialog. */
+  function openZatcaSubmit(row: EInvoiceRow) {
+    setZatcaTarget(row)
+    setZatcaOpen(true)
+  }
+
+  async function handleDownloadUbl(row: EInvoiceRow) {
+    try {
+      await downloadEInvoiceUbl(row.id, row.invoiceNumber)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Download failed')
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Render helpers
   // -----------------------------------------------------------------------
   /** Desktop + mobile action cluster for one row (permission + status aware). */
   const renderRowActions = (row: EInvoiceRow, mobile: boolean) => {
     const isDraft = row.status === 'draft'
+    const isP2 = (row.zatcaPhase ?? 1) === 2
     const canPay = (row.status === 'issued' || row.status === 'partially_paid') && canEdit
+    const canSubmitZatca = !isDraft && isP2 && canEdit
     const iconBtn =
       'h-8 w-8 text-muted-foreground hover:text-foreground'
     return (
@@ -1599,6 +1737,27 @@ export function EInvoicesView() {
             title="Record payment"
           >
             <Wallet className="h-4 w-4" />
+          </Button>
+        ) : null}
+        {!mobile && canSubmitZatca ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              iconBtn,
+              row.zatcaStatus === 'cleared' || row.zatcaStatus === 'reported'
+                ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400'
+                : 'text-amber-600 hover:text-amber-700 dark:text-amber-400'
+            )}
+            onClick={() => openZatcaSubmit(row)}
+            aria-label={`Submit ${row.invoiceNumber} to ZATCA`}
+            title={
+              row.zatcaStatus
+                ? `ZATCA: ${row.zatcaStatus} — open submission details`
+                : 'Submit to ZATCA (Phase 2 connect system)'
+            }
+          >
+            <CloudUpload className="h-4 w-4" />
           </Button>
         ) : null}
         {!mobile && !isDraft && canEdit ? (
@@ -1696,6 +1855,22 @@ export function EInvoicesView() {
               <DropdownMenuItem key="pay" onClick={() => void openPayments(row)}>
                 <Wallet className="mr-2 h-4 w-4" />
                 Record payment
+              </DropdownMenuItem>
+            )
+          }
+          if (mobile && canSubmitZatca) {
+            items.push(
+              <DropdownMenuItem key="zatca" onClick={() => openZatcaSubmit(row)}>
+                <CloudUpload className="mr-2 h-4 w-4" />
+                {row.zatcaStatus ? `ZATCA: ${row.zatcaStatus}` : 'Submit to ZATCA'}
+              </DropdownMenuItem>
+            )
+          }
+          if (isP2 && !isDraft) {
+            items.push(
+              <DropdownMenuItem key="ubl" onClick={() => void handleDownloadUbl(row)}>
+                <FileCode className="mr-2 h-4 w-4" />
+                Download UBL XML
               </DropdownMenuItem>
             )
           }
@@ -1878,6 +2053,7 @@ export function EInvoicesView() {
             activeCount={
               (statusFilter !== 'all' ? 1 : 0) +
               (clientFilter !== 'all' ? 1 : 0) +
+              (phaseFilter !== 'all' ? 1 : 0) +
               (dateFrom !== '' ? 1 : 0) +
               (dateTo !== '' ? 1 : 0) +
               (yearFilter !== 'all' ? 1 : 0)
@@ -1902,6 +2078,19 @@ export function EInvoicesView() {
               options={clients.map((c) => ({ value: c.id, label: c.name }))}
               placeholder="All Clients"
               className="sm:w-[170px]"
+            />
+            <FilterSelect
+              value={phaseFilter}
+              onChange={(v) => {
+                setPhaseFilter(v)
+                setPage(1)
+              }}
+              options={[
+                { value: '1', label: 'Phase 1 · Generation' },
+                { value: '2', label: 'Phase 2 · Integration' },
+              ]}
+              placeholder="All ZATCA Phases"
+              className="sm:w-[185px]"
             />
             <Input
               type="date"
@@ -1995,6 +2184,7 @@ export function EInvoicesView() {
                         </span>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
                           <DocTypeChip docType={row.docType} />
+                          <PhaseChip phase={row.zatcaPhase} />
                           {row.relatedInvoiceNumber ? (
                             <span
                               className="text-[11px] text-muted-foreground"
@@ -2067,6 +2257,11 @@ export function EInvoicesView() {
                       </TableCell>
                       <TableCell>
                         <EIStatusBadge status={row.status} overdue={row.overdue} />
+                        {row.zatcaStatus ? (
+                          <div className="mt-1">
+                            <ZatcaStatusBadge status={row.zatcaStatus} />
+                          </div>
+                        ) : null}
                       </TableCell>
                       {canEdit || canDelete || canCreate ? (
                         <TableCell className="text-right">{renderRowActions(row, false)}</TableCell>
@@ -2089,6 +2284,7 @@ export function EInvoicesView() {
                       <p className="font-mono text-[13px] font-bold">{row.invoiceNumber}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <DocTypeChip docType={row.docType} />
+                        <PhaseChip phase={row.zatcaPhase} />
                         <EIStatusBadge status={row.status} overdue={row.overdue} />
                       </div>
                       <p className="mt-1.5 truncate text-xs font-medium">{row.clientNameEn}</p>
@@ -2264,6 +2460,64 @@ export function EInvoicesView() {
                 </div>
               )}
             </div>
+
+            {/* ZATCA phase — per-invoice designation (Phase 1 & 2 are separate) */}
+            <div className="space-y-2">
+              <Label>ZATCA Phase</Label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={form.zatcaPhase === 1}
+                  onClick={() => setField('zatcaPhase', 1)}
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    form.zatcaPhase === 1
+                      ? 'border-[#132A4A] bg-[#132A4A]/[0.04] ring-1 ring-[#132A4A]/30 dark:border-[#E1B169]/50 dark:bg-[#0C1D33]/50 dark:ring-[#E1B169]/30'
+                      : 'border-border hover:border-muted-foreground/40'
+                  )}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <QrCode className="mt-0.5 h-4 w-4 shrink-0 text-[#132A4A] dark:text-[#E1B169]" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">Phase 1 · Generation</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                        QR with the 5 mandatory TLV tags (seller, VAT no., timestamp,
+                        total, VAT). No crypto, no portal submission.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={form.zatcaPhase === 2}
+                  onClick={() => setField('zatcaPhase', 2)}
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    form.zatcaPhase === 2
+                      ? 'border-emerald-600 bg-emerald-50/60 ring-1 ring-emerald-600/30 dark:border-emerald-500/60 dark:bg-emerald-950/40 dark:ring-emerald-500/30'
+                      : 'border-border hover:border-muted-foreground/40'
+                  )}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">Phase 2 · Integration</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                        Full 8-tag cryptographic QR (hash + ECDSA signature + key) +
+                        UBL XML. Submit to the ZATCA Fatoora portal after issuing.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Choose per invoice — Phase 1 when the QR is enough, Phase 2 when it
+                must be cleared on the Fatoora gateway. The phase locks when the
+                document is issued.
+              </p>
+            </div>
           </section>
 
           {/* 2 ─ Client */}
@@ -2271,7 +2525,19 @@ export function EInvoicesView() {
             <h3 className="text-sm font-semibold">Client</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="ei-client">Registered Client</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="ei-client">Registered Client</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs text-[#8E6420] hover:text-[#8E6420] dark:text-[#E1B169] dark:hover:text-[#E1B169]"
+                    onClick={() => setClientAddOpen(true)}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    New Client
+                  </Button>
+                </div>
                 <Select value={form.clientId || 'none'} onValueChange={handleClientSelect}>
                   <SelectTrigger id="ei-client" className="w-full" aria-label="Registered client">
                     <SelectValue />
@@ -2286,7 +2552,8 @@ export function EInvoicesView() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  Selecting a client fills the name, VAT, CR and address fields.
+                  Selecting a client fills the name, VAT, CR and address fields — or add
+                  a new one and it is saved to Clients.
                 </p>
               </div>
               <ArField
@@ -3148,6 +3415,149 @@ export function EInvoicesView() {
           }
         }}
       />
+
+      {/* ---- ZATCA Phase 2 submission (connect system) ---- */}
+      <EInvoiceZatcaSubmitDialog
+        open={zatcaOpen}
+        onOpenChange={setZatcaOpen}
+        invoice={zatcaTarget}
+        onSubmitted={() => void load()}
+      />
+
+      {/* ---- Quick add client (saved to the Clients module) ---- */}
+      <Dialog open={clientAddOpen} onOpenChange={setClientAddOpen}>
+        <DialogContent className="nice-scrollbar max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-[#8E6420] dark:text-[#E1B169]" />
+              Add New Client
+            </DialogTitle>
+            <DialogDescription>
+              Saved permanently to the Clients module — the client becomes
+              selectable here and everywhere else.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-name">
+                Client Name (English) <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="qc-name"
+                value={clientForm.name}
+                onChange={(e) => setClientForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Al Bawani Co. Ltd."
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-name-ar">Client Name (Arabic)</Label>
+              <Input
+                id="qc-name-ar"
+                lang="ar"
+                dir="rtl"
+                value={clientForm.nameAr}
+                onChange={(e) => setClientForm((f) => ({ ...f, nameAr: e.target.value }))}
+                placeholder="مثال: شركة البواني"
+                className="font-[Cairo]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-contact">Contact Person</Label>
+              <Input
+                id="qc-contact"
+                value={clientForm.contactPerson}
+                onChange={(e) =>
+                  setClientForm((f) => ({ ...f, contactPerson: e.target.value }))
+                }
+                placeholder="e.g. Eng. Ahmed Ali"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-phone">Phone</Label>
+              <Input
+                id="qc-phone"
+                value={clientForm.phone}
+                onChange={(e) => setClientForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="e.g. +966 5X XXX XXXX"
+                inputMode="tel"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-email">Email</Label>
+              <Input
+                id="qc-email"
+                type="email"
+                value={clientForm.email}
+                onChange={(e) => setClientForm((f) => ({ ...f, email: e.target.value }))}
+                placeholder="e.g. accounts@client.com"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-city">City</Label>
+              <Input
+                id="qc-city"
+                value={clientForm.city}
+                onChange={(e) => setClientForm((f) => ({ ...f, city: e.target.value }))}
+                placeholder="e.g. Riyadh"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-vat">VAT No.</Label>
+              <Input
+                id="qc-vat"
+                value={clientForm.vatNumber}
+                onChange={(e) => setClientForm((f) => ({ ...f, vatNumber: e.target.value }))}
+                placeholder="3XXXXXXXXXXXXX3"
+                className="font-mono"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qc-cr">C.R. No.</Label>
+              <Input
+                id="qc-cr"
+                value={clientForm.crNumber}
+                onChange={(e) => setClientForm((f) => ({ ...f, crNumber: e.target.value }))}
+                placeholder="e.g. 2050xxxxxxx"
+                className="font-mono"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="qc-address">Address</Label>
+              <Textarea
+                id="qc-address"
+                value={clientForm.address}
+                onChange={(e) => setClientForm((f) => ({ ...f, address: e.target.value }))}
+                placeholder="Street, city, country"
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setClientAddOpen(false)}
+              disabled={clientAddSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleQuickAddClient()}
+              disabled={clientAddSaving}
+            >
+              {clientAddSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
+              Save Client
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

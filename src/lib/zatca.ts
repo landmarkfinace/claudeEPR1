@@ -198,7 +198,7 @@ export async function saveZatcaLastTest(test: ZatcaLastTest): Promise<void> {
 
 type ZatcaKeys = { privatePem: string; publicPem: string }
 
-async function getZatcaKeys(): Promise<ZatcaKeys> {
+export async function getZatcaKeys(): Promise<ZatcaKeys> {
   const rows = await db.setting.findMany({
     where: { key: { in: ['zatca_private_key', 'zatca_public_key'] } },
   })
@@ -242,7 +242,7 @@ export async function hasZatcaKeys(): Promise<boolean> {
  * QR tag 8 value: base64 of the RAW 64-byte EC point (x‖y), 0x04 prefix
  * stripped — exactly the form ZATCA specifies. Derived from the SPKI PEM.
  */
-function ecPublicKeyBase64(publicPem: string): string {
+export function ecPublicKeyBase64(publicPem: string): string {
   const jwk = createPublicKey(publicPem).export({ format: 'jwk' }) as {
     x?: string
     y?: string
@@ -253,7 +253,7 @@ function ecPublicKeyBase64(publicPem: string): string {
 }
 
 /** Sign the invoice hash with ECDSA/SHA-256 → base64 (DER encoded, as node emits). */
-function signHash(privatePem: string, data: Buffer): string {
+export function signHash(privatePem: string, data: Buffer): string {
   const signer = createSign('SHA256')
   signer.update(data)
   return signer.sign(createPrivateKey(privatePem)).toString('base64')

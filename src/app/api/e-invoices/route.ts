@@ -85,6 +85,10 @@ export async function GET(req: NextRequest) {
     const clientId = sp.get('clientId')?.trim()
     if (clientId) where.clientId = clientId
 
+    // ZATCA phase filter: 1 = Generation, 2 = Integration (per-invoice designation)
+    const phase = parseInt(sp.get('zatcaPhase') ?? '', 10)
+    if (phase === 1 || phase === 2) where.zatcaPhase = phase
+
     // Issue-date range filters (dateFrom/dateTo) or calendar-year filter
     const dateFrom = parseDate(sp.get('dateFrom'))
     const dateTo = parseDate(sp.get('dateTo'))
@@ -246,6 +250,7 @@ export async function POST(req: NextRequest) {
           notesAr: body.notesAr?.trim() || null,
           arManualFlags: JSON.stringify(body.arManualFlags ?? []),
           showReceiverSignature: body.showReceiverSignature ?? true,
+          zatcaPhase: body.zatcaPhase ?? 1,
           relatedInvoiceId,
           items: { create: items },
         },

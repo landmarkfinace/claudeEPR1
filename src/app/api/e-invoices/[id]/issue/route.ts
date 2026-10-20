@@ -1,9 +1,10 @@
 // E-Invoice issue API — POST /api/e-invoices/[id]/issue
-// Draft → issued. Assigns the ZATCA Phase 2 readiness data at issue time:
+// Draft → issued. Assigns the ZATCA readiness data at issue time:
 //   uuid (v4) · icv (sequential across all issued e-invoices) ·
 //   previousHash (latest issued e-invoice's hash, PIH chain — starts at
 //   ZATCA_INITIAL_PIH) · invoiceHash (base64 SHA-256 of the UBL XML).
-// Totals are defensively recomputed from the stored items first.
+// PHASE 2 documents additionally get the ECDSA signature of the hash
+// (8-tag cryptographic QR). Totals are defensively recomputed first.
 // Response: full updated row + qrPayload + qrDataUrl.
 import { NextRequest } from 'next/server'
 import { randomUUID } from 'node:crypto'
@@ -17,6 +18,7 @@ import {
   isResponse,
   logActivity,
 } from '@/lib/api-helpers'
+import { getZatcaKeys, signHash, ecPublicKeyBase64 } from '@/lib/zatca'
 import {
   computeInvoiceTotals,
   buildEInvoiceXml,
@@ -66,6 +68,17 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     const xml = buildEInvoiceXml({ ...inv, ...totals, uuid }, items, seller, previousHash, icv)
     const invoiceHash = hashEInvoiceXml(xml)
 
+    // PHASE 2 (Integration): sign the hash with the ZATCA ECDSA keypair —
+    // the QR grows to the full 8-tag cryptographic stamp and the document
+    // becomes ready for the Fatoora gateway (submit from the list view).
+    let signature: string | null = null
+    let publicKeyBase64 = ''
+    if ((inv.zatcaPhase ?? 1) === 2) {
+      const keys = await getZatcaKeys()
+      signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
+      publicKeyBase64 = ecPublicKeyBase64(keys.publicPem)
+    }
+
     const issuedAt = new Date()
     const updated = await db.eInvoice.update({
       where: { id: inv.id },
@@ -75,6 +88,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         icv,
         previousHash,
         invoiceHash,
+        ...(signature ? { signature } : {}),
         status: 'issued',
         issuedAt,
         issuedByName: auth.name,
@@ -82,14 +96,18 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
       include: eInvoiceDetailInclude,
     })
 
-    const payload = buildEInvoiceQrPayload(seller, updated)
+    const payload = buildEInvoiceQrPayload(
+      seller,
+      updated,
+      signature ? { invoiceHash, signature, publicKeyBase64 } : null
+    )
     const qr = await qrDataUrl(payload)
 
     await logActivity({
       user: auth,
       action: 'issued',
       module: 'einvoice',
-      description: `E-Invoice ${updated.invoiceNumber} issued — ${updated.clientNameEn}`,
+      description: `E-Invoice ${updated.invoiceNumber} issued (ZATCA Phase ${updated.zatcaPhase ?? 1}) — ${updated.clientNameEn}`,
       amount: totals.totalDue,
     })
     return ok({ ...mapEInvoice(updated), qrPayload: payload, qrDataUrl: qr })

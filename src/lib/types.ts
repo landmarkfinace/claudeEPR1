@@ -1094,6 +1094,11 @@ export type EInvoiceRow = {
   notesAr: string | null
   arManualFlags: string[] // header field keys manually edited in Arabic (auto-translate must not overwrite)
   showReceiverSignature: boolean
+  // ZATCA phase designation (per invoice): 1 = Generation, 2 = Integration
+  zatcaPhase: number
+  zatcaStatus: string | null // reported | cleared | rejected (Phase 2 submission outcome)
+  zatcaSubmittedAt: string | null
+  zatcaSubmissionMode: string | null // simulation | production
   relatedInvoiceId: string | null
   uuid: string | null
   icv: number | null

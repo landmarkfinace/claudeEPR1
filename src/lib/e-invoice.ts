@@ -16,7 +16,7 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import QRCode from 'qrcode'
 import { db } from '@/lib/db'
 import { round2 } from '@/lib/format'
-import { tlvEncode, ZATCA_INITIAL_PIH } from '@/lib/zatca'
+import { tlvEncode, ZATCA_INITIAL_PIH, getZatcaKeys, signHash, ecPublicKeyBase64 } from '@/lib/zatca'
 
 export { ZATCA_INITIAL_PIH }
 
@@ -389,24 +389,40 @@ export function hashEInvoiceXml(xml: string): string {
   return createHash('sha256').update(xml, 'utf8').digest('base64')
 }
 
-// ── QR payload (TLV tags 1-5) ───────────────────────────────────────────────
+// ── QR payload (phase-aware TLV) ────────────────────────────────────────────
 
 /** Structural type satisfied by Prisma EInvoice rows. */
 export type EQRInvoice = {
+  zatcaPhase?: number | null
   issuedAt: Date | null
   issueDate: Date
   totalDue: number
   vatAmount: number
 }
 
+/** Phase 2 stamp fields appended to the QR (tags 6-8) when available. */
+export type EZatcaStampFields = {
+  invoiceHash: string
+  signature: string
+  publicKeyBase64: string
+}
+
 /**
- * 5-tag TLV QR payload (base64), reusing tlvEncode from zatca.ts:
- *   1 seller name (Arabic preferred) · 2 seller VAT number
- *   3 ISO-8601 timestamp (issuedAt if set else issueDate)
- *   4 invoice total (VAT inclusive) · 5 VAT total
+ * Phase-aware QR payload (base64 TLV):
+ *   PHASE 1 (Generation) — the 5 mandatory tags only, no crypto:
+ *     1 seller name (Arabic preferred) · 2 seller VAT number
+ *     3 ISO-8601 timestamp (issuedAt if set else issueDate)
+ *     4 invoice total (VAT inclusive) · 5 VAT total
+ *   PHASE 2 (Integration) — same 5 tags PLUS the cryptographic stamp:
+ *     6 invoice hash (base64 SHA-256 of the UBL XML) · 7 ECDSA signature
+ *     8 ECDSA public key (raw 64-byte x‖y point)
  */
-export function buildEInvoiceQrPayload(seller: ESellerInfo, invoice: EQRInvoice): string {
-  return tlvEncode([
+export function buildEInvoiceQrPayload(
+  seller: ESellerInfo,
+  invoice: EQRInvoice,
+  stamp?: EZatcaStampFields | null
+): string {
+  const entries = [
     {
       tag: 1,
       value: seller.companyNameAr.trim() ? seller.companyNameAr : seller.companyName,
@@ -418,7 +434,22 @@ export function buildEInvoiceQrPayload(seller: ESellerInfo, invoice: EQRInvoice)
     },
     { tag: 4, value: round2(invoice.totalDue).toFixed(2) },
     { tag: 5, value: round2(invoice.vatAmount).toFixed(2) },
-  ]).toString('base64')
+  ]
+  // Phase 2 + complete stamp → extend to the full 8-tag cryptographic QR
+  if (
+    (invoice.zatcaPhase ?? 1) === 2 &&
+    stamp &&
+    stamp.invoiceHash &&
+    stamp.signature &&
+    stamp.publicKeyBase64
+  ) {
+    entries.push(
+      { tag: 6, value: stamp.invoiceHash },
+      { tag: 7, value: stamp.signature },
+      { tag: 8, value: stamp.publicKeyBase64 }
+    )
+  }
+  return tlvEncode(entries).toString('base64')
 }
 
 /** Render a QR payload as a PNG data URL (pure black on white, quiet zone 4). */
@@ -447,4 +478,81 @@ export function isEInvoiceOverdue(inv: {
   const now = inv.now ?? new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   return inv.dueDate < todayStart
+}
+
+// ── Phase 2 submission bundle (UBL XML + cryptographic stamp) ───────────────
+
+export type EInvoiceSubmission = {
+  /** UBL 2.1 XML whose SHA-256 hash equals invoiceHash */
+  xml: string
+  invoiceHash: string
+  /** base64 ECDSA signature of the invoice hash */
+  signature: string
+  /** base64 raw 64-byte EC public key (QR tag 8) */
+  publicKeyBase64: string
+  uuid: string
+  icv: number
+  /** True when the stored stamp no longer matched the rebuilt XML and was re-signed */
+  restamped: boolean
+}
+
+/** Prisma row shape required to (re)build a Phase 2 submission. */
+export type ESubmissionInvoice = Prisma.EInvoiceGetPayload<{ include: { items: true } }>
+
+/**
+ * Build everything needed to submit one PHASE 2 e-invoice to the Fatoora
+ * gateway: the UBL 2.1 XML document plus its cryptographic stamp. The XML is
+ * rebuilt deterministically from the stored row (uuid / icv / previousHash
+ * embedded, so it hashes identically); if the current document no longer
+ * hashes to the stored stamp (e.g. company details changed in Settings after
+ * issuing), the stamp is re-signed and PERSISTED so the printed QR, the
+ * stored fields and the submitted XML always agree.
+ */
+export async function buildEInvoiceSubmission(
+  inv: ESubmissionInvoice,
+  sellerOverride?: ESellerInfo
+): Promise<EInvoiceSubmission> {
+  if ((inv.zatcaPhase ?? 1) !== 2) {
+    throw new Error('ZATCA submission requires a Phase 2 e-invoice')
+  }
+  const seller = sellerOverride ?? (await readEInvoiceSellerInfo())
+  const items = [...inv.items].sort((a, b) => a.sr - b.sr)
+  const totals = computeInvoiceTotals(items)
+  const uuid = inv.uuid ?? ''
+  const icv = inv.icv ?? 1
+  const previousHash = inv.previousHash ?? ZATCA_INITIAL_PIH
+
+  const xml = buildEInvoiceXml({ ...inv, ...totals, uuid }, items, seller, previousHash, icv)
+  const invoiceHash = hashEInvoiceXml(xml)
+
+  // Stored stamp still valid → reuse it byte-for-byte
+  if (inv.invoiceHash === invoiceHash && inv.signature) {
+    const keys = await getZatcaKeys()
+    return {
+      xml,
+      invoiceHash,
+      signature: inv.signature,
+      publicKeyBase64: ecPublicKeyBase64(keys.publicPem),
+      uuid,
+      icv,
+      restamped: false,
+    }
+  }
+
+  // Stamp drifted (or was never signed) → re-sign + persist
+  const keys = await getZatcaKeys()
+  const signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
+  await db.eInvoice.update({
+    where: { id: inv.id },
+    data: { invoiceHash, signature },
+  })
+  return {
+    xml,
+    invoiceHash,
+    signature,
+    publicKeyBase64: ecPublicKeyBase64(keys.publicPem),
+    uuid,
+    icv,
+    restamped: true,
+  }
 }

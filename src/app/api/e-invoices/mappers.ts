@@ -147,6 +147,10 @@ export function mapEInvoice(
     notesAr: inv.notesAr,
     arManualFlags: parseArManualFlags(inv.arManualFlags),
     showReceiverSignature: inv.showReceiverSignature,
+    zatcaPhase: inv.zatcaPhase ?? 1,
+    zatcaStatus: inv.zatcaStatus ?? null,
+    zatcaSubmittedAt: inv.zatcaSubmittedAt ? inv.zatcaSubmittedAt.toISOString() : null,
+    zatcaSubmissionMode: inv.zatcaSubmissionMode ?? null,
     relatedInvoiceId: inv.relatedInvoiceId,
     uuid: inv.uuid,
     icv: inv.icv,
@@ -234,6 +238,9 @@ export const eInvoiceSchema = z.object({
   notesEn: z.string().max(2000, 'Notes are too long').nullable().optional(),
   notesAr: z.string().max(2000, 'Arabic notes are too long').nullable().optional(),
   showReceiverSignature: z.boolean().optional(),
+  // Per-invoice ZATCA phase designation — 1 = Generation, 2 = Integration.
+  // Only editable while the document is a draft; locked at issue time.
+  zatcaPhase: z.union([z.literal(1), z.literal(2)]).optional(),
   arManualFlags: z.array(z.string().max(40)).max(20).optional(),
   relatedInvoiceId: z.string().nullable().optional(),
   items: z
