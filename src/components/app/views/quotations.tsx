@@ -209,7 +209,7 @@ function newItemForm(): ItemForm {
     discount: '',
     subText: '',
     ratePerHour: '',
-    hoursPerMonth: '',
+    hoursPerMonth: '1',
   }
 }
 
@@ -500,13 +500,14 @@ export function QuotationsView() {
       items: f.items.map((it) => {
         if (it.key !== key) return it
         const next = { ...it, [field]: value }
-        // Template convenience: Rate/Hour × Hours/Month auto-fills the per-worker
-        // monthly rate (still overridable by typing over it afterwards).
+        // Hourly workflow: RATE × PER HOURS auto-fills the line rate (hours
+        // default to 1 when left blank, so a bare rate still prices the line).
         if (field === 'ratePerHour' || field === 'hoursPerMonth') {
           const rate = parseNum(field === 'ratePerHour' ? value : next.ratePerHour)
           const hours = parseNum(field === 'hoursPerMonth' ? value : next.hoursPerMonth)
-          if (rate !== null && hours !== null && rate > 0 && hours > 0) {
-            next.unitPrice = String(Math.round(rate * hours * 100) / 100)
+          if (rate !== null && rate > 0) {
+            const h = hours !== null && hours > 0 ? hours : 1
+            next.unitPrice = String(Math.round(rate * h * 100) / 100)
           }
         }
         return next
@@ -1537,26 +1538,17 @@ export function QuotationsView() {
                       <Input
                         value={it.description}
                         onChange={(e) => setItemField(it.key, 'description', e.target.value)}
-                        placeholder="Worker category / trade — e.g. Electrician"
+                        placeholder="Trade — e.g. Steel Fixter, Electrician, Helper"
                         className="min-w-0"
-                        aria-label={`Item ${i + 1} description`}
+                        aria-label={`Item ${i + 1} trade`}
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          value={it.subText}
-                          onChange={(e) => setItemField(it.key, 'subText', e.target.value)}
-                          placeholder="Detail line (gray) — e.g. Licensed, SCE-classified"
-                          className="h-9"
-                          aria-label={`Item ${i + 1} detail line`}
-                        />
-                        <Input
-                          value={it.unit}
-                          onChange={(e) => setItemField(it.key, 'unit', e.target.value)}
-                          placeholder="Unit — e.g. Man-Month"
-                          className="h-9"
-                          aria-label={`Item ${i + 1} unit`}
-                        />
-                      </div>
+                      <Input
+                        value={it.subText}
+                        onChange={(e) => setItemField(it.key, 'subText', e.target.value)}
+                        placeholder="Detail line (optional, gray) — e.g. Licensed, SCE-classified"
+                        className="h-9"
+                        aria-label={`Item ${i + 1} detail line`}
+                      />
                     </div>
                     <Button
                       type="button"
@@ -1570,9 +1562,25 @@ export function QuotationsView() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 pl-8 sm:grid-cols-3 lg:grid-cols-6">
+                  {/* Hourly rate card — the boss's field set: TRADE · PER HOURS · RATE SAR.
+                      (Unit, workers qty, per-line discount and the monthly rate stay in
+                      form state for data continuity, just out of the way.) */}
+                  <div className="mt-2 grid grid-cols-3 gap-2 pl-8">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Rate / Hour</Label>
+                      <Label className="text-[11px] text-muted-foreground">Per Hours</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={it.hoursPerMonth}
+                        onChange={(e) => setItemField(it.key, 'hoursPerMonth', e.target.value)}
+                        placeholder="1"
+                        className="h-9 tabular-nums"
+                        aria-label={`Item ${i + 1} per hours`}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Rate (SAR)</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1581,58 +1589,7 @@ export function QuotationsView() {
                         onChange={(e) => setItemField(it.key, 'ratePerHour', e.target.value)}
                         placeholder="0.00"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} rate per hour`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Hours / Month</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="1"
-                        value={it.hoursPerMonth}
-                        onChange={(e) => setItemField(it.key, 'hoursPerMonth', e.target.value)}
-                        placeholder="260"
-                        className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} hours per month`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Rate / Worker / Month</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={it.unitPrice}
-                        onChange={(e) => setItemField(it.key, 'unitPrice', e.target.value)}
-                        placeholder="0.00"
-                        className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} rate per worker per month`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Workers / Qty</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={it.quantity}
-                        onChange={(e) => setItemField(it.key, 'quantity', e.target.value)}
-                        className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} quantity`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Discount</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={it.discount}
-                        onChange={(e) => setItemField(it.key, 'discount', e.target.value)}
-                        placeholder="0.00"
-                        className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} discount`}
+                        aria-label={`Item ${i + 1} rate per hour in SAR`}
                       />
                     </div>
                     <div className="space-y-1">
@@ -1650,9 +1607,9 @@ export function QuotationsView() {
             <div className="rounded-lg border bg-muted/40 p-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Total Workers / Qty</p>
+                  <p className="text-[11px] font-medium text-muted-foreground">Total Hours</p>
                   <p className="text-sm font-semibold tabular-nums">
-                    {formatNumber(calc.items.reduce((s, it) => s + it.quantity, 0))}
+                    {formatNumber(form.items.reduce((s, it) => s + (parseNum(it.hoursPerMonth) ?? 0), 0))}
                   </p>
                 </div>
                 <div>

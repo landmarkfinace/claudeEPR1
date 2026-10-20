@@ -105,11 +105,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
     aoa.push([null])
 
-    // Items table — rate/hour + hours/month columns when the template data is present
+    // Items table — hourly manpower columns when the rate basis is present
     const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
     const headerRowIndex = aoa.length
     if (hasRateBasis) {
-      aoa.push(['Sr', 'Worker Category / Trade', 'No. of Workers', 'Rate / Hour', 'Hours / Month', 'Rate / Worker / Month', 'Monthly Amount'])
+      aoa.push(['Sr', 'Trade', 'Per Hours', 'Rate (SAR)'])
     } else {
       aoa.push(['Sr', 'Description', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Line Total'])
     }
@@ -119,11 +119,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
           ? [
               it.sr,
               it.subText ? `${it.description} (${it.subText})` : it.description,
-              round2(it.quantity),
-              it.ratePerHour != null ? round2(it.ratePerHour) : '',
               it.hoursPerMonth != null ? round2(it.hoursPerMonth) : '',
-              round2(it.unitPrice),
-              round2(it.lineTotal),
+              it.ratePerHour != null ? round2(it.ratePerHour) : '',
             ]
           : [
               it.sr,
@@ -136,25 +133,29 @@ export async function GET(_req: NextRequest, { params }: Params) {
             ]
       )
     }
+    if (hasRateBasis) {
+      const totalHours = round2(items.reduce((s, it) => s + (it.hoursPerMonth ?? 0), 0))
+      aoa.push(['', 'Total Hours', totalHours, ''])
+    }
     aoa.push([null])
 
-    // Totals
+    // Totals — label/value columns follow the item table width
     const totalStart = aoa.length
-    aoa.push(['', '', '', '', 'Subtotal', '', quotation.subtotal])
-    if (quotation.discount > 0) aoa.push(['', '', '', '', 'Discount', '', -quotation.discount])
-    aoa.push(['', '', '', '', 'Net Amount', '', netTotal])
-    aoa.push(['', '', '', '', `VAT (${vatPercent}%)`, '', quotation.vatAmount])
-    aoa.push(['', '', '', '', 'TOTAL', '', quotation.total])
+    const labelCol = hasRateBasis ? 2 : 4
+    const valCol = hasRateBasis ? 3 : 6
+    const totalRow = (label: string, value: number): Array<string | number> => {
+      const row: Array<string | number> = []
+      for (let c = 0; c < valCol; c++) row.push(c === labelCol ? label : '')
+      row.push(value)
+      return row
+    }
+    aoa.push(totalRow('Subtotal', quotation.subtotal))
+    if (quotation.discount > 0) aoa.push(totalRow('Discount', -quotation.discount))
+    aoa.push(totalRow('Net Amount', netTotal))
+    aoa.push(totalRow(`VAT (${vatPercent}%)`, quotation.vatAmount))
+    aoa.push(totalRow('TOTAL', quotation.total))
     if (quotation.contractMonths && quotation.contractMonths > 0) {
-      aoa.push([
-        '',
-        '',
-        '',
-        '',
-        `Contract Value (${quotation.contractMonths} Months) incl. VAT`,
-        '',
-        round2(quotation.total * quotation.contractMonths),
-      ])
+      aoa.push(totalRow(`Contract Value (${quotation.contractMonths} Months) incl. VAT`, round2(quotation.total * quotation.contractMonths)))
     }
     aoa.push([`Amount in words: ${amountInWords(quotation.total, currency)}`])
     aoa.push([null])
@@ -194,25 +195,34 @@ export async function GET(_req: NextRequest, { params }: Params) {
       { s: { r: totalStart + 5, c: 0 }, e: { r: totalStart + 5, c: 6 } },
     ]
     sheet['!merges'] = merges
-    sheet['!cols'] = [
-      { wch: 5 }, // Sr
-      { wch: 52 }, // Description
-      { wch: 10 }, // Unit
-      { wch: 8 }, // Qty
-      { wch: 14 }, // Unit Price
-      { wch: 12 }, // Discount
-      { wch: 16 }, // Line Total
-    ]
+    sheet['!cols'] = hasRateBasis
+      ? [
+          { wch: 5 }, // Sr
+          { wch: 52 }, // Trade
+          { wch: 12 }, // Per Hours
+          { wch: 14 }, // Rate (SAR)
+        ]
+      : [
+          { wch: 5 }, // Sr
+          { wch: 52 }, // Description
+          { wch: 10 }, // Unit
+          { wch: 8 }, // Qty
+          { wch: 14 }, // Unit Price
+          { wch: 12 }, // Discount
+          { wch: 16 }, // Line Total
+        ]
 
-    // Number formatting for money/qty columns (D..G on item rows)
+    // Number formatting for money/qty columns on item rows
+    const numFrom = hasRateBasis ? 2 : 3
+    const numTo = hasRateBasis ? 3 : 6
     for (let r = headerRowIndex + 1; r < headerRowIndex + 1 + items.length; r++) {
-      for (let c = 3; c <= 6; c++) {
+      for (let c = numFrom; c <= numTo; c++) {
         const cell = sheet[XLSX.utils.encode_cell({ r, c })]
         if (cell && cell.t === 'n') cell.z = '#,##0.00'
       }
     }
     for (const r of [totalStart, totalStart + 1, totalStart + 2, totalStart + 3, totalStart + 4]) {
-      const cell = sheet[XLSX.utils.encode_cell({ r, c: 6 })]
+      const cell = sheet[XLSX.utils.encode_cell({ r, c: valCol })]
       if (cell && cell.t === 'n') cell.z = '#,##0.00'
     }
 

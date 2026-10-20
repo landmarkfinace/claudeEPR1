@@ -7,11 +7,11 @@
 //     navy side; Quotation No / Date / Valid Until / Your Ref meta rows on the
 //     gold side (slanted chevron edge).
 //   • QUOTATION TO | PROJECT DETAILS boxes with the gold left accent bar.
-//   • Items table with navy header + zebra rows. Template columns (No. of
-//     Workers / Rate-Hour / Hours-Month / Rate-Worker-Month / Monthly Amount
-//     + gray sub-text) appear automatically when the rate basis is present;
-//     generic quotations fall back to the classic column set.
-//   • Terms (auto-numbered) + totals box: Monthly Subtotal / VAT / TOTAL row
+//   • Items table with navy header + zebra rows. Hourly manpower columns
+//     (TRADE | PER HOURS | RATE SAR + total-hours row) appear automatically
+//     when the rate basis is present; generic quotations fall back to the
+//     classic column set (Description / Qty / Unit / Unit Price / Line Total).
+//   • Terms (auto-numbered) + totals box: Subtotal / VAT / TOTAL row
 //     on solid gold / Contract Value (N months) / currency line.
 //   • INCLUDED | EXCLUDED bullet boxes.
 //   • APPROVED BY (Name / Designation / Date + dashed Company Stamp circle) |
@@ -127,22 +127,22 @@ function geometryFor(letterhead: LetterheadConfig): PageGeometry {
       return {
         padTop: letterhead.headerHeightMm + 4,
         padBottom: Math.max(letterhead.footerHeightMm + 4, 12),
-        page1Fixed: 80,
+        page1Fixed: 87,
       }
     case 'header':
       return {
         padTop: letterhead.headerHeightMm + 3,
         padBottom: 12,
-        page1Fixed: 80,
+        page1Fixed: 87,
       }
     case 'header_footer':
       return {
         padTop: letterhead.headerHeightMm + 3,
         padBottom: letterhead.footerHeightMm + 3,
-        page1Fixed: 80,
+        page1Fixed: 87,
       }
     default:
-      return { padTop: 10, padBottom: 13, page1Fixed: 90 }
+      return { padTop: 10, padBottom: 13, page1Fixed: 97 }
   }
 }
 
@@ -449,7 +449,7 @@ export function QuotationDocument({
   // Template columns appear when any line carries the rate basis
   const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
   const showDiscountCol = items.some((it) => (it.discount ?? 0) > 0) || q.discount > 0
-  const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
+  const totalHours = round2(items.reduce((s, it) => s + (it.hoursPerMonth ?? 0), 0))
   const inclusions = bulletLines(q.inclusions)
   const exclusions = bulletLines(q.exclusions)
   const terms = q.terms ? numberedTerms(q.terms) : []
@@ -595,10 +595,17 @@ export function QuotationDocument({
                     </div>
                   )}
 
-                  {/* ── chevron title bar (navy + gold) ── */}
-                  <div className="relative mt-2.5 overflow-hidden rounded-[3px]" style={{ background: NAVY }}>
+                  {/* ── chevron title bar (navy + gold) ──
+                      min-h keeps the bar tall enough for the 4 meta rows
+                      (line-boxes ≈ 16mm + gaps) — without it the rows
+                      overflowed the chevron and the clip-path sliced the
+                      first (Quotation No.) and last (Your Ref.) rows. */}
+                  <div
+                    className="relative mt-2.5 flex min-h-[23mm] overflow-hidden rounded-[3px]"
+                    style={{ background: NAVY }}
+                  >
                     {/* navy side — title + subject subtitle */}
-                    <div className="flex h-full flex-col justify-center py-[3mm] pl-[4mm] pr-[66mm]">
+                    <div className="flex min-w-0 flex-1 flex-col justify-center py-[3mm] pl-[4mm] pr-[66mm]">
                       <p className="text-[23px] font-extrabold uppercase leading-none tracking-[0.16em] text-white">
                         Quotation
                       </p>
@@ -611,20 +618,20 @@ export function QuotationDocument({
                     </div>
                     {/* gold chevron side — meta rows (slanted left edge reveals the navy) */}
                     <div
-                      className="absolute bottom-0 right-0 top-0 w-[62mm] py-[2.6mm] pl-[10mm] pr-[3.5mm]"
+                      className="absolute inset-y-0 right-0 w-[62mm] py-[2.2mm] pl-[10mm] pr-[3.5mm]"
                       style={{
                         background: `linear-gradient(115deg, ${GOLD} 0%, ${LIGHT_GOLD} 55%, ${GOLD} 100%)`,
                         clipPath: 'polygon(7mm 0%, 100% 0%, 100% 100%, 0% 100%)',
                       }}
                     >
-                      <div className="flex h-full flex-col justify-center gap-[1.1mm]">
+                      <div className="flex h-full flex-col justify-center gap-[1.2mm]">
                         {metaRows.map(([label, value, mono]) => (
                           <div key={label} className="flex items-baseline justify-between gap-2">
-                            <span className="text-[8px] font-semibold uppercase tracking-[0.06em] text-white/85">
+                            <span className="text-[8px] font-semibold uppercase leading-[1.25] tracking-[0.06em] text-white/85">
                               {label}
                             </span>
                             <span
-                              className={`text-[9.5px] font-bold text-white ${mono ? 'font-mono' : 'tabular-nums'}`}
+                              className={`text-[9.5px] font-bold leading-[1.25] text-white ${mono ? 'font-mono' : 'tabular-nums'}`}
                             >
                               {value}
                             </span>
@@ -719,7 +726,7 @@ export function QuotationDocument({
                     className="mb-[1.2mm] mt-[3mm] text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
                     style={{ color: MUTED }}
                   >
-                    Manpower Rates &mdash; Monthly Amounts
+                    {hasRateBasis ? 'Manpower Hourly Rates \u2014 SAR' : 'Manpower Rates \u2014 Monthly Amounts'}
                   </h3>
                 </>
               ) : (
@@ -767,30 +774,26 @@ export function QuotationDocument({
                 <table className="w-full border-collapse text-[10px]">
                   <thead>
                     <tr style={{ background: NAVY }}>
-                      <th className={`${thCls} w-[7mm] text-center`}>#</th>
-                      <th className={thCls}>
-                        {hasRateBasis ? 'Worker Category / Trade' : 'Description of Goods / Services'}
-                      </th>
-                      <th className={`${thCls} w-[15mm] text-center`}>
-                        {hasRateBasis ? 'No. of Workers' : 'Qty'}
-                      </th>
+                      <th className={`${thCls} w-[8mm] text-center`}>#</th>
                       {hasRateBasis ? (
                         <>
-                          <th className={`${thCls} w-[17mm] text-right`}>Rate / Hour (SAR)</th>
-                          <th className={`${thCls} w-[15mm] text-center`}>Hours / Month</th>
+                          {/* hourly manpower rate card — the boss's column set */}
+                          <th className={thCls}>Trade</th>
+                          <th className={`${thCls} w-[38mm] text-center`}>Per Hours</th>
+                          <th className={`${thCls} w-[42mm] text-right`}>Rate (SAR)</th>
                         </>
                       ) : (
-                        <th className={`${thCls} w-[16mm]`}>Unit</th>
+                        <>
+                          <th className={thCls}>Description of Goods / Services</th>
+                          <th className={`${thCls} w-[15mm] text-center`}>Qty</th>
+                          <th className={`${thCls} w-[16mm]`}>Unit</th>
+                          <th className={`${thCls} w-[24mm] text-right`}>Unit Price</th>
+                          {showDiscountCol ? (
+                            <th className={`${thCls} w-[16mm] text-right`}>Disc.</th>
+                          ) : null}
+                          <th className={`${thCls} w-[25mm] text-right`}>Line Total</th>
+                        </>
                       )}
-                      <th className={`${thCls} w-[24mm] text-right`}>
-                        {hasRateBasis ? 'Rate / Worker / Month' : 'Unit Price'}
-                      </th>
-                      {showDiscountCol ? (
-                        <th className={`${thCls} w-[16mm] text-right`}>Disc.</th>
-                      ) : null}
-                      <th className={`${thCls} w-[25mm] text-right`}>
-                        {hasRateBasis ? 'Monthly Amount (SAR)' : 'Line Total'}
-                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -799,7 +802,7 @@ export function QuotationDocument({
                         <td
                           className={`${tdCls} text-center`}
                           style={{ color: MUTED }}
-                          colSpan={hasRateBasis ? (showDiscountCol ? 8 : 7) : showDiscountCol ? 7 : 6}
+                          colSpan={hasRateBasis ? 4 : showDiscountCol ? 7 : 6}
                         >
                           No line items yet
                         </td>
@@ -821,63 +824,102 @@ export function QuotationDocument({
                           <td className={`${tdCls} text-center tabular-nums`} style={{ color: MUTED }}>
                             {it.sr}
                           </td>
-                          <td className={tdCls}>
-                            <p className="text-[10.5px] font-bold" style={{ color: DARK_NAVY }}>
-                              {it.description}
-                            </p>
-                            {it.subText ? (
-                              <p className="mt-px text-[8.5px] italic" style={{ color: MUTED }}>
-                                {it.subText}
-                              </p>
-                            ) : null}
-                          </td>
-                          <td className={`${tdCls} text-center tabular-nums font-semibold`}>
-                            {it.quantity.toLocaleString('en-US')}
-                          </td>
                           {hasRateBasis ? (
                             <>
-                              <td className={`${tdCls} text-right tabular-nums`}>
-                                {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
+                              <td className={tdCls}>
+                                <p className="text-[10.5px] font-bold" style={{ color: DARK_NAVY }}>
+                                  {it.description}
+                                </p>
+                                {it.subText ? (
+                                  <p className="mt-px text-[8.5px] italic" style={{ color: MUTED }}>
+                                    {it.subText}
+                                  </p>
+                                ) : null}
                               </td>
-                              <td className={`${tdCls} text-center tabular-nums`}>
+                              <td className={`${tdCls} text-center text-[10.5px] tabular-nums`}>
                                 {it.hoursPerMonth != null ? it.hoursPerMonth.toLocaleString('en-US') : '—'}
+                              </td>
+                              <td
+                                className={`${tdCls} text-right text-[10.5px] font-bold tabular-nums`}
+                                style={{ color: DARK_NAVY }}
+                              >
+                                {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
                               </td>
                             </>
                           ) : (
-                            <td className={tdCls}>{it.unit ?? '—'}</td>
+                            <>
+                              <td className={tdCls}>
+                                <p className="text-[10.5px] font-bold" style={{ color: DARK_NAVY }}>
+                                  {it.description}
+                                </p>
+                                {it.subText ? (
+                                  <p className="mt-px text-[8.5px] italic" style={{ color: MUTED }}>
+                                    {it.subText}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className={`${tdCls} text-center tabular-nums font-semibold`}>
+                                {it.quantity.toLocaleString('en-US')}
+                              </td>
+                              <td className={tdCls}>{it.unit ?? '—'}</td>
+                              <td className={`${tdCls} text-right tabular-nums`}>{money(it.unitPrice)}</td>
+                              {showDiscountCol ? (
+                                <td className={`${tdCls} text-right tabular-nums`}>
+                                  {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
+                                </td>
+                              ) : null}
+                              <td className={`${tdCls} text-right font-bold tabular-nums`} style={{ color: DARK_NAVY }}>
+                                {money(it.lineTotal)}
+                              </td>
+                            </>
                           )}
-                          <td className={`${tdCls} text-right tabular-nums`}>{money(it.unitPrice)}</td>
-                          {showDiscountCol ? (
-                            <td className={`${tdCls} text-right tabular-nums`}>
-                              {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
-                            </td>
-                          ) : null}
-                          <td className={`${tdCls} text-right font-bold tabular-nums`} style={{ color: DARK_NAVY }}>
-                            {money(it.lineTotal)}
-                          </td>
                         </tr>
                       ))
                     )}
-                    {/* total row on the last items chunk */}
+                    {/* total row on the last items chunk — hourly quotes total
+                        the PER HOURS column (money totals live in the totals box) */}
                     {chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
                       <tr
                         className="break-inside-avoid"
                         style={{ background: LIGHT_BG, borderTop: `0.6mm solid ${NAVY}` }}
                       >
-                        <td className={tdCls} />
-                        <td className={`${tdCls} text-[10.5px] font-extrabold uppercase tracking-wide`} style={{ color: NAVY }}>
-                          Total {hasRateBasis ? 'Workers' : 'Amount'}
-                        </td>
-                        <td className={`${tdCls} text-center font-extrabold tabular-nums`} style={{ color: NAVY }}>
-                          {hasRateBasis ? totalWorkers.toLocaleString('en-US') : ''}
-                        </td>
-                        {hasRateBasis ? <td /> : null}
-                        {hasRateBasis ? <td /> : null}
-                        <td className={tdCls} />
-                        {showDiscountCol ? <td /> : null}
-                        <td className={`${tdCls} text-right font-extrabold tabular-nums`} style={{ color: NAVY }}>
-                          {money(q.subtotal)}
-                        </td>
+                        {hasRateBasis ? (
+                          <>
+                            <td className={tdCls} />
+                            <td
+                              className={`${tdCls} text-[10.5px] font-extrabold uppercase tracking-wide`}
+                              style={{ color: NAVY }}
+                            >
+                              Total Hours
+                            </td>
+                            <td
+                              className={`${tdCls} text-center font-extrabold tabular-nums`}
+                              style={{ color: NAVY }}
+                            >
+                              {totalHours.toLocaleString('en-US')}
+                            </td>
+                            <td className={tdCls} />
+                          </>
+                        ) : (
+                          <>
+                            <td className={tdCls} />
+                            <td
+                              className={`${tdCls} text-[10.5px] font-extrabold uppercase tracking-wide`}
+                              style={{ color: NAVY }}
+                            >
+                              Total Amount
+                            </td>
+                            <td className={tdCls} />
+                            <td className={tdCls} />
+                            {showDiscountCol ? <td /> : null}
+                            <td
+                              className={`${tdCls} text-right font-extrabold tabular-nums`}
+                              style={{ color: NAVY }}
+                            >
+                              {money(q.subtotal)}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ) : null}
                   </tbody>
@@ -925,7 +967,7 @@ export function QuotationDocument({
                       {/* rows */}
                       <div className="flex items-center justify-between border-b px-3 py-[1.6mm] text-[9.5px]" style={{ borderColor: BORDER, background: '#FFFFFF' }}>
                         <span className="text-neutral-700">
-                          Monthly Subtotal <span style={{ color: MUTED }}>(excl. VAT)</span>
+                          Subtotal <span style={{ color: MUTED }}>(excl. VAT)</span>
                         </span>
                         <span className="font-semibold tabular-nums">{money(q.subtotal)}</span>
                       </div>
@@ -951,7 +993,7 @@ export function QuotationDocument({
                         style={{ background: `linear-gradient(115deg, ${GOLD} 0%, ${LIGHT_GOLD} 55%, ${GOLD} 100%)` }}
                       >
                         <span className="text-[10px] font-extrabold uppercase tracking-[0.08em]">
-                          Total / Month incl. VAT
+                          Total incl. VAT
                         </span>
                         <span className="text-[13px] font-extrabold tabular-nums">{money(q.total)}</span>
                       </div>

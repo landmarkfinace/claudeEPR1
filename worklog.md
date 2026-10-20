@@ -1895,3 +1895,29 @@ Stage Summary:
 - tsc --noEmit clean, bun run lint clean, dev.log no errors, dashboard/quotations regression OK.
 - Verification artifacts: /tmp/qtqa/ (printed-A4.pdf, newprt-*.png, bbox html).
 - Assets (signature/stamp percent-positioning) untouched — still pinned to last page, signatures stay at the foot so existing placements remain aligned.
+
+---
+Task ID: EI-QHRATE
+Agent: main (Z.ai Code)
+Task: Boss feedback on Quotations PDF (screenshot "Screenshot 1448-05-09 at 8.42.12 PM.png" of QTN-2026-0002): (1) "Quotation No and Your ref ektu lekha kata porece" — meta text getting cut; (2) manpower work is hourly, so the table only needs TRADE - PER HOURS - RATE SAR.
+
+Work Log:
+- Diagnosed the cut-off with pixel-level analysis of the boss's screenshot (gold chevron y 212-345, white text bands at exactly y=212 and y=345) + live measurements: the 4 chevron meta rows (4 line-boxes ≈16mm + 3×1.1mm gaps) overflowed the title bar's ~16mm height; justify-center bled them symmetrically past the top/bottom edges where the chevron clip-path sliced the FIRST row (Quotation No.) and LAST row (Your Ref.) — exactly the two rows the boss named. QTN-2026-0002's referenceNo is literally "97" (not truncated data).
+- Fixed src/components/app/print/quotation-print.tsx chevron:
+  * Title bar is now `flex min-h-[23mm]` (was content-height ~16mm); navy side `flex-1 justify-center` centers the QUOTATION title; chevron absolute inset-y-0 now spans the full 23mm.
+  * Chevron vertical padding 2.6→2.2mm, row gap 1.1→1.2mm, meta spans get leading-[1.25] (controlled line boxes). Verified live: text bands now have 13-15px (≈3.5mm) clearance top AND bottom (was 0-1px clipped).
+  * geometryFor page1Fixed recalibrated for the taller bar: 'none' 90→97, artwork modes 80→87 (over-reserve = safe breaks).
+- Hourly rate-card table (print): rate-basis quotations now render exactly the boss's column set — `# | TRADE | PER HOURS | RATE SAR` (wide airy columns, subText detail under the trade). Old columns (No. of Workers / Rate-Hour / Hours-Month / Rate-Worker-Month / Monthly Amount) removed for rate-basis; generic non-manpower quotes keep the classic Description/Qty/Unit/Unit Price/Line Total fallback. Table TOTAL row for rate-basis = "TOTAL HOURS" (sum of hoursPerMonth; money totals live in the totals box). Heading: "Manpower Hourly Rates — SAR" (rate-basis) vs "Manpower Rates — Monthly Amounts" (fallback). Totals box labels neutralized: "Monthly Subtotal"→"Subtotal (excl. VAT)", "Total / Month incl. VAT"→"Total incl. VAT".
+- Editor (views/quotations.tsx) simplified to the hourly workflow: item card = TRADE input + optional detail line on top, then a 3-col grid PER HOURS / RATE (SAR) / LINE TOTAL (read-only). Hidden-but-preserved in form state: unit, workers qty (default 1), per-line discount, monthly rate — old monthly-style quotes (QTN-2026-0001 with 10-worker lines) still edit and re-save correctly. Auto-compute now fills rate × (hours || 1) so a bare rate prices the line; new items default hoursPerMonth '1'. Live totals footer first stat changed "Total Workers / Qty"→"Total Hours".
+- Excel export (api/quotations/[id]/excel/route.ts): rate-basis sheet now Sr | Trade | Per Hours | Rate (SAR) + "Total Hours" row; totals label/value columns adapt (label col 2 / value col 3 for rate-basis, 4/6 for generic); number-format loops and !cols widths follow the mode.
+- Fixed one JSX syntax slip (missing `)` closing the chunk.map ternary) caught by tsc.
+
+Stage Summary:
+- QA all green: `bunx tsc --noEmit` clean, `bun run lint` clean, dev.log no errors (only expected 401 from an unauthenticated curl test).
+- Browser E2E on QTN-2026-0002 (boss's quote): chevron 23mm with 13px symmetric clearances; table headers `# / Trade / Per Hours / Rate (SAR)`; rows STEEL FIXTER 1 | 18.00, HELPER 1 | 18.00; TOTAL HOURS 2. VLM confirms no clipped/overlapping text.
+- Browser E2E on QTN-2026-0001 (8-trade demo): still 2 pages, zero overflow, headers/total-hours 2,080 correct, page 2 has continuation strip + INCLUDED/EXCLUDED + signatures pinned bottom + "Page 2 of 2" footer. CDP print-to-PDF = 2 pages, both filled to the footer, chevron fully legible.
+- Editor E2E: fields load (1/18), rate→25 live-updates Line Total 25.00 + Subtotal 43.00 + VAT 6.45 + Total 49.45 + amount-in-words; Add Item defaults hours '1'; dialog cancelled without saving — DB verified unchanged.
+- Excel E2E: 200, valid xlsx, headers Sr/Trade/Per Hours/Rate (SAR)/Total Hours present, old headers gone, totals 36/5.4.
+- Verification artifacts: /tmp/qa_new_preview.png, /tmp/qa_np-1/2.png (printed PDF pages), /tmp/qa_0001_p1/p2*.png.
+- Cron: created fresh 15-min webDevReview job (id 469468) with QA guardrails; 3 older jobs exist but are disabled by exec limits.
+- Open follow-ups if boss asks: (1) hide/remove the money totals box for pure rate cards; (2) continuation-strip client name uses truncate (shows "Al Noor Development Co…" on long names) — could wrap to 2 lines instead; (3) quotation → e-invoice conversion still a next-phase idea.
