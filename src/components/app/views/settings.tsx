@@ -23,6 +23,7 @@ import {
   EInvoiceSettingsSection,
   GlossarySettingsSection,
 } from '@/components/app/settings/e-invoice-settings'
+import { AiSettingsSection } from '@/components/app/settings/ai-settings'
 import {
   ENV_LABELS,
   ZATCA_ENV_GATEWAYS,
@@ -967,6 +968,9 @@ export function SettingsView() {
 
         {/* ---- E-Invoice print template + translation provider ---- */}
         <EInvoiceSettingsSection />
+
+        {/* ---- AI Assistant provider + usage + logs ---- */}
+        <AiSettingsSection />
 
         {/* ---- EN→AR translation glossary ---- */}
         <GlossarySettingsSection />

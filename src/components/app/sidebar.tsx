@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   Landmark,
   ScrollText,
+  Sparkles,
   CalendarClock,
   Wallet,
   FileSpreadsheet,
@@ -82,6 +83,7 @@ const MENU: MenuGroup[] = [
   {
     items: [
       { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: 'dashboard.view' },
+      { view: 'ai-assistant', label: 'AI Assistant', icon: Sparkles, perm: 'ai.use' },
       { view: 'projects', label: 'Project Management', icon: FolderKanban, perm: 'projects.view' },
       { view: 'clients', label: 'Clients', icon: Building2, perm: 'clients.view' },
       { view: 'deployments', label: 'Worker Deployment', icon: Network, perm: 'clients.view' },

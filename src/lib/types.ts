@@ -816,7 +816,144 @@ export type ViewKey =
   | 'users'
   | 'settings'
   | 'activity-log'
+  | 'ai-assistant'
 
+// ── AI Assistant ──
+
+export type AiChatSummary = {
+  id: string
+  title: string
+  lastPreview: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type AiToolEvent = {
+  name: string
+  args: Record<string, unknown>
+  ok: boolean
+  ms?: number
+  rows?: number
+  summary?: string
+  error?: string
+}
+
+export type AiAttachmentMeta = {
+  name: string
+  type: string
+  size: number
+  extractedChars?: number
+}
+
+export type AiDraft = {
+  type: 'quotation' | 'invoice' | 'po' | 'email' | 'letter'
+  title: string
+  data: Record<string, unknown>
+}
+
+export type AiMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  toolEvents: AiToolEvent[]
+  attachments: AiAttachmentMeta[]
+  drafts: AiDraft[]
+  promptTokens: number
+  completionTokens: number
+  isError: boolean
+  createdAt: string
+  /** client-only streaming state */
+  streaming?: boolean
+}
+
+export type AiSettingsView = {
+  provider: 'builtin' | 'zhipu' | 'anthropic' | 'openai'
+  model: string
+  apiKeyHint: string | null
+  hasKey: boolean
+  baseUrl: string
+  maxTokens: number
+  monthlyLimitSar: number
+  inCostPer1k: number
+  outCostPer1k: number
+  updatedAt: string
+}
+
+export type AiUsageView = {
+  month: {
+    label: string
+    requests: number
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    costSar: number
+  }
+  perUser: {
+    userName: string
+    requests: number
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    costSar: number
+  }[]
+  trend: { label: string; tokens: number; costSar: number }[]
+  sixMonthCost: number
+}
+
+export type AiLogRow = {
+  id: string
+  userName: string | null
+  question: string
+  toolsCalled: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  costSar: number
+  durationMs: number
+  provider: string
+  model: string
+  success: boolean
+  error: string | null
+  createdAt: string
+}
+
+export const AI_DRAFT_ICONS: Record<AiDraft['type'], string> = {
+  quotation: 'quotation',
+  invoice: 'invoice',
+  po: 'po',
+  email: 'email',
+  letter: 'letter',
+}
+
+export const VIEW_LABELS: Partial<Record<ViewKey, string>> = {
+  dashboard: 'Dashboard',
+  projects: 'Project Management',
+  clients: 'Clients',
+  deployments: 'Worker Deployment',
+  'staff-list': 'Staff List',
+  'staff-categories': 'Staff Categories',
+  attendance: 'Staff Attendance',
+  payroll: 'Payroll',
+  advances: 'Worker Advances',
+  'salary-sheet': 'Salary Sheet',
+  'salary-summary': 'Staff Salary Summary',
+  'client-salary-summary': 'Client Salary Summary',
+  'income-list': 'Income List',
+  'expense-list': 'Expense List',
+  'accounts-summary': 'Accounts Summary',
+  'transaction-categories': 'Categories',
+  'vat-return-expense': 'VAT Return Expense',
+  quotations: 'Quotations',
+  'e-invoices': 'E-Invoice',
+  'name-list': 'Name List',
+  'supplier-pos': 'Supplier P.O.',
+  agreements: 'Agreements',
+  roles: 'Roles',
+  users: 'Users',
+  settings: 'Settings',
+  'activity-log': 'Activity Log',
+  'ai-assistant': 'AI Assistant',
+}
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

@@ -27,6 +27,7 @@ import { RolesView } from './roles'
 import { UsersView } from './users'
 import { SettingsView } from './settings'
 import { ActivityLogView } from './activity-log'
+import { AiAssistantView } from './ai-assistant'
 
 export function ViewRouter() {
   const { view } = useAppStore()
@@ -83,6 +84,8 @@ export function ViewRouter() {
       return <SettingsView />
     case 'activity-log':
       return <ActivityLogView />
+    case 'ai-assistant':
+      return <AiAssistantView />
     default:
       return <DashboardView />
   }

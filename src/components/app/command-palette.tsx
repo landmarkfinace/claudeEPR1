@@ -27,6 +27,7 @@ import {
   ScrollText,
   Settings as SettingsIcon,
   ShieldCheck,
+  Sparkles,
   Tags,
   TrendingDown,
   TrendingUp,
@@ -54,6 +55,7 @@ type NavEntry = { view: ViewKey; label: string; icon: React.ComponentType<{ clas
 
 const NAV: NavEntry[] = [
   { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: 'dashboard.view', keywords: 'home overview stats' },
+  { view: 'ai-assistant', label: 'AI Assistant', icon: Sparkles, perm: 'ai.use', keywords: 'chat ai assistant glm claude openai ask questions copilot' },
   { view: 'projects', label: 'Project Management', icon: FolderKanban, perm: 'projects.view', keywords: 'construction sites directory' },
   { view: 'clients', label: 'Clients', icon: Building2, perm: 'clients.view', keywords: 'customer company contact cr' },
   { view: 'deployments', label: 'Worker Deployment', icon: Network, perm: 'clients.view', keywords: 'who works where company allocation mapping bench' },

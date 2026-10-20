@@ -22,6 +22,7 @@ model User {
   sessions             Session[]
   operatedTransactions Transaction[] @relation("Operator")
   vatBills             VatExpenseBill[] @relation("VatBillCreator")
+  aiChats              AiChat[] @relation("AiChatOwner")
 }
 
 model Session {
@@ -734,6 +735,91 @@ model EInvoicePayment {
   createdAt    DateTime @default(now())
 
   @@index([eInvoiceId])
+}
+
+// ═══════════ AI ASSISTANT MODULE ═══════════
+// Conversational AI with read-only ERP tool calling. The AI never writes to
+// the database — drafts are returned as data the user reviews and saves
+// manually through the normal module screens.
+
+// A chat conversation (each user sees only their own chats)
+model AiChat {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("AiChatOwner", fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @default("New chat")
+  // Last message preview for the history list (denormalized, capped length)
+  lastPreview String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AiChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+// One message inside a chat (user question or assistant answer)
+model AiChatMessage {
+  id        String   @id @default(cuid())
+  chatId    String
+  chat      AiChat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      String // user | assistant
+  content   String // markdown answer / question text
+  // JSON array of tool events: [{name, args, ok, ms, rows, summary}]
+  toolEvents String  @default("[]")
+  // JSON array of attachments: [{name, type, size, extractedChars}]
+  attachments String @default("[]")
+  // JSON array of drafts extracted from the answer: [{type, title, data}]
+  drafts    String  @default("[]")
+  promptTokens     Int  @default(0)
+  completionTokens Int  @default(0)
+  isError   Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([chatId, createdAt])
+}
+
+// Single-row AI provider configuration. The API key is stored ENCRYPTED
+// (AES-256-GCM, key derived from a server-side secret) and is NEVER sent to
+// the browser — the settings API returns only a masked hint like "sk-…abc4".
+model AiSettings {
+  id                String   @id @default(cuid())
+  // builtin = sandbox GLM via z-ai-web-dev-sdk (no key needed)
+  // zhipu | anthropic | openai = direct HTTPS calls with the stored key
+  provider          String   @default("builtin")
+  model             String   @default("")
+  apiKeyEnc         String? // AES-256-GCM ciphertext (never leaves the server)
+  baseUrl           String? // optional custom endpoint override
+  maxTokens         Int      @default(4000) // max response length (completion cap)
+  monthlyLimitSar   Float    @default(0) // 0 = unlimited
+  // Cost estimate per 1,000 tokens (SAR) — drives the usage page estimate
+  inCostPer1k       Float    @default(0)
+  outCostPer1k      Float    @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+// Audit + usage row for EVERY assistant request
+model AiUsageLog {
+  id               String   @id @default(cuid())
+  userId           String?
+  userName         String?
+  chatId           String?
+  question         String // capped snippet of the user's question
+  // JSON array of tool names that were called
+  toolsCalled      String   @default("[]")
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  costSar          Float    @default(0)
+  durationMs       Int      @default(0)
+  provider         String   @default("builtin")
+  model            String   @default("")
+  success          Boolean  @default(true)
+  error            String?
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 // Fixed translations that always win over machine translation
