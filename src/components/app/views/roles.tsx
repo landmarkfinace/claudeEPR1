@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Lock, Pencil, Plus, ShieldCheck, Users } from 'lucide-react'
+import { Loader2, Lock, LockOpen, Pencil, Plus, ShieldCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api-client'
 import { useAppStore, can } from '@/lib/store'
@@ -188,6 +188,18 @@ export function RolesView() {
           </Button>
         ) : null}
       </PageHeader>
+
+      <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100">
+        <LockOpen className="mt-0.5 h-5 w-5 shrink-0" />
+        <div className="min-w-0 text-sm">
+          <p className="font-semibold">Full access is enabled for every signed-in user</p>
+          <p className="mt-0.5 leading-relaxed text-emerald-800/90 dark:text-emerald-200/80">
+            All options and modules are open to everyone who logs in — view, create, edit and
+            delete. The role permissions below are kept for reference and organization; they
+            only take effect if company-wide access is restricted again.
+          </p>
+        </div>
+      </div>
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -388,11 +400,12 @@ export function RolesView() {
             <div className="grid gap-3">
               {MODULES.map((m) => {
                 const modulePerms = m.actions.map((a) => `${m.module}.${a}`)
-                // Baseline permissions (e.g. vat.view) count as always selected
+                // Baseline permissions count as always selected
                 const selectedCount = modulePerms.filter(
                   (p) => form.selected.has(p) || BASELINE_PERMISSIONS.has(p)
                 ).length
                 const allSelected = selectedCount === modulePerms.length
+                const allBaseline = modulePerms.every((p) => BASELINE_PERMISSIONS.has(p))
                 return (
                   <div key={m.module} className="rounded-lg border p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -403,7 +416,7 @@ export function RolesView() {
                         Select all
                         <Checkbox
                           checked={form.fullAccess || allSelected}
-                          disabled={form.fullAccess}
+                          disabled={form.fullAccess || allBaseline}
                           onCheckedChange={(v) => toggleModule(m.module, m.actions, v === true)}
                           aria-label={`Select all ${m.label} permissions`}
                         />
@@ -443,8 +456,9 @@ export function RolesView() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              VAT Return Expense viewing is available to every signed-in user. A role with no
-              permissions is view-only — users can sign in but cannot open other modules.
+              Every permission is currently granted to all signed-in users (company-wide full
+              access). The selections stored on this role apply only if that access is later
+              restricted.
             </p>
           </div>
 

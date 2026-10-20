@@ -73,7 +73,7 @@ export function can(
   user: SessionUser | null,
   permission: string
 ): boolean {
-  // Baseline permissions (e.g. vat.view) apply to every signed-in user
+  // Baseline permissions apply to every signed-in user (company-wide full access)
   if (user && BASELINE_PERMISSIONS.has(permission)) return true
   const perms = user?.role?.permissions ?? []
   return perms.includes('*') || perms.includes(permission)

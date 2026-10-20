@@ -51,8 +51,6 @@ export const MODULES: { module: string; label: string; actions: string[]; action
   {
     module: 'vat',
     label: 'VAT Return Expense',
-    // 'view' is a baseline permission — every signed-in user can view VAT bills
-    // (see BASELINE_PERMISSIONS below); create/edit/delete stay role-gated.
     actions: ['view', 'create', 'edit', 'delete'],
     actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
   },
@@ -88,11 +86,18 @@ export const ALL_PERMISSIONS: string[] = MODULES.flatMap((m) =>
 
 /**
  * Baseline permissions granted to EVERY signed-in user, regardless of role.
- * The VAT Return Expense module is visible company-wide: all users can see
- * bills and summaries, while create/edit/delete remain role-gated.
- * Enforced server-side (lib/auth.ts hasPermission) and client-side (lib/store.ts can).
+ *
+ * COMPANY-WIDE FULL ACCESS (owner request): every user who logs in can open
+ * and use ALL modules — view, create, edit and delete everywhere. Role
+ * permissions stored on each role are kept for reference and only take
+ * effect if this baseline is restricted again (e.g. back to
+ * `new Set(['vat.view'])` for view-only VAT access for everyone).
+ *
+ * Enforced server-side (lib/auth.ts hasPermission) and client-side
+ * (lib/store.ts can) — sidebar items, command palette, shortcuts, action
+ * buttons and every API route check against this set first.
  */
-export const BASELINE_PERMISSIONS: ReadonlySet<string> = new Set(['vat.view'])
+export const BASELINE_PERMISSIONS: ReadonlySet<string> = new Set(ALL_PERMISSIONS)
 
 export function isValidPermission(p: string): boolean {
   return p === '*' || ALL_PERMISSIONS.includes(p)
