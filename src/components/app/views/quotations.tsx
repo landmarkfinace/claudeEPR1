@@ -3,34 +3,45 @@
 // Quotations view — business document module for quotes sent to clients:
 //   • stat cards (count, quoted value, accepted value, awaiting decision)
 //   • filter bar (search + status + year) with the shared mobile collapse
-//   • desktop table + mobile stacked cards, row actions Edit / Delete / Print
+//   • desktop table + mobile stacked cards, row actions Edit / Duplicate /
+//     Delete / Print
 //   • add/edit dialog with a live line-items editor (server always recomputes
 //     the final money figures — the in-dialog math is only a preview),
-//     client picker (registered clients) with a free-text fallback
-//   • CSV export of the filtered list, A4 print via QuotationPrintDialog
+//     client picker (registered clients) with a free-text fallback,
+//     per-line discounts, amount-in-words, default T&C auto-fill + save,
+//     drag-and-drop signature & stamp placement, and a live draft preview
+//     rendered by the exact same component as the final print/PDF
+//   • company A4 letterhead manager (upload / mode / margins)
+//   • CSV export of the filtered list, per-quotation Excel (.xlsx) export
 // Role-based: add/edit/delete/print only with quotations.* permissions.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
+  BookmarkPlus,
   Building2,
   Calculator,
   CheckCircle2,
   Clock,
+  Copy,
   Download,
+  Eye,
   FileText,
   Hash,
+  Layers,
   Pencil,
   Plus,
   Printer,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react'
 
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
+import { amountInWords } from '@/lib/amount-words'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
-import type { ClientRow, Paginated, QuotationRow } from '@/lib/types'
+import type { ClientRow, LetterheadConfig, Paginated, QuotationAssetRow, QuotationRow } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -63,6 +74,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 
 import { ConfirmDelete } from '../shared/confirm-delete'
 import { DataTablePagination } from '../shared/data-table-pagination'
@@ -70,8 +82,10 @@ import { EmptyState, TableSkeleton } from '../shared/empty-state'
 import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
-import { QuotationPrintDialog } from '../print/quotation-print'
+import { QuotationPrintDialog, DEFAULT_LETTERHEAD } from '../print/quotation-print'
 import type { QuotationDetail } from '../print/quotation-print'
+import { AssetPlacer } from '../quotations/asset-placer'
+import { LetterheadDialog } from '../quotations/letterhead-dialog'
 
 type QuotationListRow = QuotationRow & { itemCount: number }
 
@@ -153,26 +167,30 @@ type ItemForm = {
   unit: string
   quantity: string
   unitPrice: string
+  discount: string
 }
 
 type QuotationForm = {
   clientId: string
   clientName: string
   subject: string
+  referenceNo: string
   issueDate: string
   validityDate: string
   status: string
+  numberPrefix: string
   discount: string
   vatPercent: string
   notes: string
   terms: string
   items: ItemForm[]
+  assets: QuotationAssetRow[]
 }
 
 let itemKeySeq = 0
 function newItemForm(): ItemForm {
   itemKeySeq += 1
-  return { key: `item-${itemKeySeq}`, description: '', unit: '', quantity: '1', unitPrice: '' }
+  return { key: `item-${itemKeySeq}`, description: '', unit: '', quantity: '1', unitPrice: '', discount: '' }
 }
 
 function emptyForm(vatPercent: number): QuotationForm {
@@ -182,14 +200,17 @@ function emptyForm(vatPercent: number): QuotationForm {
     clientId: '',
     clientName: '',
     subject: '',
+    referenceNo: '',
     issueDate: toDateInputValue(today),
     validityDate: toDateInputValue(validity),
     status: 'draft',
+    numberPrefix: 'QTN',
     discount: '',
     vatPercent: String(vatPercent),
     notes: '',
     terms: '',
     items: [newItemForm()],
+    assets: [],
   }
 }
 
@@ -232,13 +253,32 @@ export function QuotationsView() {
   const [editing, setEditing] = useState<QuotationRow | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<QuotationForm>(() => emptyForm(defaultVatPercent))
-  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [clients, setClients] = useState<ClientRow[]>([])
   const clientsLoaded = useRef(false)
 
-  // ---- print ----
+  // ---- default T&C (auto-fills new quotations) ----
+  const [defaultTerms, setDefaultTerms] = useState<string | null>(null)
+  const defaultTermsRef = useRef<string | null>(null)
+  const defaultTermsLoaded = useRef(false)
+  const [savingTerms, setSavingTerms] = useState(false)
+
+  // ---- letterhead manager ----
+  const [letterheadOpen, setLetterheadOpen] = useState(false)
+  // company letterhead config — printed documents read it from here
+  const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
+  const letterheadLoaded = useRef(false)
+
+  // ---- duplicate action ----
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+  // next-number prediction cache (prefix-year → number) for draft previews
+  const nextNumberCache = useRef<Map<string, string>>(new Map())
+
+  // ---- print / preview ----
   const [printOpen, setPrintOpen] = useState(false)
   const [printQuotation, setPrintQuotation] = useState<QuotationDetail | null>(null)
   const [printLoading, setPrintLoading] = useState(false)
+  // draft preview (unsaved form state rendered by the same print component)
+  const [draftPreview, setDraftPreview] = useState<QuotationDetail | null>(null)
 
   // guard against out-of-order responses when filters/page change quickly
   const requestId = useRef(0)
@@ -304,20 +344,66 @@ export function QuotationsView() {
   const loadClients = useCallback(async () => {
     if (clientsLoaded.current) return
     try {
-      const res = await api.get<Paginated<ClientRow>>('/api/clients?pageSize=100')
-      setClients(res.data.map((c) => ({ id: c.id, name: c.name })))
+      const res = await api.get<Paginated<ClientRow>>('/api/clients?pageSize=200')
+      setClients(res.data)
       clientsLoaded.current = true
     } catch {
       // picker stays empty — free-text fallback still works
     }
   }, [])
 
+  /** Default T&C — cached after the first read (auto-fills new quotations). */
+  const getDefaultTerms = useCallback(async (): Promise<string | null> => {
+    if (defaultTermsLoaded.current) return defaultTermsRef.current
+    defaultTermsLoaded.current = true
+    try {
+      const res = await api.get<{ content: string | null }>('/api/default-terms')
+      defaultTermsRef.current = res.content
+      setDefaultTerms(res.content)
+    } catch {
+      // defaults are optional — silently fall back to an empty Terms box
+    }
+    return defaultTermsRef.current
+  }, [])
+
+  /** Company letterhead — cached after the first read. */
+  const loadLetterhead = useCallback(async () => {
+    if (letterheadLoaded.current) return
+    letterheadLoaded.current = true
+    try {
+      const res = await api.get<LetterheadConfig>('/api/letterhead')
+      setLetterhead({ ...DEFAULT_LETTERHEAD, ...res })
+    } catch {
+      // fall back to the styled typed header
+    }
+  }, [])
+
+  /** Predict the number a NEW quotation will receive (server generator). */
+  const fetchNextNumber = useCallback(async (prefix: string, year: number): Promise<string> => {
+    const key = `${prefix}-${year}`
+    const cached = nextNumberCache.current.get(key)
+    if (cached) return cached
+    try {
+      const res = await api.get<{ quoteNumber: string }>(
+        `/api/quotations/next-number${qs({ prefix, year })}`
+      )
+      nextNumberCache.current.set(key, res.quoteNumber)
+      return res.quoteNumber
+    } catch {
+      return `${prefix}-${year}-0001`
+    }
+  }, [])
+
   // -----------------------------------------------------------------------
   // Add / Edit dialog
   // -----------------------------------------------------------------------
-  function openAdd() {
+  async function openAdd() {
     setEditing(null)
-    setForm(emptyForm(defaultVatPercent))
+    // auto-fill Terms & Conditions from the saved default (if any)
+    const terms = await getDefaultTerms()
+    const f = emptyForm(defaultVatPercent)
+    if (terms) f.terms = terms
+    setForm(f)
     setDialogOpen(true)
     void loadClients()
   }
@@ -325,7 +411,7 @@ export function QuotationsView() {
   // Deep-open the create dialog when arriving via the command palette
   const shouldOpenCreate = useViewIntent('quotations', 'create')
   useEffect(() => {
-    if (shouldOpenCreate) openAdd()
+    if (shouldOpenCreate) void openAdd()
   }, [shouldOpenCreate])
 
   async function openEdit(row: QuotationRow) {
@@ -337,9 +423,11 @@ export function QuotationsView() {
         clientId: full.clientId ?? '',
         clientName: full.clientName,
         subject: full.subject ?? '',
+        referenceNo: full.referenceNo ?? '',
         issueDate: toDateInputValue(full.issueDate),
         validityDate: full.validityDate ? toDateInputValue(full.validityDate) : '',
         status: full.status,
+        numberPrefix: 'QTN',
         discount: full.discount ? String(full.discount) : '',
         vatPercent: String(Math.round(full.vatRate * 100)),
         notes: full.notes ?? '',
@@ -352,11 +440,14 @@ export function QuotationsView() {
             unit: it.unit ?? '',
             quantity: String(it.quantity),
             unitPrice: String(it.unitPrice),
+            discount: it.discount ? String(it.discount) : '',
           }
         }),
+        assets: full.assets ?? [],
       })
       setDialogOpen(true)
       void loadClients()
+      void getDefaultTerms()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open the quotation')
     }
@@ -390,12 +481,19 @@ export function QuotationsView() {
 
   // -----------------------------------------------------------------------
   // LIVE totals preview — mirrors the server-side computation exactly
+  // (per-line discount → line total → subtotal → overall discount → VAT)
   // -----------------------------------------------------------------------
   const calc = useMemo(() => {
     const items = form.items.map((it) => {
       const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
       const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
-      return { quantity, unitPrice, lineTotal: round2(quantity * unitPrice) }
+      const lineDiscount = Math.min(Math.max(0, parseNum(it.discount) ?? 0), round2(quantity * unitPrice))
+      return {
+        quantity,
+        unitPrice,
+        lineDiscount,
+        lineTotal: round2(quantity * unitPrice - lineDiscount),
+      }
     })
     const subtotal = round2(items.reduce((s, it) => s + it.lineTotal, 0))
     const discount = Math.max(0, parseNum(form.discount) ?? 0)
@@ -430,12 +528,20 @@ export function QuotationsView() {
       toast.error('Discount cannot be greater than the subtotal')
       return
     }
-    const items = form.items.map((it) => ({
-      description: it.description.trim(),
-      unit: it.unit.trim() || null,
-      quantity: Math.max(0, parseNum(it.quantity) ?? 0),
-      unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
-    }))
+    const items = form.items.map((it, i) => {
+      const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
+      const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
+      const lineDiscount = Math.max(0, parseNum(it.discount) ?? 0)
+      return {
+        description: it.description.trim(),
+        unit: it.unit.trim() || null,
+        quantity,
+        unitPrice,
+        discount: round2(lineDiscount),
+        lineTotal: round2(quantity * unitPrice - lineDiscount),
+        index: i + 1,
+      }
+    })
     if (items.length === 0 || items.some((it) => !it.description)) {
       toast.error('Every line item needs a description')
       return
@@ -448,11 +554,16 @@ export function QuotationsView() {
       toast.error('Unit prices cannot be negative')
       return
     }
+    if (items.some((it) => it.discount > round2(it.quantity * it.unitPrice))) {
+      toast.error('A line discount cannot be greater than the line amount')
+      return
+    }
 
     const body = {
       clientId: form.clientId || null,
       clientName,
       subject: form.subject.trim() || null,
+      referenceNo: form.referenceNo.trim() || null,
       issueDate: form.issueDate,
       validityDate: form.validityDate || null,
       status: form.status,
@@ -460,7 +571,23 @@ export function QuotationsView() {
       vatRate: calc.vatRate,
       notes: form.notes.trim() || null,
       terms: form.terms.trim() || null,
-      items,
+      items: items.map(({ description, unit, quantity, unitPrice, discount }) => ({
+        description,
+        unit,
+        quantity,
+        unitPrice,
+        discount,
+      })),
+      assets: form.assets.map((a) => ({
+        type: a.type,
+        dataUrl: a.dataUrl,
+        posX: a.posX,
+        posY: a.posY,
+        width: a.width,
+        rotation: a.rotation,
+        visible: a.visible,
+      })),
+      ...(editing ? {} : { numberPrefix: (form.numberPrefix.trim() || 'QTN').toUpperCase() }),
     }
 
     setSaving(true)
@@ -473,6 +600,7 @@ export function QuotationsView() {
         toast.success(`Quotation ${created.quoteNumber} created`)
       }
       setDialogOpen(false)
+      nextNumberCache.current.clear() // predictions are stale after a create
       void load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the quotation')
@@ -489,6 +617,110 @@ export function QuotationsView() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not delete the quotation')
     }
+  }
+
+  /** Duplicate a quotation (items + assets + terms) as a new draft. */
+  async function handleDuplicate(row: QuotationRow) {
+    if (duplicatingId) return
+    setDuplicatingId(row.id)
+    try {
+      const dup = await api.post<QuotationRow>(`/api/quotations/${row.id}/duplicate`, {})
+      nextNumberCache.current.clear()
+      toast.success(`Duplicated as ${dup.quoteNumber} (draft) — open it to adjust details`)
+      void load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not duplicate the quotation')
+    } finally {
+      setDuplicatingId(null)
+    }
+  }
+
+  /** Save the current Terms text as the default for future quotations. */
+  async function handleSaveDefaultTerms() {
+    const content = form.terms.trim()
+    if (!content) {
+      toast.error('Write the terms first, then save them as the default')
+      return
+    }
+    if (savingTerms) return
+    setSavingTerms(true)
+    try {
+      await api.put('/api/default-terms', { content })
+      defaultTermsRef.current = content
+      setDefaultTerms(content)
+      toast.success('Saved — new quotations will start with these terms')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the default terms')
+    } finally {
+      setSavingTerms(false)
+    }
+  }
+
+  /** Build a draft QuotationDetail from the unsaved form for live preview. */
+  function buildDraftDetail(): QuotationDetail {
+    const selected = form.clientId ? clients.find((c) => c.id === form.clientId) ?? null : null
+    const year = form.issueDate ? new Date(`${form.issueDate}T00:00:00`).getFullYear() : new Date().getFullYear()
+    const prefix = (form.numberPrefix.trim() || 'QTN').toUpperCase()
+    return {
+      id: 'draft',
+      quoteNumber: editing?.quoteNumber ?? `${prefix}-${year}-0001`,
+      clientId: form.clientId || null,
+      clientName: form.clientName.trim() || 'Client name',
+      subject: form.subject.trim() || null,
+      referenceNo: form.referenceNo.trim() || null,
+      issueDate: form.issueDate ? new Date(`${form.issueDate}T00:00:00`).toISOString() : new Date().toISOString(),
+      validityDate: form.validityDate ? new Date(`${form.validityDate}T00:00:00`).toISOString() : null,
+      status: form.status,
+      subtotal: calc.subtotal,
+      discount: calc.discount,
+      vatRate: calc.vatRate,
+      vatAmount: calc.vatAmount,
+      total: calc.total,
+      notes: form.notes.trim() || null,
+      terms: form.terms.trim() || null,
+      createdByName: user?.name ?? '',
+      createdAt: new Date().toISOString(),
+      items: form.items.map((it, i) => ({
+        sr: i + 1,
+        description: it.description.trim() || '—',
+        unit: it.unit.trim() || null,
+        quantity: Math.max(0, parseNum(it.quantity) ?? 0),
+        unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
+        discount: Math.max(0, parseNum(it.discount) ?? 0),
+        lineTotal: calc.items[i]?.lineTotal ?? 0,
+      })),
+      assets: form.assets,
+      client: selected
+        ? {
+            id: selected.id,
+            name: selected.name,
+            contactPerson: selected.contactPerson ?? null,
+            phone: selected.phone ?? null,
+            email: selected.email ?? null,
+            address: selected.address ?? null,
+            city: selected.city ?? null,
+            crNumber: selected.crNumber ?? null,
+            vatNumber: selected.vatNumber ?? null,
+          }
+        : null,
+    }
+  }
+
+  function openDraftPreview() {
+    void loadLetterhead()
+    const detail = buildDraftDetail()
+    if (!editing) {
+      // new quotation — predict the real number the server will assign
+      const prefix = (form.numberPrefix.trim() || 'QTN').toUpperCase()
+      const year = detail.issueDate
+        ? new Date(detail.issueDate).getFullYear()
+        : new Date().getFullYear()
+      void fetchNextNumber(prefix, year).then((quoteNumber) => {
+        setDraftPreview((d) => (d ? { ...d, quoteNumber } : d))
+      })
+    }
+    setDraftPreview(detail)
+    setPrintOpen(true)
   }
 
   // -----------------------------------------------------------------------
@@ -564,7 +796,9 @@ export function QuotationsView() {
     if (printLoading) return
     setPrintLoading(true)
     try {
+      void loadLetterhead()
       const full = await api.get<QuotationDetail>(`/api/quotations/${row.id}`)
+      setDraftPreview(null)
       setPrintQuotation(full)
       setPrintOpen(true)
     } catch (e) {
@@ -583,6 +817,12 @@ export function QuotationsView() {
         title="Quotations"
         description={`Prepare price quotations for clients — items, ${vatPercentLabel}% VAT and totals are computed automatically.`}
       >
+        {canEdit ? (
+          <Button variant="outline" size="sm" onClick={() => setLetterheadOpen(true)}>
+            <Layers className="h-4 w-4" />
+            Letterhead
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"
@@ -593,14 +833,14 @@ export function QuotationsView() {
           Export CSV
         </Button>
         {canCreate ? (
-          <Button size="sm" onClick={openAdd}>
+          <Button size="sm" onClick={() => void openAdd()}>
             <Plus className="h-4 w-4" />
             Add Quotation
           </Button>
         ) : null}
       </PageHeader>
 
-      {canCreate ? <MobileFab label="Add Quotation" onClick={openAdd} icon={Plus} /> : null}
+      {canCreate ? <MobileFab label="Add Quotation" onClick={() => void openAdd()} icon={Plus} /> : null}
 
       {/* ---- Stat cards ---- */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -748,8 +988,8 @@ export function QuotationsView() {
                     <TableHead className="w-[110px]">Valid Until</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead className="w-[100px]">Status</TableHead>
-                    {canEdit || canDelete ? (
-                      <TableHead className="w-[130px] text-right">Actions</TableHead>
+                    {canEdit || canDelete || canCreate ? (
+                      <TableHead className="w-[168px] text-right">Actions</TableHead>
                     ) : null}
                   </TableRow>
                 </TableHeader>
@@ -795,7 +1035,7 @@ export function QuotationsView() {
                       <TableCell>
                         <QuoteStatusBadge status={row.status} />
                       </TableCell>
-                      {canEdit || canDelete ? (
+                      {canEdit || canDelete || canCreate ? (
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-0.5">
                             <Button
@@ -808,6 +1048,19 @@ export function QuotationsView() {
                             >
                               <Printer className="h-4 w-4" />
                             </Button>
+                            {canCreate ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => void handleDuplicate(row)}
+                                disabled={duplicatingId === row.id}
+                                aria-label={`Duplicate quotation ${row.quoteNumber}`}
+                                title="Duplicate as draft"
+                              >
+                                <Copy className={duplicatingId === row.id ? 'h-4 w-4 animate-pulse' : 'h-4 w-4'} />
+                              </Button>
+                            ) : null}
                             {canEdit ? (
                               <Button
                                 variant="ghost"
@@ -888,6 +1141,18 @@ export function QuotationsView() {
                       >
                         <Printer className="h-4 w-4" />
                       </Button>
+                      {canCreate ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => void handleDuplicate(row)}
+                          disabled={duplicatingId === row.id}
+                          aria-label={`Duplicate quotation ${row.quoteNumber}`}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      ) : null}
                       {canEdit ? (
                         <Button
                           variant="ghost"
@@ -930,7 +1195,7 @@ export function QuotationsView() {
 
       {/* ---- Add / Edit dialog ---- */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="nice-scrollbar max-h-[90vh] gap-5 overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="nice-scrollbar max-h-[90vh] gap-5 overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{editing ? `Edit Quotation ${editing.quoteNumber}` : 'New Quotation'}</DialogTitle>
             <DialogDescription>
@@ -1016,6 +1281,35 @@ export function QuotationsView() {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="quote-reference">Reference No</Label>
+              <Input
+                id="quote-reference"
+                value={form.referenceNo}
+                onChange={(e) => setField('referenceNo', e.target.value)}
+                placeholder="e.g. PO-2026-118 / client ref"
+              />
+            </div>
+            {!editing ? (
+              <div className="space-y-2">
+                <Label htmlFor="quote-prefix">Number Prefix</Label>
+                <Input
+                  id="quote-prefix"
+                  value={form.numberPrefix}
+                  onChange={(e) =>
+                    setField(
+                      'numberPrefix',
+                      e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
+                    )
+                  }
+                  placeholder="QTN"
+                  className="font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Number will be <span className="font-mono font-semibold">{form.numberPrefix || 'QTN'}-YYYY-NNNN</span>
+                </p>
+              </div>
+            ) : null}
+            <div className="space-y-2">
               <Label htmlFor="quote-status">Status</Label>
               <Select value={form.status} onValueChange={(v) => setField('status', v)}>
                 <SelectTrigger id="quote-status" className="w-full" aria-label="Status">
@@ -1032,7 +1326,20 @@ export function QuotationsView() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="quote-vat">VAT %</Label>
+                <Label htmlFor="quote-vat" className="flex items-center justify-between">
+                  VAT %
+                  <span className="flex items-center gap-1.5">
+                    <Switch
+                      checked={vatPercentLabel > 0}
+                      onCheckedChange={(v) => setField('vatPercent', v ? String(defaultVatPercent) : '0')}
+                      aria-label="Apply VAT"
+                      className="scale-90"
+                    />
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {vatPercentLabel > 0 ? 'VAT' : 'No VAT'}
+                    </span>
+                  </span>
+                </Label>
                 <Input
                   id="quote-vat"
                   type="number"
@@ -1044,7 +1351,7 @@ export function QuotationsView() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="quote-discount">Discount</Label>
+                <Label htmlFor="quote-discount">Discount (overall)</Label>
                 <Input
                   id="quote-discount"
                   type="number"
@@ -1105,7 +1412,7 @@ export function QuotationsView() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 pl-8 sm:grid-cols-4">
+                  <div className="mt-2 grid grid-cols-2 gap-2 pl-8 sm:grid-cols-5">
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Unit</Label>
                       <Input
@@ -1142,6 +1449,19 @@ export function QuotationsView() {
                       />
                     </div>
                     <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Discount</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={it.discount}
+                        onChange={(e) => setItemField(it.key, 'discount', e.target.value)}
+                        placeholder="0.00"
+                        className="h-9 tabular-nums"
+                        aria-label={`Item ${i + 1} discount`}
+                      />
+                    </div>
+                    <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Line Total</Label>
                       <p className="flex h-9 items-center rounded-md border bg-background px-2.5 text-sm font-semibold tabular-nums">
                         {formatNumber(calc.items[i]?.lineTotal ?? 0)}
@@ -1174,6 +1494,10 @@ export function QuotationsView() {
                   <p className="text-base font-bold tabular-nums">{money(calc.total)}</p>
                 </div>
               </div>
+              <p className="mt-2 border-t pt-2 text-[11px] italic text-muted-foreground">
+                <span className="font-semibold not-italic">Amount in words:</span>{' '}
+                {amountInWords(calc.total, currency)}
+              </p>
             </div>
           </div>
 
@@ -1189,7 +1513,37 @@ export function QuotationsView() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="quote-terms">Terms &amp; Conditions</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="quote-terms">Terms &amp; Conditions</Label>
+                <span className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-muted-foreground"
+                    disabled={!defaultTerms || savingTerms}
+                    onClick={() => defaultTerms && setField('terms', defaultTerms)}
+                    title="Replace with the saved default terms"
+                  >
+                    <Undo2 className="mr-1 h-3 w-3" />
+                    Load default
+                  </Button>
+                  {canEdit ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[11px] text-emerald-600 hover:text-emerald-700"
+                      disabled={savingTerms}
+                      onClick={() => void handleSaveDefaultTerms()}
+                      title="Save the current text as the default for new quotations"
+                    >
+                      <BookmarkPlus className="mr-1 h-3 w-3" />
+                      {savingTerms ? 'Saving…' : 'Save as default'}
+                    </Button>
+                  ) : null}
+                </span>
+              </div>
               <Textarea
                 id="quote-terms"
                 value={form.terms}
@@ -1200,9 +1554,33 @@ export function QuotationsView() {
             </div>
           </div>
 
-          <DialogFooter>
+          {/* ---- Signature & stamp placement ---- */}
+          {canEdit ? (
+            <div className="space-y-2 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm">Signature &amp; Company Stamp</Label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Upload PNG/JPEG (≤ 2 MB), drag to position on the A4 page — the exact placement is
+                    reproduced in the printed document.
+                  </p>
+                </div>
+              </div>
+              <AssetPlacer
+                assets={form.assets}
+                onChange={(next) => setField('assets', next)}
+                onError={(msg) => toast.error(msg)}
+              />
+            </div>
+          ) : null}
+
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
+            </Button>
+            <Button variant="outline" onClick={openDraftPreview} disabled={saving}>
+              <Eye className="h-4 w-4" />
+              Preview
             </Button>
             <Button onClick={() => void handleSubmit()} disabled={saving}>
               {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Quotation'}
@@ -1211,8 +1589,29 @@ export function QuotationsView() {
         </DialogContent>
       </Dialog>
 
-      {/* ---- Print dialog ---- */}
-      <QuotationPrintDialog quotation={printQuotation} open={printOpen} onOpenChange={setPrintOpen} />
+      {/* ---- Company letterhead manager ---- */}
+      <LetterheadDialog
+        open={letterheadOpen}
+        onOpenChange={setLetterheadOpen}
+        onSaved={(cfg) => {
+          letterheadLoaded.current = true
+          setLetterhead(cfg)
+        }}
+      />
+
+      {/* ---- Print / preview dialog (saved documents + live drafts) ---- */}
+      <QuotationPrintDialog
+        quotation={printQuotation ?? draftPreview}
+        letterhead={letterhead}
+        open={printOpen}
+        onOpenChange={(v) => {
+          setPrintOpen(v)
+          if (!v) {
+            setPrintQuotation(null)
+            setDraftPreview(null)
+          }
+        }}
+      />
     </div>
   )
 }

@@ -374,6 +374,8 @@ model Quotation {
   client       Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
   clientName   String // snapshot / free-text party (for non-registered clients)
   subject      String?
+  // Optional client / PO reference shown on the document ("Ref No")
+  referenceNo  String?
   issueDate    DateTime
   validityDate DateTime?
   status       String        @default("draft") // draft | sent | accepted | rejected | expired
@@ -388,10 +390,51 @@ model Quotation {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  items QuotationItem[]
+  items  QuotationItem[]
+  assets QuotationAsset[]
 
   @@index([issueDate])
   @@index([status])
+}
+
+// Signature / stamp image placed on the quotation document. Positions and
+// sizes are stored as PERCENTAGES of the A4 page (210×297mm) so they scale
+// exactly the same on screen, in print and in the exported PDF.
+model QuotationAsset {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  type        String // 'signature' | 'stamp'
+  dataUrl     String // base64 data URL (PNG/JPEG, validated ≤ 2 MB)
+  posX        Float     @default(70) // left edge, % of page width
+  posY        Float     @default(80) // top edge, % of page height
+  width       Float     @default(18) // image width, % of page width
+  rotation    Float     @default(0) // degrees, clockwise
+  visible     Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([quotationId])
+}
+
+// Single-row company letterhead configuration for A4 business documents.
+// mode: 'none' (styled text header) | 'header' | 'header_footer' | 'full'.
+model CompanyLetterhead {
+  id                 String   @id @default(cuid())
+  mode               String   @default("none")
+  headerImage        String? // data URL — repeats at the top of every page
+  footerImage        String? // data URL — repeats at the bottom of every page
+  fullPageImage      String? // data URL — full A4 background on every page
+  showCompanyDetails Boolean  @default(true) // textual company block on/off
+  headerHeightMm     Float    @default(30) // reserved top band (mm) on A4
+  footerHeightMm     Float    @default(18) // reserved bottom band (mm) on A4
+  updatedAt          DateTime @updatedAt
+}
+
+// Single-row default Terms & Conditions that auto-fills new quotations.
+model DefaultTerms {
+  id        String   @id @default(cuid())
+  content   String
+  updatedAt DateTime @updatedAt
 }
 
 model QuotationItem {
@@ -403,7 +446,8 @@ model QuotationItem {
   unit        String?
   quantity    Float     @default(1)
   unitPrice   Float     @default(0)
-  lineTotal   Float     @default(0)
+  discount    Float     @default(0) // per-line discount amount (currency)
+  lineTotal   Float     @default(0) // qty × unitPrice − discount
 
   @@index([quotationId])
 }

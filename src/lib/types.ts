@@ -832,7 +832,32 @@ export type DocItemRow = {
   unit: string | null
   quantity: number
   unitPrice: number
+  /** Optional per-line discount amount (quotations). */
+  discount?: number
   lineTotal: number
+}
+
+/** Signature / stamp image placed on a quotation (percent-of-A4 coordinates). */
+export type QuotationAssetRow = {
+  id?: string
+  type: 'signature' | 'stamp'
+  dataUrl: string
+  posX: number // % of page width (left edge)
+  posY: number // % of page height (top edge)
+  width: number // % of page width
+  rotation: number // degrees clockwise
+  visible: boolean
+}
+
+/** Company letterhead configuration (single row, GET /api/letterhead). */
+export type LetterheadConfig = {
+  mode: 'none' | 'header' | 'header_footer' | 'full'
+  headerImage: string | null
+  footerImage: string | null
+  fullPageImage: string | null
+  showCompanyDetails: boolean
+  headerHeightMm: number
+  footerHeightMm: number
 }
 
 export type QuotationRow = {
@@ -841,6 +866,7 @@ export type QuotationRow = {
   clientId: string | null
   clientName: string
   subject: string | null
+  referenceNo: string | null
   issueDate: string
   validityDate: string | null
   status: string
@@ -854,6 +880,7 @@ export type QuotationRow = {
   createdByName: string | null
   createdAt: string
   items?: DocItemRow[]
+  assets?: QuotationAssetRow[]
 }
 
 export type InvoiceRow = {
