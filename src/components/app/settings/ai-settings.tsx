@@ -474,12 +474,13 @@ export function AiSettingsSection() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex max-w-40 flex-wrap gap-1">
-                          {parseTools(l.toolsCalled).length === 0 ? (
+                          {aggregateTools(l.toolsCalled).length === 0 ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
-                            parseTools(l.toolsCalled).map((t) => (
-                              <Badge key={t} variant="outline" className="px-1.5 py-0 font-mono text-[9px] font-normal">
-                                {t}
+                            aggregateTools(l.toolsCalled).map((t) => (
+                              <Badge key={t.name} variant="outline" className="px-1.5 py-0 font-mono text-[9px] font-normal">
+                                {t.name}
+                                {t.count > 1 ? <span className="ml-0.5 text-muted-foreground">×{t.count}</span> : null}
                               </Badge>
                             ))
                           )}
@@ -531,4 +532,13 @@ function parseTools(raw: string): string[] {
   } catch {
     return []
   }
+}
+
+/** Aggregate tool calls so each unique tool appears once (with call count) — avoids duplicate React keys. */
+function aggregateTools(raw: string): { name: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const t of parseTools(raw)) {
+    counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  return [...counts.entries()].map(([name, count]) => ({ name, count }))
 }

@@ -2089,3 +2089,16 @@ Stage Summary:
 - Data notes: demo workforce seeded additively (guard key aiDemoSeeded) — boss can delete via normal UIs; INV-2026-00006 is a demo aging invoice (deletable from E-Invoice module); QA user/role removed; Kazi's AI chats cleared (contained pre-guard test answers); usage logs retained as demo audit data.
 - Known limits: builtin GLM has no native streaming (server-paced reveal used instead); external providers (Zhipu/Anthropic/OpenAI) need outbound network + user keys — clear error if unreachable; SDK ignores tool_choice (mitigated by prompt + server guard); voice input needs Chrome/Edge (graceful error elsewhere).
 - Next-round candidates: (1) quotation→e-invoice conversion button; (2) record-level context wiring (e.g. auto-detect selected invoice in E-Invoice view); (3) server-side direct PDF download for answers; (4) chat pinning/folders; (5) Arabic UI strings for the AI page.
+
+---
+Task ID: FIX-AI-LOGS-DUPKEY
+Agent: main (Z.ai Code)
+Task: User-reported console error — "Encountered two children with the same key, `site_manpower`" in Settings > AI Assistant request-log table (src/components/app/settings/ai-settings.tsx:481).
+
+Work Log:
+- Root cause: AiUsageLog.toolsCalled is a JSON array of tool names per request; when the agent calls the same tool twice in one request (e.g. ["site_manpower","search_employees","site_manpower"] in log cmvh7oiws…), rendering one Badge per entry used the tool name as React key → duplicate keys.
+- Fix in src/components/app/settings/ai-settings.tsx: added aggregateTools() helper (Map-based name→count aggregation over parseTools()); logs table now renders one Badge per UNIQUE tool with a muted "×N" suffix when called more than once; key={t.name} is guaranteed unique.
+- Verified with agent-browser: navigated Dashboard → Settings → AI Assistant section; DB-confirmed the offending log row (site_manpower ×2) still present and rendered as "site_manpower ×2 search_employees" badges; console clean (0 errors/warnings); `bun run lint` clean.
+
+Stage Summary:
+- Duplicate-key React warning eliminated; log table now shows deduplicated tool badges with call counts (better readability too). No other modules touched.
