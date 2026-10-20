@@ -1979,3 +1979,34 @@ Stage Summary:
 - Behavior notes: (1) PO numbers are now MPO-YYYY-NNNN; (2) hoursPerMonth drives the print column mode — set = manpower template columns, null = classic direct-amount columns; (3) letterhead artwork modes work like the Quotation (Settings → Letterhead shared config; compact margins when none).
 - Cron: created fresh 15-min webDevReview job (id 469520).
 - Open follow-ups if boss asks: (1) supplier directory (save/reuse suppliers instead of typing each P.O.); (2) P.O. → e-invoice linkage for supplier bills; (3) Arabic bilingual variant of the P.O. template like the E-Invoice.
+
+---
+Task ID: 1 (this session — Supplier P.O. saved-suppliers directory)
+Agent: main (Z.ai Code)
+Task: User request (Banglish): "Supplier P.O. TE SUPPLER ADD KORAR OPTION BANAW AND TA SAVE THAKBE" — add an option to add suppliers inside the Supplier P.O. module, with the suppliers persisted (saved in the DB).
+
+Work Log:
+- Prisma schema: new `Supplier` model (name @unique, contactPerson, phone, email, address, vatNumber, crNumber, status active|inactive, notes, createdByName, timestamps, purchaseOrders relation) + `SupplierPo.supplierId String?` FK (SetNull). Ran `bun run db:push` — synced, client regenerated.
+- Types (`src/lib/types.ts`): added `SupplierRow` (incl. poCount); `SupplierPoRow.supplierId: string | null`.
+- Permissions (`src/lib/permissions.ts`): new module `suppliers` (view/create/edit/delete) — included in ALL_PERMISSIONS so BASELINE grants full access (company-wide policy).
+- New API `src/app/api/suppliers/mappers.ts` + `route.ts` + `[id]/route.ts`:
+  - GET list (search across name/contact/phone/email/address/VAT/CR, status filter, sort=name, paginated, totals activeCount/inactiveCount, `suppliers.view` = requireAuth)
+  - POST create (unique name, `suppliers.create`), PUT update (`suppliers.edit`), DELETE (`suppliers.delete` — POs survive via SetNull), GET one. logActivity module 'supplier'.
+- Supplier P.O. API: `supplier-pos/mappers.ts` now maps supplierId + new `resolveSupplierLink(tx, …)` helper (explicit supplierId validated; `saveSupplier` flag → find-by-exact-name, create when missing seeded from P.O. fields, existing rows only get BLANK profile fields filled — never overwrite). POST + PUT accept `supplierId`/`saveSupplier` and run the resolver inside the transaction.
+- View `src/components/app/views/supplier-pos.tsx`:
+  - "Suppliers" header button with live count badge → Manage Suppliers dialog (search, add/edit form: name*, contact, phone, email, address, VAT, C.R., status, notes; list with max-h scroll, contact/phone/email/address, VAT/C.R. chips, per-supplier P.O. count, edit/delete; delete explains POs are kept).
+  - P.O. dialog: "Saved Supplier (optional)" Select (✍️ New — type manually + all suppliers) + adjacent + button opening the manage dialog mid-flow; picking a supplier auto-fills name/attention/phone/address/VAT/CR and shows "Saved supplier — details auto-filled" badge; "Save this supplier for future P.O.s" checkbox (default checked for new P.O.s / unlinked edits, hidden when a saved supplier is picked).
+  - Submit: link kept only when typed name still matches the picked entry; `saveSupplier` triggers server find-or-create; suppliers list refreshed after saves.
+- Seeded 3 realistic demo suppliers via new idempotent `prisma/seed-suppliers.ts` (Al-Rashid Manpower Services Co., Gulf Technical Support Contracting, Eastern Province Labour Supply Est. — Saudi contacts/addresses/VAT/C.R.).
+- OPS: dev server was DOWN at session start; plain `nohup … &` and `setsid … &` single-fork launches were reaped ~45s after the Bash call (known issue — see previous rounds). Restored with the documented double-fork pattern `( ( setsid bun run dev >> dev.log 2>&1 < /dev/null & ) ; )` — verified stable past the reaper window.
+
+Stage Summary:
+- VERIFIED E2E via agent-browser (desktop 1920×1080 + mobile 390×844, 0 page errors, 0 console errors, dev.log clean):
+  - Suppliers button shows count 3 → open dialog → all 3 seeded entries render with edit/delete.
+  - Added "Dammam Steel Works Co." via dialog form → count 4, appears in list (persisted).
+  - Add P.O. → picked saved supplier → ALL 6 fields auto-filled correctly → created MPO-2026-0002 linked to it.
+  - New P.O. typed manually ("Tabuk Civil Contracting Est.") with checkbox checked → P.O. created AND supplier auto-saved to directory (count 5) with contact/phone seeded + "1 P.O." link count.
+  - Reload → everything persisted. Edited supplier phone via dialog → updated. Deleted QA supplier + both QA P.O.s → DB left with 4 suppliers (3 seed + Dammam demo) and original demo P.O. MPO-2026-0001.
+  - tsc: 0 app errors (only pre-existing skills/ folder errors); `bun run lint`: clean.
+- 15-min webDevReview cron already exists (job 469520) — not duplicated (currently system-disabled due to exec limits).
+- Next-round candidates: (1) link existing un-linked P.O.s to directory entries (match by name backfill); (2) supplier detail drawer with P.O. history; (3) CSV export of suppliers directory; (4) show supplier chips in P.O. list rows for linked entries.

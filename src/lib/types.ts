@@ -921,9 +921,28 @@ export type NameListRow = {
   createdAt: string
 }
 
+/** Saved supplier directory row (GET /api/suppliers) — picked from a dropdown
+ *  when creating Supplier P.O.s so details auto-fill and persist. */
+export type SupplierRow = {
+  id: string
+  name: string
+  contactPerson: string | null
+  phone: string | null
+  email: string | null
+  address: string | null
+  vatNumber: string | null
+  crNumber: string | null
+  status: string // active | inactive
+  notes: string | null
+  createdByName: string | null
+  createdAt: string
+  poCount: number
+}
+
 export type SupplierPoRow = {
   id: string
   poNumber: string
+  supplierId: string | null
   supplierName: string
   supplierPhone: string | null
   attention: string | null

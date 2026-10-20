@@ -485,9 +485,34 @@ model NameListEntry {
   @@index([name])
 }
 
+// Saved supplier directory — the boss asked for an "add supplier" option inside
+// the Supplier P.O. module so frequently-used suppliers are stored once and
+// picked from a dropdown on every new P.O. (details auto-fill).
+model Supplier {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  contactPerson String? // default "Attention / Attn" on new P.O.s
+  phone         String?
+  email         String?
+  address       String?
+  vatNumber     String? // Saudi VAT reg no (15 digits)
+  crNumber      String? // Commercial Registration no
+  status        String    @default("active") // active | inactive
+  notes         String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  purchaseOrders SupplierPo[]
+
+  @@index([status])
+}
+
 model SupplierPo {
   id            String    @id @default(cuid())
   poNumber      String    @unique // e.g. MPO-2026-0001
+  supplierId    String? // link to the saved Supplier directory (optional)
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   supplierName  String
   supplierPhone String?
   attention     String?

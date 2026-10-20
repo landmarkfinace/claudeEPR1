@@ -79,6 +79,12 @@ export const MODULES: { module: string; label: string; actions: string[]; action
     actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
   },
   {
+    module: 'suppliers',
+    label: 'Suppliers (Directory)',
+    actions: ['view', 'create', 'edit', 'delete'],
+    actionLabels: { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' },
+  },
+  {
     module: 'agreements',
     label: 'Agreements',
     actions: ['view', 'create', 'edit', 'delete'],

@@ -23,9 +23,11 @@ import {
   Download,
   Eye,
   Hash,
+  Mail,
   Package,
   PackageCheck,
   Pencil,
+  Phone,
   Plus,
   Printer,
   Trash2,
@@ -36,7 +38,7 @@ import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
-import type { LetterheadConfig, Paginated, SupplierPoRow } from '@/lib/types'
+import type { LetterheadConfig, Paginated, SupplierPoRow, SupplierRow } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -69,6 +71,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 
 import { ConfirmDelete } from '../shared/confirm-delete'
 import { DataTablePagination } from '../shared/data-table-pagination'
@@ -93,6 +96,37 @@ type PoTotals = {
 type PoResponse = Paginated<PoListRow> & {
   totals: PoTotals
   years: number[]
+}
+
+type SupplierListResponse = Paginated<SupplierRow> & {
+  totals: { activeCount: number; inactiveCount: number }
+}
+
+/** Saved-supplier directory form (string fields for smooth typing). */
+type SupplierDirForm = {
+  name: string
+  contactPerson: string
+  phone: string
+  email: string
+  address: string
+  vatNumber: string
+  crNumber: string
+  status: string
+  notes: string
+}
+
+function emptySupplierForm(): SupplierDirForm {
+  return {
+    name: '',
+    contactPerson: '',
+    phone: '',
+    email: '',
+    address: '',
+    vatNumber: '',
+    crNumber: '',
+    status: 'active',
+    notes: '',
+  }
 }
 
 const EMPTY_TOTALS: PoTotals = {
@@ -225,6 +259,10 @@ export function SupplierPosView() {
   const canCreate = can(user, 'supplierpo.create')
   const canEdit = can(user, 'supplierpo.edit')
   const canDelete = can(user, 'supplierpo.delete')
+  // supplier directory (add / edit / delete saved suppliers)
+  const canCreateSupplier = can(user, 'suppliers.create')
+  const canEditSupplier = can(user, 'suppliers.edit')
+  const canDeleteSupplier = can(user, 'suppliers.delete')
 
   const currentYear = new Date().getFullYear()
 
@@ -257,6 +295,22 @@ export function SupplierPosView() {
   const [printLoading, setPrintLoading] = useState(false)
   // draft preview (unsaved form state rendered by the same print component)
   const [draftPreview, setDraftPreview] = useState<SupplierPoDetail | null>(null)
+
+  // ---- saved suppliers directory ("add supplier" + persistence) ----
+  const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false)
+  const [suppliersOpen, setSuppliersOpen] = useState(false)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const debouncedSupplierSearch = useDebounce(supplierSearch)
+  const [supplierFormOpen, setSupplierFormOpen] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<SupplierRow | null>(null)
+  const [savingSupplier, setSavingSupplier] = useState(false)
+  const [supplierForm, setSupplierForm] = useState<SupplierDirForm>(emptySupplierForm)
+
+  // picked saved supplier inside the P.O. dialog ('' = type manually)
+  const [pickedSupplierId, setPickedSupplierId] = useState('')
+  // "save this supplier for future P.O.s" checkbox
+  const [saveSupplier, setSaveSupplier] = useState(true)
 
   // company letterhead config — the printed P.O. reads it from here
   const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
@@ -314,6 +368,48 @@ export function SupplierPosView() {
     void load()
   }, [load])
 
+  // -----------------------------------------------------------------------
+  // Saved suppliers directory — loaded once for the P.O. dropdown and kept
+  // fresh after every add/edit/delete. Server caps pageSize at 100, so walk
+  // the pages (hard cap 10 pages = 1000 suppliers).
+  // -----------------------------------------------------------------------
+  const loadSuppliers = useCallback(async () => {
+    setSuppliersLoading(true)
+    try {
+      const all: SupplierRow[] = []
+      let p = 1
+      for (;;) {
+        const res = await api.get<SupplierListResponse>(
+          `/api/suppliers${qs({ page: p, pageSize: 100, sort: 'name' })}`
+        )
+        all.push(...res.data)
+        if (p >= res.totalPages || res.data.length === 0 || p >= 10) break
+        p += 1
+      }
+      setSuppliers(all)
+    } catch {
+      // dropdown simply stays empty — P.O.s can always be typed manually
+      setSuppliers([])
+    } finally {
+      setSuppliersLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadSuppliers()
+  }, [loadSuppliers])
+
+  // Client-side filter for the manage dialog list (list is fully loaded)
+  const filteredSuppliers = useMemo(() => {
+    const q = debouncedSupplierSearch.trim().toLowerCase()
+    if (!q) return suppliers
+    return suppliers.filter((s) =>
+      [s.name, s.contactPerson, s.phone, s.email, s.address, s.vatNumber, s.crNumber]
+        .filter(Boolean)
+        .some((v) => (v as string).toLowerCase().includes(q))
+    )
+  }, [suppliers, debouncedSupplierSearch])
+
   const yearOptions = useMemo(() => {
     const set = new Set<number>(years)
     set.add(currentYear)
@@ -335,6 +431,8 @@ export function SupplierPosView() {
   function openAdd() {
     setEditing(null)
     setForm(emptyForm(defaultVatPercent))
+    setPickedSupplierId('')
+    setSaveSupplier(true)
     setDialogOpen(true)
   }
 
@@ -378,6 +476,8 @@ export function SupplierPosView() {
           }
         }),
       })
+      setPickedSupplierId(full.supplierId ?? '')
+      setSaveSupplier(!full.supplierId)
       setDialogOpen(true)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open the purchase order')
@@ -451,6 +551,109 @@ export function SupplierPosView() {
   const vatPercentLabel = Math.round(calc.vatRate * 100)
   const isManpower = calc.hoursPerMonth !== null
 
+  // -----------------------------------------------------------------------
+  // Saved suppliers directory — add / edit / delete (persists in the DB)
+  // -----------------------------------------------------------------------
+  function openSuppliersDialog() {
+    setSupplierFormOpen(false)
+    setEditingSupplier(null)
+    setSuppliersOpen(true)
+    void loadSuppliers()
+  }
+
+  function openAddSupplier() {
+    setEditingSupplier(null)
+    setSupplierForm(emptySupplierForm())
+    setSupplierFormOpen(true)
+  }
+
+  function openEditSupplier(s: SupplierRow) {
+    setEditingSupplier(s)
+    setSupplierForm({
+      name: s.name,
+      contactPerson: s.contactPerson ?? '',
+      phone: s.phone ?? '',
+      email: s.email ?? '',
+      address: s.address ?? '',
+      vatNumber: s.vatNumber ?? '',
+      crNumber: s.crNumber ?? '',
+      status: s.status,
+      notes: s.notes ?? '',
+    })
+    setSupplierFormOpen(true)
+  }
+
+  function setSupplierField<K extends keyof SupplierDirForm>(key: K, value: SupplierDirForm[K]) {
+    setSupplierForm((f) => ({ ...f, [key]: value }))
+  }
+
+  async function handleSupplierSubmit() {
+    const name = supplierForm.name.trim()
+    if (!name) {
+      toast.error('Supplier name is required')
+      return
+    }
+    setSavingSupplier(true)
+    try {
+      const body = {
+        name,
+        contactPerson: supplierForm.contactPerson.trim() || null,
+        phone: supplierForm.phone.trim() || null,
+        email: supplierForm.email.trim() || null,
+        address: supplierForm.address.trim() || null,
+        vatNumber: supplierForm.vatNumber.trim() || null,
+        crNumber: supplierForm.crNumber.trim() || null,
+        status: supplierForm.status,
+        notes: supplierForm.notes.trim() || null,
+      }
+      if (editingSupplier) {
+        const updated = await api.put<SupplierRow>(`/api/suppliers/${editingSupplier.id}`, body)
+        toast.success(`Supplier "${updated.name}" updated`)
+      } else {
+        const created = await api.post<SupplierRow>('/api/suppliers', body)
+        toast.success(`Supplier "${created.name}" saved — it will auto-fill on future P.O.s`)
+      }
+      setSupplierFormOpen(false)
+      setEditingSupplier(null)
+      await loadSuppliers()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the supplier')
+    } finally {
+      setSavingSupplier(false)
+    }
+  }
+
+  async function handleSupplierDelete(s: SupplierRow) {
+    try {
+      await api.del(`/api/suppliers/${s.id}`)
+      toast.success(`Supplier "${s.name}" deleted`)
+      if (pickedSupplierId === s.id) setPickedSupplierId('')
+      await loadSuppliers()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete the supplier')
+    }
+  }
+
+  /** Picking a saved supplier auto-fills the whole P.O. supplier block. */
+  function pickSupplier(id: string) {
+    if (id === '__manual__') {
+      setPickedSupplierId('')
+      return
+    }
+    const s = suppliers.find((x) => x.id === id)
+    if (!s) return
+    setPickedSupplierId(id)
+    setForm((f) => ({
+      ...f,
+      supplierName: s.name,
+      attention: s.contactPerson ?? '',
+      supplierPhone: s.phone ?? '',
+      supplierAddress: s.address ?? '',
+      supplierVat: s.vatNumber ?? '',
+      supplierCr: s.crNumber ?? '',
+    }))
+  }
+
   async function handleSubmit() {
     // Friendly client-side validation before hitting the API
     const supplierName = form.supplierName.trim()
@@ -481,8 +684,17 @@ export function SupplierPosView() {
       return
     }
 
+    // Saved-supplier link: only keep the pick when the typed name still
+    // matches the directory entry (the user may have edited the name after
+    // picking — that makes it a manual / new supplier again).
+    const picked = suppliers.find((s) => s.id === pickedSupplierId)
+    const linkSupplierId = picked && picked.name === supplierName ? picked.id : null
+    const saveThisSupplier = saveSupplier && !linkSupplierId
+
     const body = {
       supplierName,
+      supplierId: linkSupplierId,
+      saveSupplier: saveThisSupplier,
       supplierPhone: form.supplierPhone.trim() || null,
       attention: form.attention.trim() || null,
       supplierAddress: form.supplierAddress.trim() || null,
@@ -513,6 +725,9 @@ export function SupplierPosView() {
       }
       setDialogOpen(false)
       void load()
+      // the save may have created / enriched a directory entry — keep the
+      // dropdown fresh so it shows up immediately
+      if (saveThisSupplier || linkSupplierId) void loadSuppliers()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the purchase order')
     } finally {
@@ -637,6 +852,7 @@ export function SupplierPosView() {
     return {
       id: 'draft',
       poNumber: 'DRAFT',
+      supplierId: null,
       supplierName,
       supplierPhone: form.supplierPhone.trim() || null,
       attention: form.attention.trim() || null,
@@ -681,6 +897,17 @@ export function SupplierPosView() {
         title="Supplier P.O."
         description={`Issue purchase orders to suppliers — items, ${vatPercentLabel}% VAT and totals are computed automatically.`}
       >
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={openSuppliersDialog}
+        >
+          <Building2 className="h-4 w-4" />
+          Suppliers
+          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground">
+            {suppliers.length}
+          </span>
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -1042,8 +1269,60 @@ export function SupplierPosView() {
 
           {/* ---- Supplier details ---- */}
           <div className="space-y-3">
-            <p className="text-sm font-semibold">Supplier</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Supplier</p>
+              {pickedSupplierId ? (
+                <Badge
+                  variant="outline"
+                  className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+                >
+                  Saved supplier — details auto-filled
+                </Badge>
+              ) : null}
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="po-saved-supplier">Saved Supplier (optional)</Label>
+                <div className="flex gap-2">
+                  <Select
+                    value={pickedSupplierId || '__manual__'}
+                    onValueChange={pickSupplier}
+                  >
+                    <SelectTrigger id="po-saved-supplier" className="w-full" aria-label="Saved supplier">
+                      <SelectValue placeholder="Pick a saved supplier…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__manual__">
+                        ✍️ New — type details manually
+                      </SelectItem>
+                      {suppliers.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                          {s.status !== 'active' ? ' (inactive)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={openSuppliersDialog}
+                    aria-label="Add or manage saved suppliers"
+                    title="Add / manage suppliers"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {pickedSupplierId
+                    ? 'Details filled from the supplier directory — edit below only for this P.O.'
+                    : suppliers.length === 0
+                      ? 'No saved suppliers yet — use + to add one, or type the details below.'
+                      : 'Pick a saved supplier to auto-fill the details below.'}
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="po-supplier">
                   Supplier Name <span className="text-destructive">*</span>
@@ -1101,6 +1380,28 @@ export function SupplierPosView() {
                 />
               </div>
             </div>
+            {!pickedSupplierId ? (
+              <label
+                htmlFor="po-save-supplier"
+                className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed bg-muted/30 p-3 transition-colors hover:bg-muted/60"
+              >
+                <Checkbox
+                  id="po-save-supplier"
+                  checked={saveSupplier}
+                  onCheckedChange={(v) => setSaveSupplier(v === true)}
+                  className="mt-0.5"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium">
+                    Save this supplier for future P.O.s
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    The name, contact, address, VAT and C.R. details are stored in the supplier
+                    directory and auto-fill the next time you pick this supplier.
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
 
           {/* ---- P.O. details (ORDER strip) ---- */}
@@ -1388,6 +1689,282 @@ export function SupplierPosView() {
               {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create P.O.'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---- Manage saved suppliers dialog ---- */}
+      <Dialog open={suppliersOpen} onOpenChange={setSuppliersOpen}>
+        <DialogContent className="nice-scrollbar max-h-[90vh] gap-4 overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-muted-foreground" />
+              Suppliers
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+                {suppliers.length}
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              Saved suppliers stay in the system — pick one when creating a P.O. and the details
+              auto-fill. Deleting a supplier never deletes its purchase orders.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* toolbar: search + add */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <SearchInput
+              value={supplierSearch}
+              onChange={setSupplierSearch}
+              placeholder="Search suppliers…"
+              className="w-full sm:flex-1"
+            />
+            {canCreateSupplier ? (
+              <Button
+                size="sm"
+                variant={supplierFormOpen ? 'outline' : 'default'}
+                className="sm:w-auto"
+                onClick={() => (supplierFormOpen ? setSupplierFormOpen(false) : openAddSupplier())}
+              >
+                {supplierFormOpen ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                {supplierFormOpen ? 'Close Form' : 'Add Supplier'}
+              </Button>
+            ) : null}
+          </div>
+
+          {/* add / edit form */}
+          {supplierFormOpen ? (
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+              <p className="text-sm font-semibold">
+                {editingSupplier ? `Edit — ${editingSupplier.name}` : 'New Supplier'}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="sup-name">
+                    Supplier Name <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="sup-name"
+                    value={supplierForm.name}
+                    onChange={(e) => setSupplierField('name', e.target.value)}
+                    placeholder="Supplier / company name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-contact">Contact Person</Label>
+                  <Input
+                    id="sup-contact"
+                    value={supplierForm.contactPerson}
+                    onChange={(e) => setSupplierField('contactPerson', e.target.value)}
+                    placeholder="e.g. Mr. Faisal Al-Otaibi"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-phone">Phone</Label>
+                  <Input
+                    id="sup-phone"
+                    value={supplierForm.phone}
+                    onChange={(e) => setSupplierField('phone', e.target.value)}
+                    placeholder="+966 …"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-email">Email</Label>
+                  <Input
+                    id="sup-email"
+                    type="email"
+                    value={supplierForm.email}
+                    onChange={(e) => setSupplierField('email', e.target.value)}
+                    placeholder="accounts@supplier.com"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="sup-address">Address</Label>
+                  <Input
+                    id="sup-address"
+                    value={supplierForm.address}
+                    onChange={(e) => setSupplierField('address', e.target.value)}
+                    placeholder="District, City, Country"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-vat">VAT No.</Label>
+                  <Input
+                    id="sup-vat"
+                    value={supplierForm.vatNumber}
+                    onChange={(e) => setSupplierField('vatNumber', e.target.value)}
+                    placeholder="300000000000003"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-cr">C.R. No.</Label>
+                  <Input
+                    id="sup-cr"
+                    value={supplierForm.crNumber}
+                    onChange={(e) => setSupplierField('crNumber', e.target.value)}
+                    placeholder="1010 000 000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-status">Status</Label>
+                  <Select
+                    value={supplierForm.status}
+                    onValueChange={(v) => setSupplierField('status', v)}
+                  >
+                    <SelectTrigger id="sup-status" className="w-full" aria-label="Supplier status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sup-notes">Notes</Label>
+                  <Input
+                    id="sup-notes"
+                    value={supplierForm.notes}
+                    onChange={(e) => setSupplierField('notes', e.target.value)}
+                    placeholder="Optional internal notes"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSupplierFormOpen(false)}
+                  disabled={savingSupplier}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={() => void handleSupplierSubmit()} disabled={savingSupplier}>
+                  {savingSupplier ? 'Saving…' : editingSupplier ? 'Save Changes' : 'Save Supplier'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {/* list */}
+          {suppliersLoading && suppliers.length === 0 ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-muted/50" />
+              ))}
+            </div>
+          ) : filteredSuppliers.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-6 text-center">
+              <Building2 className="mx-auto h-8 w-8 text-muted-foreground/60" />
+              <p className="mt-2 text-sm font-medium">
+                {debouncedSupplierSearch
+                  ? 'No suppliers match your search'
+                  : 'No saved suppliers yet'}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {debouncedSupplierSearch
+                  ? 'Try a different name, phone or VAT number.'
+                  : 'Add your first supplier — it will be saved and auto-fill future P.O.s.'}
+              </p>
+              {canCreateSupplier && !debouncedSupplierSearch && !supplierFormOpen ? (
+                <Button size="sm" variant="outline" className="mt-3" onClick={openAddSupplier}>
+                  <Plus className="h-4 w-4" />
+                  Add Supplier
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <ul className="nice-scrollbar max-h-[46vh] space-y-2 overflow-y-auto pr-1">
+              {filteredSuppliers.map((s) => (
+                <li
+                  key={s.id}
+                  className={cn(
+                    'rounded-xl border p-3 transition-colors hover:bg-muted/30',
+                    s.status !== 'active' && 'opacity-70'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                        <Building2 className="h-4 w-4 text-muted-foreground" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {s.name}
+                          {s.status !== 'active' ? (
+                            <Badge variant="outline" className="ml-2 text-[10px] text-muted-foreground">
+                              Inactive
+                            </Badge>
+                          ) : null}
+                        </p>
+                        {s.contactPerson ? (
+                          <p className="truncate text-xs text-muted-foreground">
+                            Attn: {s.contactPerson}
+                          </p>
+                        ) : null}
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                          {s.phone ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {s.phone}
+                            </span>
+                          ) : null}
+                          {s.email ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {s.email}
+                            </span>
+                          ) : null}
+                          {s.address ? <span className="truncate">{s.address}</span> : null}
+                        </div>
+                        {s.vatNumber || s.crNumber ? (
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {s.vatNumber ? (
+                              <span className="rounded border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+                                VAT {s.vatNumber}
+                              </span>
+                            ) : null}
+                            {s.crNumber ? (
+                              <span className="rounded border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+                                C.R. {s.crNumber}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+                        {s.poCount} P.O.{s.poCount === 1 ? '' : 's'}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        {canEditSupplier ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => openEditSupplier(s)}
+                            aria-label={`Edit supplier ${s.name}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : null}
+                        {canDeleteSupplier ? (
+                          <ConfirmDelete
+                            onConfirm={() => void handleSupplierDelete(s)}
+                            title="Delete supplier?"
+                            description={`"${s.name}" will be removed from the supplier directory.${
+                              s.poCount
+                                ? ` Its ${s.poCount} purchase order${s.poCount === 1 ? '' : 's'} will be kept.`
+                                : ''
+                            }`}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </DialogContent>
       </Dialog>
 

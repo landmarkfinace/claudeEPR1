@@ -18,7 +18,7 @@ import {
   parseDate,
   logActivity,
 } from '@/lib/api-helpers'
-import { mapPo, poInclude } from '../mappers'
+import { mapPo, poInclude, resolveSupplierLink } from '../mappers'
 
 const PO_STATUSES = ['draft', 'ordered', 'received', 'cancelled'] as const
 
@@ -38,6 +38,8 @@ const itemSchema = z.object({
 const poUpdateSchema = z.object({
   poNumber: z.string().min(1).max(40).optional(), // normally not edited (auto-generated)
   supplierName: z.string().min(1, 'Supplier name is required').max(160, 'Supplier name is too long'),
+  supplierId: z.string().nullable().optional(), // link to the saved suppliers directory
+  saveSupplier: z.boolean().optional(), // "save this supplier for future P.O.s"
   supplierPhone: z.string().nullable().optional(),
   attention: z.string().nullable().optional(),
   issueDate: z.string().min(1, 'Issue date is required'),
@@ -150,10 +152,23 @@ export async function PUT(req: NextRequest, { params }: Params) {
     // Full replace: items are deleted and recreated in the same transaction
     const updated = await db.$transaction(async (tx) => {
       await tx.supplierPoItem.deleteMany({ where: { poId: id } })
+      // saved-supplier directory link (explicit pick or find-or-create)
+      const supplierId = await resolveSupplierLink(tx, {
+        supplierId: body.supplierId ?? null,
+        saveSupplier: body.saveSupplier,
+        name: supplierName,
+        phone: body.supplierPhone?.trim() || null,
+        attention: body.attention?.trim() || null,
+        address: body.supplierAddress?.trim() || null,
+        vat: body.supplierVat?.trim() || null,
+        cr: body.supplierCr?.trim() || null,
+        createdByName: auth.name,
+      })
       return tx.supplierPo.update({
         where: { id },
         data: {
           ...(poNumber ? { poNumber } : {}),
+          supplierId,
           supplierName,
           supplierPhone: body.supplierPhone?.trim() || null,
           attention: body.attention?.trim() || null,
