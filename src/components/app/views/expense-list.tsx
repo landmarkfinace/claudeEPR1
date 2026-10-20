@@ -33,7 +33,7 @@ import {
   X,
 } from 'lucide-react'
 
-import { api, qs } from '@/lib/api-client'
+import { api, qs, getAuthToken } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, monthName, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
@@ -148,7 +148,12 @@ async function fetchAllPages<T>(
 async function uploadReceipt(txId: string, file: File) {
   const fd = new FormData()
   fd.append('file', file)
-  const res = await fetch(`/api/transactions/${txId}/receipt`, { method: 'POST', body: fd })
+  const res = await fetch(`/api/transactions/${txId}/receipt`, {
+    method: 'POST',
+    body: fd,
+    // Bearer fallback for iframe contexts where cookies are blocked
+    headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : undefined,
+  })
   let body: unknown = null
   try {
     body = await res.json()

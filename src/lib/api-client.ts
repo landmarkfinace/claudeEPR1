@@ -1,4 +1,29 @@
 // Client-side API wrapper for all fetch calls
+
+// Session token fallback for iframe contexts (sandbox preview panel), where
+// browsers block SameSite=Lax cookies. After login the token is stored here
+// and attached to every request as `Authorization: Bearer <token>`.
+// In first-party contexts the httpOnly cookie still does the primary work —
+// the header is simply ignored server-side when the cookie already resolves.
+const TOKEN_KEY = 'lig_session_token'
+
+export function setAuthToken(token: string | null | undefined): void {
+  try {
+    if (token) window.localStorage.setItem(TOKEN_KEY, token)
+    else window.localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // localStorage unavailable (private mode etc.) — cookie path still works
+  }
+}
+
+export function getAuthToken(): string | null {
+  try {
+    return window.localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {
@@ -9,10 +34,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken()
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {}),
     },
     cache: 'no-store',
@@ -24,6 +51,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     // non-JSON response
   }
   if (!res.ok) {
+    if (res.status === 401) {
+      // Session gone/expired — drop the stored token so the app returns to
+      // the login screen instead of retrying with dead credentials.
+      setAuthToken(null)
+    }
     const message =
       (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
         ? body.error

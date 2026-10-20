@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   User,
 } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api, setAuthToken } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
 import type { SessionUser } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -162,7 +162,13 @@ export function LoginScreen() {
     setError(null)
     setLoading(true)
     try {
-      const res = await api.post<{ user: SessionUser }>('/api/auth/login', { email, password })
+      const res = await api.post<{ user: SessionUser; token?: string }>('/api/auth/login', {
+        email,
+        password,
+      })
+      // Store the session token for iframe contexts (preview panel) where
+      // cookies are blocked — sent as Authorization: Bearer by api-client.
+      setAuthToken(res.token ?? null)
       try {
         if (remember) window.localStorage.setItem(REMEMBER_KEY, email.trim())
         else window.localStorage.removeItem(REMEMBER_KEY)

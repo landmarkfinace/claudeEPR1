@@ -13,7 +13,7 @@ import { Topbar } from '@/components/app/topbar'
 import { CommandPalette } from '@/components/app/command-palette'
 import { LoginScreen } from '@/components/app/login-screen'
 import { ViewRouter } from '@/components/app/views/registry'
-import { api } from '@/lib/api-client'
+import { api, setAuthToken } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
 import type { AppSettings, SessionUser } from '@/lib/types'
 
@@ -37,7 +37,13 @@ export function App() {
           api.get<{ settings: AppSettings }>('/api/settings').catch(() => null),
         ])
         if (cancelled) return
-        if (meRes?.user) setUser(meRes.user)
+        if (meRes?.user) {
+          setUser(meRes.user)
+        } else {
+          // No valid session — drop any stale bearer token (e.g. session was
+          // destroyed server-side or expired) so we start clean.
+          setAuthToken(null)
+        }
         if (settingsRes?.settings) setSettings(settingsRes.settings)
       } finally {
         if (!cancelled) setBooting(false)
@@ -55,6 +61,7 @@ export function App() {
     } catch {
       // ignore
     }
+    setAuthToken(null)
     setUser(null)
     toast.success('Signed out successfully')
   }, [setUser])

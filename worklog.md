@@ -1262,3 +1262,30 @@ Stage Summary:
 - COMPANY-WIDE FULL ACCESS IS ON: any user who logs in can see and use every option in the system. Roles still exist for organization, but their permission lists only matter if the baseline is restricted again (one-line revert: BASELINE_PERMISSIONS back to a smaller set, e.g. `new Set(['vat.view'])`).
 - Owner credentials: admin@landmarkintergulf.com / Landmark@2025 (admin) and viewer@landmarkintergulf.com / Demo@2025 (demo non-admin, kept intentionally so the owner can verify — delete from Users module if unwanted).
 - Gotchas for the cron agent: (1) DO NOT revert BASELINE_PERMISSIONS to a smaller set — full access for all signed-in users is the owner's explicit request; (2) the Demo Viewer account is intentional demo data; (3) the skills/ tsc fixes keep regressing — after autonomous rounds run `bunx tsc --noEmit` and re-apply if needed; (4) after any prisma db:push restart the dev server; (5) do not re-introduce demo seeding anywhere.
+
+---
+Task ID: iframe-auth-bearer-fallback
+Agent: main (Z.ai Code)
+Task: User report (Bengali): "Email: admin@landmarkintergulf.com Password: Landmark@2025 eta die login korco kintu ase na" + screenshot — user logs in with the correct admin credentials but the Dashboard shows "Unable to load dashboard / Authentication required".
+
+Work Log:
+- DIAGNOSIS (from screenshot via VLM + dev.log + DB): the login itself SUCCEEDED every time — the sidebar showed "landmarkintergulf / Super Admin" and the Session table had 5 rows (06:04–06:21, repeated attempts). But every follow-up GET (/api/dashboard, /api/users, /api/roles) returned 401 "Authentication required". ROOT CAUSE: the user views the app in the sandbox PREVIEW PANEL — a cross-site IFRAME. The session cookie is `SameSite=Lax; httpOnly` → browsers (Chrome/Safari) refuse to store/send Lax cookies in third-party iframe contexts → login POST returns 200 + user JSON (so the client-side store shows the user), but all subsequent API calls arrive cookie-less → 401 → "Unable to load dashboard".
+- FIX — DUAL AUTH (cookie + Bearer token), cookie stays primary:
+  1. src/lib/auth.ts: getSessionUser() refactored — new lookupSession(token) helper; primary path reads the lig_session cookie; FALLBACK reads `Authorization: Bearer <token>` header (via next/headers) when the cookie is absent/rejected. One choke point — every API route (requireAuth/requirePermission) benefits automatically.
+  2. src/app/api/auth/login/route.ts: response JSON now includes `token` alongside `user` (the same 64-hex session token the cookie would carry).
+  3. src/app/api/auth/logout/route.ts: destroys the session from cookie OR Bearer header OR {token} JSON body; still clears the cookie.
+  4. src/lib/api-client.ts: new TOKEN_KEY 'lig_session_token' in localStorage + setAuthToken/getAuthToken exports; request() attaches `Authorization: Bearer` when a token exists; on any 401 the stored token is auto-cleared. (Bug fixed while rewriting: qs() ternary needed `: ''`.)
+  5. login-screen.tsx: after successful login stores res.token via setAuthToken.
+  6. app.tsx: handleLogout clears the token; boot() clears any STALE token when /api/auth/me returns user:null (covers server-side session loss, logout from another tab, expiry).
+  7. Two raw-fetch call sites given the Bearer header too: expense-list.tsx uploadReceipt (multipart) and settings.tsx handleBackup (backup download).
+- QA (curl + agent-browser):
+  - curl: login returns {user, token(64)}; Bearer-only GET /api/dashboard → 200 with full JSON; Bearer-only /api/auth/me → 200 user; no cookie+no token → 401 (security intact).
+  - UI login → token stored, Dashboard loads. **Cleared ALL browser cookies (iframe simulation) → reload → Dashboard STILL LOADS via Bearer (200 in dev.log), "Total Staff" KPIs render, no error state.** Bearer-only POST/DELETE staff-category create→delete → 200. Raw-fetch logout via Bearer → session destroyed; stale token auto-cleared on next boot (verified).
+  - Full UI cycle re-verified after fix: login → Dashboard → Users module (New User button) → VAT module (Add Bill button) → UI logout → back to login screen with localStorage token cleared.
+  - Console/errors clean after fresh reload (old api-client HMR artifacts gone); tsc 0 errors; lint 0 problems; dev.log shows only 200s post-fix.
+- NOTE for the user: the fix requires ONE fresh sign-in from the login screen (so the token gets stored) — then the preview panel keeps them signed in.
+
+Stage Summary:
+- Login in the sandbox preview iframe now works end-to-end: the app authenticates via a localStorage Bearer token when the browser blocks the session cookie, while the httpOnly cookie remains the primary mechanism for direct/new-tab access. Logout, 401 handling and stale-token cleanup all covered.
+- The user should simply sign in again with admin@landmarkintergulf.com / Landmark@2025 — the dashboard will now load inside the preview panel (and in "Open in New Tab" as before).
+- Gotchas for the cron agent: (1) do NOT remove the Bearer fallback in getSessionUser or the Authorization header in api-client — the preview panel depends on it; (2) any NEW raw fetch() call must attach the Bearer header (pattern: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()` } : undefined); (3) /api/auth/me returns 200 with user:null when unauthenticated (not 401) — the 401 auto-clear does not fire for it; boot() handles the stale-token cleanup instead; (4) keep the login response shape {user, token}.

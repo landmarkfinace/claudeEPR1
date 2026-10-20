@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react'
 import { Building2, DatabaseBackup, ImagePlus, Loader2, RotateCcw, Save, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { api, ApiError } from '@/lib/api-client'
+import { api, ApiError, getAuthToken } from '@/lib/api-client'
 import { useAppStore, can } from '@/lib/store'
 import { PAY_TYPE_LABELS, type AppSettings, type PayType } from '@/lib/types'
 import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
@@ -78,7 +78,11 @@ export function SettingsView() {
     if (backingUp) return
     setBackingUp(true)
     try {
-      const res = await fetch('/api/backup', { credentials: 'same-origin' })
+      const res = await fetch('/api/backup', {
+        credentials: 'same-origin',
+        // Bearer fallback for iframe contexts where cookies are blocked
+        headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : undefined,
+      })
       if (!res.ok) {
         let message = 'Backup failed'
         try {

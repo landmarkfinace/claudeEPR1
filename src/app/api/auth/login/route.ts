@@ -74,7 +74,10 @@ export async function POST(req: NextRequest) {
       description: `${user.name} signed in`,
     })
 
-    const res = ok({ user: sessionUser })
+    // Token is ALSO returned in the JSON body: the client stores it and sends
+    // it as an Authorization: Bearer header. Required for the sandbox preview
+    // iframe where SameSite=Lax cookies are blocked by the browser.
+    const res = ok({ user: sessionUser, token })
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: 'lax',

@@ -2,7 +2,7 @@
 import 'server-only'
 import { randomBytes, scrypt as _scrypt, timingSafeEqual } from 'crypto'
 import { promisify } from 'util'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { db } from '@/lib/db'
 import { BASELINE_PERMISSIONS } from '@/lib/permissions'
 import type { SessionUser } from '@/lib/types'
@@ -56,11 +56,8 @@ function parsePermissions(raw: string | null | undefined): string[] {
   }
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+async function lookupSession(token: string): Promise<SessionUser | null> {
   try {
-    const cookieStore = await cookies()
-    const token = cookieStore.get(SESSION_COOKIE)?.value
-    if (!token) return null
     const session = await db.session.findUnique({
       where: { token },
       include: {
@@ -88,6 +85,32 @@ export async function getSessionUser(): Promise<SessionUser | null> {
           }
         : null,
     }
+  } catch {
+    return null
+  }
+}
+
+export async function getSessionUser(): Promise<SessionUser | null> {
+  try {
+    // 1) Primary: session cookie (first-party contexts — direct tab / new tab)
+    const cookieStore = await cookies()
+    const token = cookieStore.get(SESSION_COOKIE)?.value
+    if (token) {
+      const user = await lookupSession(token)
+      if (user) return user
+    }
+
+    // 2) Fallback: Authorization: Bearer <token> header — required when the
+    //    app runs inside the sandbox preview IFRAME, where browsers block
+    //    SameSite=Lax cookies (third-party context). The client stores the
+    //    token in localStorage (same-origin as the iframe) and sends it here.
+    const headerList = await headers()
+    const authHeader = headerList.get('authorization')
+    if (authHeader?.startsWith('Bearer ')) {
+      const bearer = authHeader.slice('Bearer '.length).trim()
+      if (bearer) return lookupSession(bearer)
+    }
+    return null
   } catch {
     return null
   }
