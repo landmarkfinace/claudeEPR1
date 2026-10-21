@@ -622,6 +622,39 @@ export type DashboardData = {
     deployedWorkers: number
     topClients: { id: string; name: string; city: string | null; workers: number }[]
   } | null
+  /** Active / on-site / available workers (null without staff.view) */
+  workforce?: { active: number; onSite: number; available: number; inInterview: number } | null
+  /** Open e-invoice balances (null without einvoices.view) */
+  receivables?: {
+    openCount: number
+    outstanding: number
+    overdueCount: number
+    overdueAmount: number
+    invoicedThisMonth: number
+  } | null
+  /** Quotations awaiting reply + open supplier P.O.s (fields null without the module permission) */
+  pipeline?: {
+    quotationsSent: number | null
+    quotationsSentValue: number | null
+    quotationsDraft: number | null
+    posOrdered: number | null
+    posOrderedValue: number | null
+  } | null
+  /** Name lists dated today (null without namelist.view) */
+  todayLists?: {
+    listCount: number
+    workerCount: number
+    lists: {
+      id: string
+      listNo: string
+      time: string | null
+      clientName: string
+      subjectName: string
+      subjectColor: string
+      status: string
+      workers: number
+    }[]
+  } | null
 }
 
 export type DocumentAlert = {

@@ -103,10 +103,13 @@ export async function GET(req: NextRequest) {
       expense: round2(b.expense),
     }))
 
-    const recentActivityRows = await db.activityLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 8,
-    })
+    // Activity feed is only sent to users who may open the Activity Log
+    const recentActivityRows = hasPermission(auth, 'activity.view')
+      ? await db.activityLog.findMany({
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+        })
+      : []
     const recentActivity = recentActivityRows.map((a) => ({
       id: a.id,
       userName: a.userName,
@@ -201,7 +204,11 @@ export async function GET(req: NextRequest) {
         db.client.count(),
         db.client.count({ where: { status: 'active' } }),
         db.projectStaff.findMany({
-          where: { project: { clientId: { not: null } } },
+          // only real, active workers count as deployed (soft-deleted / inactive excluded)
+          where: {
+            project: { clientId: { not: null } },
+            staff: { deletedAt: null, status: 'active' },
+          },
           select: {
             staffId: true,
             project: { select: { client: { select: { id: true, name: true, city: true } } } },
@@ -241,6 +248,165 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // ---- Workforce availability (staff.view gated) ----
+    let workforce: { active: number; onSite: number; available: number; inInterview: number } | null = null
+    if (hasPermission(auth, 'staff.view')) {
+      try {
+        const [onSiteRows, inInterview] = await Promise.all([
+          db.projectStaff.findMany({
+            where: { staff: { deletedAt: null, status: 'active' } },
+            select: { staffId: true },
+            distinct: ['staffId'],
+          }),
+          db.staff.count({
+            where: { deletedAt: null, status: 'active', deploymentStatus: 'in_interview' },
+          }),
+        ])
+        const onSite = onSiteRows.length
+        workforce = {
+          active: totalStaff,
+          onSite,
+          available: Math.max(totalStaff - onSite, 0),
+          inInterview,
+        }
+      } catch {
+        workforce = null
+      }
+    }
+
+    // ---- Receivables: open e-invoices (einvoices.view gated) ----
+    let receivables: {
+      openCount: number
+      outstanding: number
+      overdueCount: number
+      overdueAmount: number
+      invoicedThisMonth: number
+    } | null = null
+    if (hasPermission(auth, 'einvoices.view')) {
+      try {
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+        const [openRows, monthAgg] = await Promise.all([
+          db.eInvoice.findMany({
+            where: { docType: 'invoice', status: { in: ['issued', 'partially_paid'] } },
+            select: { totalDue: true, paidAmount: true, dueDate: true },
+          }),
+          db.eInvoice.aggregate({
+            where: {
+              docType: 'invoice',
+              status: { not: 'draft' },
+              issueDate: { gte: monthStart, lte: chartEnd },
+            },
+            _sum: { totalDue: true },
+          }),
+        ])
+        let outstanding = 0
+        let overdueCount = 0
+        let overdueAmount = 0
+        for (const r of openRows) {
+          const bal = Math.max(r.totalDue - r.paidAmount, 0)
+          outstanding += bal
+          if (r.dueDate && r.dueDate < todayStart && bal > 0.004) {
+            overdueCount += 1
+            overdueAmount += bal
+          }
+        }
+        receivables = {
+          openCount: openRows.length,
+          outstanding: round2(outstanding),
+          overdueCount,
+          overdueAmount: round2(overdueAmount),
+          invoicedThisMonth: round2(monthAgg._sum.totalDue ?? 0),
+        }
+      } catch {
+        receivables = null
+      }
+    }
+
+    // ---- Pipeline: quotations awaiting reply + open supplier P.O.s ----
+    let pipeline: {
+      quotationsSent: number | null
+      quotationsSentValue: number | null
+      quotationsDraft: number | null
+      posOrdered: number | null
+      posOrderedValue: number | null
+    } | null = null
+    const canQuotes = hasPermission(auth, 'quotations.view')
+    const canPos = hasPermission(auth, 'supplierpo.view')
+    if (canQuotes || canPos) {
+      try {
+        const [qSent, qDraft, poOrdered] = await Promise.all([
+          canQuotes
+            ? db.quotation.aggregate({ where: { status: 'sent' }, _count: { _all: true }, _sum: { total: true } })
+            : null,
+          canQuotes ? db.quotation.count({ where: { status: 'draft' } }) : null,
+          canPos
+            ? db.supplierPo.aggregate({ where: { status: 'ordered' }, _count: { _all: true }, _sum: { total: true } })
+            : null,
+        ])
+        pipeline = {
+          quotationsSent: qSent ? qSent._count._all : null,
+          quotationsSentValue: qSent ? round2(qSent._sum.total ?? 0) : null,
+          quotationsDraft: qDraft,
+          posOrdered: poOrdered ? poOrdered._count._all : null,
+          posOrderedValue: poOrdered ? round2(poOrdered._sum.total ?? 0) : null,
+        }
+      } catch {
+        pipeline = null
+      }
+    }
+
+    // ---- Today's name lists (namelist.view gated) ----
+    let todayLists: {
+      listCount: number
+      workerCount: number
+      lists: {
+        id: string
+        listNo: string
+        time: string | null
+        clientName: string
+        subjectName: string
+        subjectColor: string
+        status: string
+        workers: number
+      }[]
+    } | null = null
+    if (hasPermission(auth, 'namelist.view')) {
+      try {
+        const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+        const rows = await db.nameList.findMany({
+          where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'cancelled' } },
+          select: {
+            id: true,
+            listNo: true,
+            time: true,
+            status: true,
+            client: { select: { name: true } },
+            subject: { select: { name: true, color: true } },
+            _count: { select: { workers: true } },
+          },
+          orderBy: [{ time: 'asc' }, { seq: 'asc' }],
+        })
+        todayLists = {
+          listCount: rows.length,
+          workerCount: rows.reduce((s, r) => s + r._count.workers, 0),
+          lists: rows.slice(0, 8).map((r) => ({
+            id: r.id,
+            listNo: r.listNo,
+            time: r.time,
+            clientName: r.client?.name ?? '—',
+            subjectName: r.subject.name,
+            subjectColor: r.subject.color,
+            status: r.status,
+            workers: r._count.workers,
+          })),
+        }
+      } catch {
+        todayLists = null
+      }
+    }
+
     return ok({
       stats: {
         totalStaff,
@@ -256,6 +422,10 @@ export async function GET(req: NextRequest) {
       recentActivity,
       documentAlerts,
       clientDeployment,
+      workforce,
+      receivables,
+      pipeline,
+      todayLists,
     })
   } catch {
     return serverError()

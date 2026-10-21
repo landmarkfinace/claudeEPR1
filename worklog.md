@@ -2167,3 +2167,19 @@ Stage Summary:
 - Delivered: direct "New worker" quick-add in Name Lists (editor button + inside picker + create-mode draft flow), TEMP-Iqama handling, missing-data ⚠ carried into the row, activity logs, and one-step bigger fonts everywhere names appear (screen editor/picker/lists/today + A4 print rows/thead/capsules with a dedicated larger name column tier). Fixed a pre-existing create-mode picker selection-loss bug along the way (initialSelectedIds). All browser-verified; demo data back to its original state (NL-2026-0001..0006 counts 4/3/3/2/25).
 - Known limits: quick-add is guarded by namelist.edit (users with list-edit but not staff.create can register workers — intended for speed, revisit if RBAC granularity needed); TEMP- Iqama placeholders print as-is until updated from Employees; DB-file-watcher reload quirk remains (environmental, not app code).
 - Next-round candidates: record-level context in AI assistant for name lists; quotation→e-invoice conversion; server-side direct PDF download; Arabic RTL name-list variant; demobilization demo walkthrough.
+
+---
+Task ID: DASHBOARD-REDESIGN-AUDIT
+Agent: Claude (Anthropic)
+Task: Boss asked for a full check of the ERP, fix any problems without removing options, and a new dashboard design.
+
+Work Log:
+- Audit: tsc 0; all 27 views opened in a browser with 0 console errors; ~50 GET API routes return 200/expected 400 validations.
+- FIX: ThemeProvider moved from App (client-only render) into the root layout via components/app/providers.tsx — removes React "script tag inside component" error (the red "1 Issue" badge) and the dark-mode flash while booting. Footer now reads settings reactively.
+- FIX: lib/db.ts no longer logs every SQL query in production (set PRISMA_LOG_QUERIES=1 to force).
+- FIX: /api/dashboard — recent activity only sent to users with activity.view; deployed-worker counts exclude soft-deleted/inactive staff.
+- FIX: Dashboard activity amounts no longer forced to a red minus figure (log rows do not record direction).
+- FIX: Top bar "Add Income / Add Expense" now opens the add dialog (was only switching page) and hides without accounts.create.
+- NEW /api/dashboard fields (each permission-gated, each in its own try/catch so one failure never blanks the dashboard): workforce (active/on-site/available/in-interview), receivables (open issued invoices, overdue, invoiced this month — drafts excluded), pipeline (quotations sent/draft, supplier P.O.s ordered), todayLists (name lists dated today, not cancelled).
+- NEW dashboard design: navy blueprint-grid hero (greeting, date, net balance, income/expense totals and this month, quick actions New name list / New invoice / New quotation + mobile-only Add income/expense), "Needs attention" queue (expired/≤30-day IQAMA, overdue invoices, unpaid salaries, quotations awaiting reply, today's lists), metric tiles (Total staff with on-site bar, Salary paid, Advance outstanding, To collect, System users — every old "View …" link kept), 6-month income/expense bar chart, "Money in the pipeline", Payroll status + Pending payouts (Mark Paid + show all kept), Name lists today, Workforce by client, Document compliance, Recent activity. Verified desktop 1440, mobile 390 (no horizontal overflow), dark mode.
+- NOTES for the boss: BASELINE_PERMISSIONS currently grants every permission to every signed-in user (owner request) — roles have no effect until it is restricted. E-Invoice module "outstanding" total includes draft invoices; the dashboard counts issued invoices only.

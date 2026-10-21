@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ThemeProvider } from 'next-themes'
 import dynamic from 'next/dynamic'
 import { motion } from 'framer-motion'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -25,7 +24,7 @@ const LoginScreenLazy = dynamic(
 )
 
 export function App() {
-  const { user, setUser, setSettings, view } = useAppStore()
+  const { user, setUser, setSettings, view, settings } = useAppStore()
   const [booting, setBooting] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
@@ -91,15 +90,15 @@ export function App() {
 
   if (!user) {
     return (
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+      <>
         <LoginScreenLazy />
         <Toaster richColors position="top-right" />
-      </ThemeProvider>
+      </>
     )
   }
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    <>
       <SidebarProvider>
         <AppSidebar onLogout={() => void handleLogout()} />
         <SidebarInset className="min-h-svh min-w-0">
@@ -116,14 +115,14 @@ export function App() {
             </motion.div>
           </div>
           <footer className="mt-auto border-t px-4 py-3 text-center text-xs text-muted-foreground sm:px-6 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            © {new Date().getFullYear()} {useAppStore.getState().settings.companyName} · Workforce,
-            Payroll & Accounts System · All amounts in {useAppStore.getState().settings.currency}
+            © {new Date().getFullYear()} {settings.companyName} · Workforce,
+            Payroll & Accounts System · All amounts in {settings.currency}
           </footer>
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
         <AiChatPanel />
       </SidebarProvider>
       <Toaster richColors position="top-right" />
-    </ThemeProvider>
+    </>
   )
 }

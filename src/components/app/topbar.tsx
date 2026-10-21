@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Keyboard, Moon, PanelLeft, Search, Sun } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useAppStore } from '@/lib/store'
+import { can, useAppStore } from '@/lib/store'
 import { useSyncExternalStore } from 'react'
 import {
   Tooltip,
@@ -128,15 +128,21 @@ export function Topbar({ onOpenPalette }: { onOpenPalette: () => void }) {
 }
 
 function TopbarActions() {
-  const { view } = useAppStore()
-  const { setView } = useAppStore()
+  const { view, user, setView, setPendingIntent } = useAppStore()
   if (view !== 'dashboard') return null
+  // Hidden for users who cannot create transactions (the API would refuse anyway)
+  if (!can(user, 'accounts.create')) return null
+  // Open the module AND its "add" dialog directly (previously it only switched page)
+  const open = (target: 'income-list' | 'expense-list') => {
+    setPendingIntent({ view: target, kind: 'create' })
+    setView(target)
+  }
   return (
     <div className="hidden items-center gap-2 lg:flex">
-      <Button size="sm" variant="outline" onClick={() => setView('income-list')} className="h-8">
+      <Button size="sm" variant="outline" onClick={() => open('income-list')} className="h-8">
         Add Income
       </Button>
-      <Button size="sm" onClick={() => setView('expense-list')} className="h-8">
+      <Button size="sm" onClick={() => open('expense-list')} className="h-8">
         Add Expense
       </Button>
     </div>
