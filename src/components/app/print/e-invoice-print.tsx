@@ -177,7 +177,9 @@ function rowHeightMm(it: EInvoiceItemRow): number {
     estLines(it.descriptionEn, 42),
     estLines(it.descriptionAr, 36),
   )
-  return 8 + 3.4 * (lines - 1)
+  // measured ≈4.45mm per description line at 9pt leading-[1.35] + ~1.6mm
+  // row padding/borders (calibrated against real Chrome A4 renders).
+  return 9.5 + 4.3 * (lines - 1)
 }
 
 // ── Flow-fill pagination constants ───────────────────────────────────────────
@@ -481,15 +483,25 @@ export function EInvoiceDocument({
   // Page-1 fixed sections (title row + divider + date/currency bar + cards +
   // project strip + thead + inter-section gaps). The two party cards sit
   // side-by-side, so only the TALLER card's address wraps drive the height.
+  // Empirically calibrated against real Chrome A4 renders (address lines
+  // measure ≈4.6mm at 9pt; ~38 latin / ~40 arabic chars wrap in the ~52mm
+  // description column; header band + name rows + VAT/CR rows + padding
+  // ≈ 40mm base). Over-estimate = safe page breaks; the page box clips, so
+  // never under-estimate.
+  const buyerAddr = buyerNational || inv.clientAddressEn
+  const addrMm = (en: string | null | undefined, ar: string | null | undefined) =>
+    4.6 * estLines(en, 38) + 4.6 * estLines(ar, 40)
   const cardsMm =
-    34 +
+    40 +
     Math.max(
-      2.6 * estLines(supplier.addressEn, 52) + 2.2 * estLines(supplier.addressAr, 46),
-      2.6 * estLines(inv.clientAddressEn, 52) + 2.2 * estLines(inv.clientAddressAr, 46),
+      addrMm(supplier.addressEn, supplier.addressAr),
+      addrMm(buyerAddr, inv.clientAddressAr),
     )
+  // Project strip: each cell stacks an EN-over-AR label plus the EN and AR
+  // value lines — measured ≈26mm with 3 value lines → base 14 + 4.2/line.
   const projectBarMm =
-    9 +
-    2.4 *
+    14 +
+    4.2 *
       Math.max(
         estLines(inv.poRef, 18),
         estLines(inv.projectEn, 22),
@@ -499,11 +511,28 @@ export function EInvoiceDocument({
         estLines(inv.paymentMethodEn, 22),
         estLines(inv.paymentMethodAr, 20),
       )
+  // title row ≈12.3mm · status chip ≈1.6mm · date/currency bar ≈11.4mm ·
+  // inter-section gaps ≈18mm total (measured).
   const page1FixedMm =
-    11 + (inv.relatedInvoiceNumber ? 4.5 : 0) + 2.5 + 10.5 + cardsMm + projectBarMm + 8 + 8
+    13 + (inv.relatedInvoiceNumber ? 4.5 : 0) + 2 + 12 + cardsMm + projectBarMm + 9 + 9
 
-  // Tail = bottom split + signature row (last page only)
-  const tailMm = 48 + 42 + 4
+  // Tail = bottom split + signature row (last page only), measured on real
+  // Chrome A4 renders (roomy variant — the worst case):
+  //   • amount-in-words box ≈ 21mm (2 EN + 2 AR lines)
+  //   • bank-details box ≈ 44mm when ANY bank field is set (5 entries in a
+  //     2-col grid → 3 rows), else the compact ≈14mm placeholder
+  //   • totals box ≈ 66mm with the full 7-row summary
+  //   • signature row (QR + receiver + authorized + stamp) ≈ 38mm
+  //   • inter-block gaps ≈ 7mm
+  const anyBank = Boolean(
+    settings.bankName ||
+      settings.bankIban ||
+      settings.bankAccountNumber ||
+      settings.bankAccountName ||
+      settings.bankSwiftCode,
+  )
+  const splitMm = Math.max(21 + (anyBank ? 44 : 14) + 3, 66)
+  const tailMm = splitMm + 38 + 7
 
   const pages = planPages(items, topMm, bottomMm, page1FixedMm, tailMm)
 
