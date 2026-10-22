@@ -115,7 +115,7 @@ export function NameListPrintDialog({
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-sm font-bold uppercase tracking-widest">Name List</p>
+                <p className="text-sm font-bold uppercase tracking-[0.3pt]">Name List</p>
                 <p className="mt-1 text-[11pt] text-[#1D2433]">Filter: {filterLabel}</p>
                 <p className="text-[11pt] text-[#1D2433]">
                   Generated: {formatDate(new Date())}
@@ -124,7 +124,7 @@ export function NameListPrintDialog({
             </div>
 
             {/* ---- Directory table ---- */}
-            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-wider">
+            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-[0.3pt]">
               Company Directory
             </h3>
             <table className="mt-2 w-full border-collapse text-[11pt]">
@@ -173,7 +173,7 @@ export function NameListPrintDialog({
             </table>
 
             {/* ---- Counts by type ---- */}
-            <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-wider">
+            <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-[0.3pt]">
               Counts by Type
             </h3>
             <table className="mt-2 w-full border-collapse text-[11pt]">
@@ -203,7 +203,7 @@ export function NameListPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
                   Prepared By
                 </p>
                 <p className="text-[10pt] text-[#1D2433]">Administration</p>
@@ -212,7 +212,7 @@ export function NameListPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
                   {settings.signatoryTitle || 'Authorized Signatory'}
                 </p>
                 <p className="text-[10pt] text-[#1D2433]">

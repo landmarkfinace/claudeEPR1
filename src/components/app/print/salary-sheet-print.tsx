@@ -217,17 +217,17 @@ export function SalarySheetPrintDialog({
                   className="h-16 w-16 rounded object-contain"
                 />
                 <div>
-                  <h1 className="text-xl font-bold uppercase tracking-wide text-[#0F1F3D]">
+                  <h1 className="break-words text-xl font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">
                     {settings.companyName}
                   </h1>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B8942C]">Monthly Payroll Sheet</p>
+                  <p className="break-words text-xs font-semibold uppercase tracking-[0.3pt] text-[#B8942C]">Monthly Payroll Sheet</p>
                   {settings.address ? (
                     <p className="text-[10pt] text-neutral-500">{settings.address}</p>
                   ) : null}
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="break-words text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   Total Disbursement
                 </p>
                 <p className="text-2xl font-bold tabular-nums">{money(data.totals.net)}</p>
@@ -334,7 +334,7 @@ export function SalarySheetPrintDialog({
             </table>
 
             {/* Category breakdown */}
-            <h3 className="mt-8 text-sm font-bold uppercase tracking-wide">
+            <h3 className="mt-8 text-sm font-bold uppercase tracking-[0.3pt]">
               Staff Category Breakdown
             </h3>
             <table className="mt-2 w-full border-collapse text-[11pt]">

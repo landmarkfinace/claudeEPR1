@@ -121,9 +121,9 @@ const FOOTER_MM = 4 // page footer strip reserved above the bottom letterhead ba
 // "continued" strip reserved at the top of every page ≥ 2
 const CONT_HEADER_MM = 8
 // head-room required before a tail block may join the last items page
-const PLACE_BUFFER_MM = 4
+const PLACE_BUFFER_MM = 7
 // slack kept in reserve when stretching rows (estimator safety)
-const STRETCH_SAFE_MM = 5
+const STRETCH_SAFE_MM = 8
 // per-row stretch cap — keeps the stretched table tasteful
 const MAX_ROW_STRETCH = 6.5
 // items-table TOTAL row height
@@ -197,14 +197,16 @@ function numberedTerms(terms: string): Array<{ n: string; text: string }> {
   })
 }
 
-/** Bilingual label: English left, Arabic right (rtl). */
+/** Bilingual label: English + '|' + Arabic on one line; when the cell is
+ *  narrow the Arabic (with its pipe) wraps onto a second line — the label
+ *  is NEVER clipped and both languages stay fully visible. */
 function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
   return (
     <span
-      className={`flex gap-1.5 text-[8.5pt] font-semibold uppercase leading-tight tracking-[0.06em] ${center ? 'justify-center' : ''}`}
+      className={`flex flex-wrap gap-x-1.5 gap-y-[0.3mm] text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt] ${center ? 'justify-center' : ''}`}
       style={{ color: INK_SOFT }}
     >
-      <span>{en}</span>
+      <span className="break-words">{en}</span>
       <span style={{ color: MUTED }}>|</span>
       <span lang="ar" dir="rtl" className="normal-case tracking-normal">
         {ar}
@@ -237,7 +239,7 @@ function StatusStamp({ status }: { status: string }) {
   const entry = map[status] ?? map.draft
   return (
     <span
-      className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[9pt] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[9pt] font-black uppercase tracking-[0.3pt] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
       style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
     >
       {entry.label}
@@ -528,6 +530,9 @@ export function QuotationDocument({
   const contractMonths = q.contractMonths && q.contractMonths > 0 ? q.contractMonths : null
   const contractValue = contractMonths ? round2(q.total * contractMonths) : null
   const subjectLine = (q.subject || 'Manpower Supply Proposal').toUpperCase()
+  // one-line signature-box title — the company's first name word keeps the
+  // "APPROVED BY · …" header on a single line even with long company names
+  const approverLabel = companyName.split(/\s+/)[0] || companyName
   const words = amountInWordsBoth(q.total, currency)
   const currencyAr = CURRENCY_AR[currency] ?? ''
   const printedAt = new Date()
@@ -574,10 +579,10 @@ export function QuotationDocument({
   // row counts as one extra line. Only the TALLER card's wraps matter.
   const fromExtra = Math.max(0, estLines(fromAddress, 44) - 1)
   const toExtra = Math.max(0, estLines(toAddress, 44) - 1) + (client?.contactPerson ? 1 : 0)
-  const cardsMm = 32 + 3.2 * Math.max(fromExtra, toExtra)
+  const cardsMm = 34 + 3.4 * Math.max(fromExtra, toExtra)
   const projectBarMm =
-    12 +
-    2.8 *
+    15 +
+    3.0 *
       Math.max(
         estLines(q.projectName, 18),
         estLines(q.projectLocation, 22),
@@ -586,15 +591,15 @@ export function QuotationDocument({
         estLines(workingHoursLabel, 18)
       )
   const page1FixedMm =
-    13 + // title row (18pt QUOTATION + 10pt subtitle)
+    12 + // title row (16pt QUOTATION + 7.5pt subtitle)
     4 + // gold rule
-    12 + // date & currency bar
+    15 + // date & currency bar (labels may wrap to two lines)
     cardsMm +
     projectBarMm +
     (hasRateBasis ? 9 : 7) + // centred heading + intro line
-    9 + // two-line bilingual thead (9pt EN + 8pt AR)
+    9 + // two-line bilingual thead (8pt EN + 8pt AR)
     4 + // calculation note
-    5 // inter-section margins
+    7 // inter-section margins
 
   // Tail block heights (over-estimate = safe breaks)
   const termsLines = terms.reduce((n, t) => n + estLines(t.text, 52), 0)
@@ -616,8 +621,8 @@ export function QuotationDocument({
     (contractMonths ? 9.5 : 0) + // contract value row + sub-line
     6
   const blockH: Record<TailBlock, number> = {
-    scopeSummary: Math.max(scopeMm, summaryMm) + 3 + 5, // + gap + words line (8.5pt)
-    signatures: 34,
+    scopeSummary: Math.max(scopeMm, summaryMm) + 3 + 5, // + gap + words line (8pt)
+    signatures: 36,
   }
 
   const plans = planPages(items, geo.topMm, geo.bottomMm, page1FixedMm, blockH)
@@ -633,7 +638,7 @@ export function QuotationDocument({
   // table cell styles — mirror table: navy header (white EN over gold AR),
   // horizontal-only row separators, no vertical body lines.
   const th = 'px-1 py-[2.5px] text-center align-middle leading-[1.25]'
-  const td = 'px-1 py-[2px] align-top text-[10pt] leading-[1.3] text-[#1D2433]'
+  const td = 'px-1 py-[2px] align-top text-[9pt] leading-[1.3] text-[#1D2433]'
   const tdR = `${td} text-right tabular-nums`
 
   return (
@@ -685,7 +690,7 @@ export function QuotationDocument({
                     }}
                   >
                     <p
-                      className="text-center text-[8pt] font-semibold uppercase tracking-[0.14em]"
+                      className="text-center text-[7.5pt] font-semibold uppercase tracking-[0.3pt]"
                       style={{ color: STRIPE_CAPTION }}
                     >
                       Letterhead Header Area
@@ -715,7 +720,7 @@ export function QuotationDocument({
                     }}
                   >
                     <p
-                      className="text-center text-[8pt] font-semibold uppercase tracking-[0.14em]"
+                      className="text-center text-[7.5pt] font-semibold uppercase tracking-[0.3pt]"
                       style={{ color: STRIPE_CAPTION }}
                     >
                       Letterhead Footer Area
@@ -759,7 +764,7 @@ export function QuotationDocument({
 
             {/* ── content ── */}
             <div
-              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col"
+              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col [&>*]:shrink-0"
               style={{
                 paddingTop: `${geo.topMm}mm`,
                 paddingBottom: `${geo.bottomMm + FOOTER_MM}mm`,
@@ -769,17 +774,19 @@ export function QuotationDocument({
             >
               {pageIdx === 0 ? (
                 <>
-                  {/* 1 ─ title row: QUOTATION + subject · pill badge · prepared for */}
-                  <div className="relative flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
+                  {/* 1 ─ title row: QUOTATION + subject (left, ≤35%) · number
+                      capsule (centre) · prepared-for (right, ≤35%, wraps).
+                      Grid columns keep the three zones from ever overlapping. */}
+                  <div className="grid grid-cols-[minmax(0,35fr)_auto_minmax(0,35fr)] items-center gap-3">
+                    <div className="min-w-0">
                       <h1
-                        className="text-[18pt] font-extrabold uppercase leading-[1.15] tracking-[0.04em]"
+                        className="text-[16pt] font-extrabold uppercase leading-[1.12] tracking-[0.04em]"
                         style={{ color: NAVY }}
                       >
                         Quotation
                       </h1>
                       <p
-                        className="mt-[1mm] whitespace-nowrap text-[10pt] font-bold uppercase leading-none tracking-[0.14em]"
+                        className="mt-[1mm] break-words text-[7.5pt] font-bold uppercase leading-snug tracking-[0.3pt]"
                         style={{ color: DARK_GOLD }}
                       >
                         {subjectLine}
@@ -788,11 +795,11 @@ export function QuotationDocument({
                     {/* pill badge — gold ring outside, navy fill inside */}
                     <div className="shrink-0 rounded-full p-[2px]" style={{ background: GOLD }}>
                       <div
-                        className={`rounded-full px-5 text-center ${plan.roomyTier >= 1 ? 'py-[5px]' : 'py-[3px]'}`}
+                        className="rounded-full px-4 text-center py-[4px]"
                         style={{ background: NAVY }}
                       >
                         <p
-                          className="whitespace-nowrap text-[8pt] font-bold uppercase tracking-[0.14em]"
+                          className="whitespace-nowrap text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           Quotation No.{' '}
@@ -800,13 +807,13 @@ export function QuotationDocument({
                             رقم عرض السعر
                           </span>
                         </p>
-                        <p className="whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
+                        <p className="mt-[1px] whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
                           {q.quoteNumber}
                         </p>
                       </div>
                     </div>
-                    <div className="min-w-0 flex-1 text-right">
-                      <p className="text-[8.5pt] font-semibold uppercase tracking-[0.06em]" style={{ color: INK_SOFT }}>
+                    <div className="min-w-0 text-right">
+                      <p className="break-words text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt]" style={{ color: INK_SOFT }}>
                         Prepared for{' '}
                         <span className="mx-0.5" style={{ color: MUTED }}>|</span>{' '}
                         <span lang="ar" dir="rtl" className="normal-case tracking-normal">
@@ -814,9 +821,8 @@ export function QuotationDocument({
                         </span>
                       </p>
                       <p
-                        className="mt-[0.8mm] truncate text-[12pt] font-extrabold leading-tight"
+                        className="mt-[0.8mm] break-words text-[9pt] font-extrabold leading-snug"
                         style={{ color: NAVY }}
-                        title={q.clientName}
                       >
                         {q.clientName}
                       </p>
@@ -830,9 +836,10 @@ export function QuotationDocument({
                     <div className="h-[2px] flex-1 rounded-full" style={{ background: GOLD }} />
                   </div>
 
-                  {/* 3 ─ date & currency bar (cream, rounded, 4 cells) */}
+                  {/* 3 ─ date & currency bar (cream, rounded, 4 cells) — no
+                      fixed height, no overflow clip: cells grow with content */}
                   <div
-                    className={`mt-[5px] grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomyTier >= 1 ? 'mt-2' : ''}`}
+                    className="mt-[5px] grid grid-cols-4 rounded-lg border"
                     style={{ borderColor: BORDER, background: CREAM }}
                   >
                     {(
@@ -849,12 +856,12 @@ export function QuotationDocument({
                     ).map(([en, ar, value]) => (
                       <div
                         key={en}
-                        className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}
+                        className="border-r px-1.5 py-[5px] text-center last:border-r-0"
                         style={{ borderColor: BORDER }}
                       >
                         <BiLabel en={en} ar={ar} center />
                         <p
-                          className={`mt-0.5 whitespace-nowrap text-[10pt] font-bold tabular-nums ${en === 'Currency' || en === 'Your Reference' ? '' : 'font-mono'}`}
+                          className="mt-[1px] break-words text-[9pt] font-bold tabular-nums leading-snug"
                           style={{ color: NAVY }}
                         >
                           {value}
@@ -864,18 +871,18 @@ export function QuotationDocument({
                   </div>
 
                   {/* 4 ─ FROM ◆ | TO ◆ cards (cream header, dotted field rows) */}
-                  <div className={`grid grid-cols-2 gap-2.5 ${plan.roomyTier >= 1 ? 'mt-2' : 'mt-[5px]'}`}>
+                  <div className="mt-[5px] grid grid-cols-2 gap-2.5">
                     {/* FROM — the company (supplier) */}
                     <div
-                      className="overflow-hidden rounded-lg border"
+                      className="rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex items-center justify-center gap-2 border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
+                          className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
                           From
@@ -884,53 +891,53 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[10pt] font-bold leading-none"
+                          className="text-[8.5pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           من
                         </p>
                       </div>
-                      <div className={`px-2.5 ${plan.roomyTier >= 1 ? 'space-y-[5px] py-[7px]' : 'space-y-[2px] py-[5px]'}`}>
-                        <p className="text-[10pt] font-bold leading-snug" style={{ color: INK }}>
+                      <div className="px-2.5 space-y-[4px] py-[6px]">
+                        <p className="break-words text-[9pt] font-bold leading-snug" style={{ color: INK }}>
                           {companyName}
                         </p>
                         {settings.companyNameAr ? (
                           <p
                             lang="ar"
                             dir="rtl"
-                            className="text-[10pt] font-semibold leading-snug"
+                            className="break-words text-[9pt] font-semibold leading-snug"
                             style={{ color: INK }}
                           >
                             {settings.companyNameAr}
                           </p>
                         ) : null}
                         <div
-                          className={`border-t border-dotted pt-[3px] text-[8.5pt] leading-[1.45] ${plan.roomyTier >= 1 ? 'space-y-[5px]' : 'space-y-[3px]'}`}
+                          className="border-t border-dotted pt-[3px] space-y-[4px] leading-[1.45]"
                           style={{ borderColor: '#C7CFDC' }}
                         >
-                          <p>
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>
+                          <p className="break-words">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                               Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
                             </span>
-                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
+                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
                               {fromAddress || '—'}
                             </span>
                           </p>
-                          <p>
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>
+                          <p className="break-words">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                               VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
                             </span>
-                            <span className="font-mono font-semibold text-[10pt]" style={{ color: INK }}>
+                            <span className="font-mono text-[9pt] font-semibold" style={{ color: INK }}>
                               {settings.vatNumber || '—'}
                               {settings.vatNumber && settings.crNumber ? ' · ' : ''}
                               {settings.crNumber || ''}
                             </span>
                           </p>
-                          <p>
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>
+                          <p className="break-words">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                               Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
                             </span>
-                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
+                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
                               {settings.phone || settings.email
                                 ? [settings.phone, settings.email].filter(Boolean).join(' · ')
                                 : '—'}
@@ -942,15 +949,15 @@ export function QuotationDocument({
 
                     {/* TO — the client (customer) */}
                     <div
-                      className="overflow-hidden rounded-lg border"
+                      className="rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex items-center justify-center gap-2 border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
+                          className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
                           To
@@ -959,54 +966,54 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[10pt] font-bold leading-none"
+                          className="text-[8.5pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           إلى
                         </p>
                       </div>
-                      <div className={`px-2.5 ${plan.roomyTier >= 1 ? 'space-y-[5px] py-[7px]' : 'space-y-[2px] py-[5px]'}`}>
-                        <p className="text-[10pt] font-bold leading-snug" style={{ color: INK }}>
+                      <div className="px-2.5 space-y-[4px] py-[6px]">
+                        <p className="break-words text-[9pt] font-bold leading-snug" style={{ color: INK }}>
                           {q.clientName}
                         </p>
                         <div
-                          className={`border-t border-dotted pt-[3px] text-[8.5pt] leading-[1.45] ${plan.roomyTier >= 1 ? 'space-y-[5px]' : 'space-y-[3px]'}`}
+                          className="border-t border-dotted pt-[3px] space-y-[4px] leading-[1.45]"
                           style={{ borderColor: '#C7CFDC' }}
                         >
                           {client?.contactPerson ? (
-                            <p>
-                              <span className="font-semibold" style={{ color: INK_SOFT }}>
+                            <p className="break-words">
+                              <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                                 Attention <span lang="ar" dir="rtl">عناية</span>:{' '}
                               </span>
-                              <span className="font-semibold text-[10pt]" style={{ color: INK }}>
+                              <span className="text-[9pt] font-semibold" style={{ color: INK }}>
                                 {client.contactPerson}
                               </span>
                             </p>
                           ) : null}
-                          <p>
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>
+                          <p className="break-words">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                               Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
                             </span>
-                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
+                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
                               {toAddress || '—'}
                             </span>
                           </p>
-                          <p>
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>
+                          <p className="break-words">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                               Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
                             </span>
-                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
+                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
                               {client?.phone || client?.email
                                 ? [client?.phone, client?.email].filter(Boolean).join(' · ')
                                 : '—'}
                             </span>
                           </p>
                           {client?.vatNumber || client?.crNumber ? (
-                            <p>
-                              <span className="font-semibold" style={{ color: INK_SOFT }}>
+                            <p className="break-words">
+                              <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                                 VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
                               </span>
-                              <span className="font-mono font-semibold text-[10pt]" style={{ color: INK }}>
+                              <span className="font-mono text-[9pt] font-semibold" style={{ color: INK }}>
                                 {client.vatNumber || ''}
                                 {client.vatNumber && client.crNumber ? ' · ' : ''}
                                 {client.crNumber || ''}
@@ -1018,56 +1025,56 @@ export function QuotationDocument({
                     </div>
                   </div>
 
-                  {/* 5 ─ project info strip (cream, 4 cells) */}
+                  {/* 5 ─ project info strip (cream, 4 cells) — grows with content */}
                   <div
-                    className={`grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomyTier >= 1 ? 'mt-2' : 'mt-[5px]'}`}
+                    className="mt-[5px] grid grid-cols-4 rounded-lg border"
                     style={{ borderColor: BORDER, background: CREAM }}
                   >
                     <div
-                      className={`border-r px-1.5 text-center ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}
+                      className="border-r px-1.5 py-[5px] text-center"
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="Project / Site" ar="المشروع / الموقع" center />
                       <p
-                        className="mt-0.5 break-words text-[10pt] font-bold leading-snug"
+                        className="mt-[1px] break-words text-[9pt] font-bold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {q.projectName || '—'}
                       </p>
                       {q.projectLocation ? (
-                        <p className="break-words text-[8pt]" style={{ color: INK_SOFT }}>
+                        <p className="break-words text-[7.5pt] leading-snug" style={{ color: INK_SOFT }}>
                           {q.projectLocation}
                         </p>
                       ) : null}
                     </div>
                     <div
-                      className={`border-r px-1.5 text-center ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}
+                      className="border-r px-1.5 py-[5px] text-center"
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="Mobilization" ar="التجهيز" center />
                       <p
-                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
+                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {q.mobilization || '—'}
                       </p>
                     </div>
                     <div
-                      className={`border-r px-1.5 text-center ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}
+                      className="border-r px-1.5 py-[5px] text-center"
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="Contract Period" ar="مدة العقد" center />
                       <p
-                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
+                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {contractPeriodLabel}
                       </p>
                     </div>
-                    <div className={`px-1.5 text-center ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}>
+                    <div className="px-1.5 py-[5px] text-center">
                       <BiLabel en="Working Hours" ar="ساعات العمل" center />
                       <p
-                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
+                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {workingHoursLabel}
@@ -1077,7 +1084,7 @@ export function QuotationDocument({
 
                   {/* 6 ─ centred quotation heading + polite intro (mirror) */}
                   <div className="mt-[1.6mm] text-center">
-                    <p className="text-[12pt] font-extrabold leading-tight" style={{ color: NAVY }}>
+                    <p className="text-[11pt] font-extrabold leading-tight" style={{ color: NAVY }}>
                       {hasRateBasis
                         ? 'Quotation for Supply of Skilled & Unskilled Manpower'
                         : 'Quotation Details'}
@@ -1092,11 +1099,11 @@ export function QuotationDocument({
                 </>
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
-                <div className="flex items-baseline justify-between border-b pb-[3px]" style={{ borderColor: BORDER }}>
-                  <p className="text-[10pt] font-bold uppercase tracking-[0.12em]" style={{ color: NAVY }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 border-b pb-[3px]" style={{ borderColor: BORDER }}>
+                  <p className="break-words text-[8.5pt] font-bold uppercase tracking-[0.3pt]" style={{ color: NAVY }}>
                     {companyName} — Quotation <span className="font-mono">{q.quoteNumber}</span>
                   </p>
-                  <p className="text-[8.5pt] italic" style={{ color: INK_SOFT }}>
+                  <p className="shrink-0 text-[7.5pt] italic" style={{ color: INK_SOFT }}>
                     continued · <span lang="ar" dir="rtl">تابع</span>
                   </p>
                 </div>
@@ -1105,7 +1112,7 @@ export function QuotationDocument({
               {/* 7 ─ items chunk — mirror table (thead repeats; tail-only pages skip) */}
               {chunk.length > 0 || pageIdx === 0 ? (
                 <div
-                  className="mt-[1.8mm] overflow-hidden rounded-lg border"
+                  className="mt-[1.8mm] rounded-lg border"
                   style={{ borderColor: BORDER, background: 'white' }}
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
@@ -1132,28 +1139,28 @@ export function QuotationDocument({
                       {hasRateBasis ? (
                         <tr>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">#</p>
+                            <p className="text-[8pt] font-bold text-white">#</p>
                           </th>
                           <th className={`${th} text-left`}>
-                            <p className="text-[9pt] font-bold text-white">Trade / Category</p>
+                            <p className="text-[8pt] font-bold text-white">Trade / Category</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               المهنة / الفئة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">No. of Workers</p>
+                            <p className="text-[8pt] font-bold text-white">No. of Workers</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               عدد العمال
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Hourly Rate (SAR)</p>
+                            <p className="text-[8pt] font-bold text-white">Hourly Rate (SAR)</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               السعر بالساعة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Amount (SAR)</p>
+                            <p className="text-[8pt] font-bold text-white">Amount (SAR)</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               المبلغ
                             </p>
@@ -1162,42 +1169,42 @@ export function QuotationDocument({
                       ) : (
                         <tr>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">#</p>
+                            <p className="text-[8pt] font-bold text-white">#</p>
                           </th>
                           <th className={`${th} text-left`}>
-                            <p className="text-[9pt] font-bold text-white">Description</p>
+                            <p className="text-[8pt] font-bold text-white">Description</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الوصف
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Qty</p>
+                            <p className="text-[8pt] font-bold text-white">Qty</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الكمية
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Unit</p>
+                            <p className="text-[8pt] font-bold text-white">Unit</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الوحدة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Unit Price</p>
+                            <p className="text-[8pt] font-bold text-white">Unit Price</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               سعر الوحدة
                             </p>
                           </th>
                           {showDiscountCol ? (
                             <th className={th}>
-                              <p className="text-[9pt] font-bold text-white">Disc.</p>
+                              <p className="text-[8pt] font-bold text-white">Disc.</p>
                               <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                                 الخصم
                               </p>
                             </th>
                           ) : null}
                           <th className={th}>
-                            <p className="text-[9pt] font-bold text-white">Line Total</p>
+                            <p className="text-[8pt] font-bold text-white">Line Total</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الإجمالي
                             </p>
@@ -1240,11 +1247,11 @@ export function QuotationDocument({
                               </span>
                             </td>
                             <td className={td}>
-                              <p className="text-[10pt] font-bold leading-[1.15]" style={{ color: INK }}>
+                              <p className="break-words text-[9pt] font-bold leading-[1.15]" style={{ color: INK }}>
                                 {it.description}
                               </p>
                               {it.subText ? (
-                                <p className="text-[8pt] italic leading-[1.15]" style={{ color: INK_SOFT }}>
+                                <p className="break-words text-[8pt] italic leading-[1.15]" style={{ color: INK_SOFT }}>
                                   {it.subText}
                                 </p>
                               ) : null}
@@ -1292,20 +1299,20 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[11pt] font-extrabold uppercase tracking-wide`}
+                                className={`${td} text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]`}
                                 style={{ color: NAVY }}
                               >
                                 Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
                               </td>
                               <td
-                                className={`${td} text-center text-[11pt] font-extrabold tabular-nums`}
+                                className={`${td} text-center text-[9.5pt] font-extrabold tabular-nums`}
                                 style={{ color: NAVY }}
                               >
                                 {totalWorkers.toLocaleString('en-US')}
                               </td>
                               <td className={td} />
                               <td
-                                className={`${tdR} text-[11pt] font-extrabold`}
+                                className={`${tdR} text-[9.5pt] font-extrabold`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1315,7 +1322,7 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[11pt] font-extrabold uppercase tracking-wide`}
+                                className={`${td} text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]`}
                                 style={{ color: NAVY }}
                               >
                                 Total Amount <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
@@ -1324,7 +1331,7 @@ export function QuotationDocument({
                               <td className={td} />
                               {showDiscountCol ? <td className={td} /> : null}
                               <td
-                                className={`${tdR} text-[11pt] font-extrabold`}
+                                className={`${tdR} text-[9.5pt] font-extrabold`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1353,15 +1360,15 @@ export function QuotationDocument({
                 >
                   {/* ── SCOPE & TERMS ◆ card (mirror left column) ── */}
                   <div
-                    className="overflow-hidden rounded-lg border"
+                    className="rounded-lg border"
                     style={{ borderColor: BORDER, background: 'white' }}
                   >
                     <div
-                      className="flex items-center justify-center gap-2 border-b px-2.5 py-[3.5px]"
+                      className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
                       style={{ borderColor: BORDER, background: CREAM }}
                     >
                       <p
-                        className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
+                        className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                         style={{ color: DARK_GOLD }}
                       >
                         Scope &amp; Terms
@@ -1370,19 +1377,19 @@ export function QuotationDocument({
                       <p
                         lang="ar"
                         dir="rtl"
-                        className="text-[10pt] font-bold leading-none"
+                        className="text-[8.5pt] font-bold leading-none"
                         style={{ color: DARK_GOLD }}
                       >
                         النطاق والشروط
                       </p>
                     </div>
-                    <div className={`px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[4px]'}`}>
+                    <div className="px-2.5 py-[5px]">
                       {/* included | not included sub-columns (dotted divider) */}
                       {inclusions.length > 0 || exclusions.length > 0 ? (
                         <div className="grid grid-cols-2 gap-[3mm]">
                           <div>
                             <p
-                              className="text-[8.5pt] font-extrabold uppercase tracking-[0.08em]"
+                              className="break-words text-[8pt] font-extrabold uppercase tracking-[0.3pt]"
                               style={{ color: DARK_GOLD }}
                             >
                               Included in rates{' '}
@@ -1394,13 +1401,13 @@ export function QuotationDocument({
                               {inclusions.map((l) => (
                                 <li
                                   key={l}
-                                  className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
+                                  className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
                                 >
                                   <span
                                     className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
                                     style={{ background: GOLD }}
                                   />
-                                  <span>{l}</span>
+                                  <span className="break-words">{l}</span>
                                 </li>
                               ))}
                             </ul>
@@ -1410,7 +1417,7 @@ export function QuotationDocument({
                             style={{ borderColor: '#C7CFDC' }}
                           >
                             <p
-                              className="text-[8.5pt] font-extrabold uppercase tracking-[0.08em]"
+                              className="break-words text-[8pt] font-extrabold uppercase tracking-[0.3pt]"
                               style={{ color: MUTED }}
                             >
                               Not included{' '}
@@ -1422,13 +1429,13 @@ export function QuotationDocument({
                               {exclusions.map((l) => (
                                 <li
                                   key={l}
-                                  className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
+                                  className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
                                 >
                                   <span
                                     className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
                                     style={{ background: '#B7BFCB' }}
                                   />
-                                  <span>{l}</span>
+                                  <span className="break-words">{l}</span>
                                 </li>
                               ))}
                             </ul>
@@ -1446,17 +1453,17 @@ export function QuotationDocument({
                             {terms.map((t) => (
                               <li
                                 key={`${t.n}-${t.text.slice(0, 12)}`}
-                                className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
+                                className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
                               >
                                 <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
                                   {t.n}
                                 </span>
-                                <span>{t.text}</span>
+                                <span className="break-words">{t.text}</span>
                               </li>
                             ))}
                           </ol>
                         ) : (
-                          <p className="text-[8.5pt]" style={{ color: INK_SOFT }}>
+                          <p className="text-[8pt]" style={{ color: INK_SOFT }}>
                             As mutually agreed between the parties.
                           </p>
                         )}
@@ -1471,107 +1478,107 @@ export function QuotationDocument({
 
                   {/* ── FINANCIAL SUMMARY box (mirror right column) ── */}
                   <div
-                    className="overflow-hidden rounded-lg border"
+                    className="rounded-lg border"
                     style={{ borderColor: BORDER, background: 'white' }}
                   >
                     <div
-                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
+                      className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[5px] text-[9.5pt]"
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="font-semibold" style={{ color: INK_SOFT }}>
+                      <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                         Monthly Subtotal{' '}
-                        <span lang="ar" dir="rtl" className="text-[8pt]">
+                        <span lang="ar" dir="rtl" className="text-[7.5pt]">
                           المجموع الشهري
                         </span>
                       </span>
-                      <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                         {money(q.subtotal)}
                       </span>
                     </div>
-                    <p className="px-2.5 text-right text-[8pt]" style={{ color: INK_SOFT }}>
+                    <p className="px-2.5 text-right text-[7.5pt]" style={{ color: INK_SOFT }}>
                       excl. VAT · {currency}
                     </p>
                     {q.discount > 0 ? (
                       <>
                         <div
-                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[10pt]"
+                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[3.5px] text-[9.5pt]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="font-semibold" style={{ color: INK_SOFT }}>
-                            Discount <span lang="ar" dir="rtl" className="text-[8pt]">الخصم</span>
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            Discount <span lang="ar" dir="rtl" className="text-[7.5pt]">الخصم</span>
                           </span>
-                          <span className="font-semibold tabular-nums text-rose-700">
+                          <span className="text-[9.5pt] font-semibold tabular-nums text-rose-700">
                             -{money(q.discount)}
                           </span>
                         </div>
                         <div
-                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[10pt]"
+                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[3.5px] text-[9.5pt]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="font-semibold" style={{ color: INK_SOFT }}>
-                            Net Amount <span lang="ar" dir="rtl" className="text-[8pt]">الصافي</span>
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            Net Amount <span lang="ar" dir="rtl" className="text-[7.5pt]">الصافي</span>
                           </span>
-                          <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                          <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                             {money(netTotal)}
                           </span>
                         </div>
                       </>
                     ) : null}
                     <div
-                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
+                      className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[5px] text-[9.5pt]"
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="font-semibold" style={{ color: INK_SOFT }}>
+                      <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                         VAT ({vatPercent}%){' '}
-                        <span lang="ar" dir="rtl" className="text-[8pt]">
+                        <span lang="ar" dir="rtl" className="text-[7.5pt]">
                           ضريبة القيمة المضافة
                         </span>
                       </span>
-                      <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                         {money(q.vatAmount)}
                       </span>
                     </div>
                     {/* TOTAL / MONTH — navy row, white label, gold amount */}
                     <div
-                      className={`border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[8px]' : 'py-[5px]'}`}
+                      className="border-b px-2.5 py-[6px]"
                       style={{ borderColor: BORDER, background: DARK_NAVY }}
                     >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[11pt] font-extrabold uppercase tracking-wide text-white">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-[0.3mm]">
+                        <span className="text-[9.5pt] font-extrabold uppercase tracking-[0.3pt] text-white">
                           Total / Month{' '}
                           <span lang="ar" dir="rtl" className="normal-case tracking-normal">
                             الإجمالي شهرياً
                           </span>
                         </span>
                         <span
-                          className="text-[14pt] font-extrabold tabular-nums"
+                          className="text-[13pt] font-extrabold tabular-nums"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {money(q.total)}
                         </span>
                       </div>
-                      <p className="text-right text-[8pt] font-semibold text-white">
+                      <p className="text-right text-[7.5pt] font-semibold text-white">
                         incl. VAT · {currency}
                       </p>
                     </div>
                     {contractMonths && contractValue != null ? (
                       <div
-                        className={`flex items-baseline justify-between gap-2 px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
+                        className="flex flex-wrap items-baseline justify-between gap-x-2 px-2.5 py-[5px] text-[9.5pt]"
                         style={{ background: LIGHT_BG }}
                       >
-                        <span className="font-semibold" style={{ color: INK_SOFT }}>
+                        <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
                           Contract Value{' '}
-                          <span lang="ar" dir="rtl" className="text-[8pt]">
+                          <span lang="ar" dir="rtl" className="text-[7.5pt]">
                             قيمة العقد
                           </span>
                         </span>
-                        <span className="text-[11pt] font-extrabold tabular-nums" style={{ color: NAVY }}>
+                        <span className="text-[9.5pt] font-extrabold tabular-nums" style={{ color: NAVY }}>
                           {money(contractValue)}
                         </span>
                       </div>
                     ) : null}
                     {contractMonths && contractValue != null ? (
-                      <p className="px-2.5 pb-[3px] text-right text-[8pt]" style={{ color: INK_SOFT }}>
+                      <p className="px-2.5 pb-[3px] text-right text-[7.5pt]" style={{ color: INK_SOFT }}>
                         {contractMonths} months · incl. VAT · {currency}
                       </p>
                     ) : null}
@@ -1581,15 +1588,15 @@ export function QuotationDocument({
 
               {/* amount in words — slim bilingual line under the split */}
               {plan.blocks.includes('scopeSummary') ? (
-                <p className="mt-[1.5mm] text-[8.5pt] leading-snug" style={{ color: INK_SOFT }}>
-                  <span className="text-[8.5pt] font-bold uppercase tracking-wide" style={{ color: DARK_GOLD }}>
+                <p className="mt-[1.5mm] text-[8pt] leading-snug" style={{ color: INK_SOFT }}>
+                  <span className="text-[8pt] font-bold uppercase tracking-[0.3pt]" style={{ color: DARK_GOLD }}>
                     Amount in Words <span lang="ar" dir="rtl" className="normal-case">المبلغ كتابةً</span>:
                   </span>{' '}
-                  <span className="text-[10pt] font-semibold" style={{ color: INK }}>
+                  <span className="text-[8pt] font-semibold" style={{ color: INK }}>
                     {words.en}
                   </span>{' '}
                   <span className="mx-1" style={{ color: MUTED }}>|</span>{' '}
-                  <span lang="ar" dir="rtl" className="text-[10pt] font-semibold" style={{ color: INK }}>
+                  <span lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: INK }}>
                     {words.ar}
                   </span>
                 </p>
@@ -1599,30 +1606,31 @@ export function QuotationDocument({
                   stamp circles. ALWAYS pinned to the very bottom of the page
                   (mt-auto): any leftover room lands between the content and
                   the boxes, so both boxes sit at the foot of the letter on
-                  every page — matching the asset-placer preview exactly. */}
+                  every page — matching the asset-placer preview exactly.
+                  Titles are kept to ONE line (short company label). */}
               {plan.blocks.includes('signatures') ? (
                 <div className="mt-auto" style={{ paddingTop: '2mm' }}>
                   <section className="grid grid-cols-2 gap-[5mm]">
                     {/* APPROVED BY — the company */}
                     <div
-                      className="overflow-hidden rounded-lg border"
+                      className="rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex items-center justify-center gap-2 border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[10pt] font-extrabold uppercase tracking-[0.12em]"
+                          className="whitespace-nowrap text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
-                          Approved By · {companyName}
+                          Approved By · {approverLabel}
                         </p>
                         <GoldDiamond size={4} />
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[10pt] font-bold leading-none"
+                          className="whitespace-nowrap text-[8.5pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           اعتماد الشركة
@@ -1647,22 +1655,22 @@ export function QuotationDocument({
                               />
                             ) : null}
                           </div>
-                          <p className="text-[10pt] text-[#1D2433]">
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>Name: </span>
+                          <p className="break-words text-[9pt] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Name: </span>
                             {settings.authorizedSignatory || q.createdByName || preparedBy || '_____________________'}
-                            <span style={{ color: MUTED }}>
+                            <span className="text-[7.5pt]" style={{ color: MUTED }}>
                               {' '}· {settings.signatoryTitle || 'Manager'}
                             </span>
                           </p>
-                          <p className="text-[10pt] text-[#1D2433]">
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>Date: </span>
+                          <p className="break-words text-[9pt] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Date: </span>
                             ____ / ____ / ________
                           </p>
                         </div>
                         {/* Stamp circle — uploaded stamp fills it EXACTLY
                             (dashed frame kept; placeholder text hidden). */}
                         <div
-                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[8pt] font-bold uppercase leading-tight tracking-wide`}
+                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[7.5pt] font-bold uppercase leading-tight tracking-[0.3pt]`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           {stampAsset ? (
@@ -1685,15 +1693,15 @@ export function QuotationDocument({
                     {/* ACCEPTED BY — the client (stays a physical-signature
                         placeholder; the client signs on paper) */}
                     <div
-                      className="overflow-hidden rounded-lg border"
+                      className="rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex items-center justify-center gap-2 border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[10pt] font-extrabold uppercase tracking-[0.12em]"
+                          className="whitespace-nowrap text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
                           Accepted By · Client
@@ -1702,7 +1710,7 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[10pt] font-bold leading-none"
+                          className="whitespace-nowrap text-[8.5pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           موافقة العميل
@@ -1717,17 +1725,17 @@ export function QuotationDocument({
                               plan.roomyTier === 2 ? '13mm' : plan.roomyTier === 1 ? '9mm' : '6mm',
                           }}
                           />
-                          <p className="text-[10pt] text-[#1D2433]">
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>Name: </span>
+                          <p className="break-words text-[9pt] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Name: </span>
                             _____________________
                           </p>
-                          <p className="text-[10pt] text-[#1D2433]">
-                            <span className="font-semibold" style={{ color: INK_SOFT }}>Date: </span>
+                          <p className="break-words text-[9pt] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Date: </span>
                             ____ / ____ / ________
                           </p>
                         </div>
                         <div
-                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[8pt] font-bold uppercase leading-tight tracking-wide`}
+                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[7.5pt] font-bold uppercase leading-tight tracking-[0.3pt]`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           Client
@@ -1750,10 +1758,10 @@ export function QuotationDocument({
 
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div
-              className="pointer-events-none absolute inset-x-[14mm] flex items-center justify-between gap-2 border-t pt-[1.5mm] text-[8pt]"
+              className="pointer-events-none absolute inset-x-[14mm] flex items-center justify-between gap-2 border-t pt-[1.5mm] text-[7.5pt]"
               style={{ bottom: `${geo.bottomMm + 1}mm`, borderColor: BORDER, color: INK_SOFT }}
             >
-              <span className="truncate">
+              <span className="min-w-0 break-words">
                 {companyName} · {q.quoteNumber}
                 {q.referenceNo ? ` · Ref ${q.referenceNo}` : ''}
               </span>

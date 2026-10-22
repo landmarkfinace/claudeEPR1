@@ -103,7 +103,7 @@ export function VatReturnPrintDialog({
                 </p>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-sm font-bold uppercase tracking-widest">VAT Return Expense</p>
+                <p className="text-sm font-bold uppercase tracking-[0.3pt]">VAT Return Expense</p>
                 <p className="mt-1 text-[11pt] text-[#1D2433]">Period: {periodLabel}</p>
                 <p className="text-[11pt] text-[#1D2433]">VAT Rate: {vatPercent}%</p>
                 <p className="text-[11pt] text-[#1D2433]">
@@ -113,7 +113,7 @@ export function VatReturnPrintDialog({
             </div>
 
             {/* ---- Bills table ---- */}
-            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-wider">
+            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-[0.3pt]">
               Expense Bills with VAT
             </h3>
             <table className="mt-2 w-full border-collapse text-[11pt]">
@@ -171,7 +171,7 @@ export function VatReturnPrintDialog({
             {/* ---- Quarterly breakdown ---- */}
             {summary ? (
               <>
-                <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-wider">
+                <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-[0.3pt]">
                   Quarterly VAT Breakdown — {summary.year}
                 </h3>
                 <table className="mt-2 w-full border-collapse text-[11pt]">
@@ -227,7 +227,7 @@ export function VatReturnPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
                   Prepared By
                 </p>
                 <p className="text-[10pt] text-[#1D2433]">Accounts Department</p>
@@ -236,7 +236,7 @@ export function VatReturnPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
                   {settings.signatoryTitle || 'Authorized Signatory'}
                 </p>
                 <p className="text-[10pt] text-[#1D2433]">

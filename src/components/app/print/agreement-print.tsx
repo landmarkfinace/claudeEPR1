@@ -168,7 +168,7 @@ function AgreementDocument({
             className="h-20 w-20 shrink-0 object-contain"
           />
           <div className="min-w-0">
-            <h2 className="text-xl font-bold uppercase tracking-wide text-[#0F1F3D]">{companyName}</h2>
+            <h2 className="text-xl font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">{companyName}</h2>
             {settings.address ? (
               <p className="mt-1 text-xs leading-relaxed text-neutral-500">{settings.address}</p>
             ) : null}
@@ -179,7 +179,7 @@ function AgreementDocument({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
-          <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-widest text-white">
+          <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-[0.3pt] text-white">
             AGREEMENT
           </span>
           <span className="text-xs font-medium text-[#1D2433]">
@@ -200,7 +200,7 @@ function AgreementDocument({
 
       {/* ---- Title ---- */}
       <div className="mt-6 text-center">
-        <h1 className="text-lg font-bold uppercase tracking-[0.25em] text-[#0F1F3D]">
+        <h1 className="text-lg font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">
           {typeLabel} Agreement
         </h1>
         <p className="mt-1 text-sm font-semibold text-neutral-800">{a.title}</p>
@@ -213,7 +213,7 @@ function AgreementDocument({
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-neutral-300 bg-neutral-50 p-3.5">
-            <p className="text-[10pt] font-bold uppercase tracking-widest text-neutral-500">
+            <p className="text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-500">
               First Party (Party A)
             </p>
             <p className="mt-1 text-sm font-bold text-[#0F1F3D]">{partyAName}</p>
@@ -225,7 +225,7 @@ function AgreementDocument({
             </p>
           </div>
           <div className="rounded-lg border border-neutral-300 bg-neutral-50 p-3.5">
-            <p className="text-[10pt] font-bold uppercase tracking-widest text-neutral-500">
+            <p className="text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-500">
               Second Party (Party B)
             </p>
             <p className="mt-1 text-sm font-bold text-[#0F1F3D]">{a.clientName}</p>
@@ -247,7 +247,7 @@ function AgreementDocument({
 
       {/* ---- Type + value summary bar ---- */}
       <div className="mt-5 flex flex-col items-center gap-1 bg-[#0F1F3D] px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm font-bold tracking-wide">{typeLabel.toUpperCase()} AGREEMENT</span>
+        <span className="text-sm font-bold tracking-[0.3pt]">{typeLabel.toUpperCase()} AGREEMENT</span>
         <span className="text-xs text-[#6B7488]">
           {formatDate(a.startDate)}
           {a.endDate ? ` — ${formatDate(a.endDate)}` : ' — ongoing'}
@@ -260,7 +260,7 @@ function AgreementDocument({
       {/* ---- Scope & pricing ---- */}
       {a.layoutStyle === 'detailed' ? (
         <section className="mt-5 break-inside-avoid">
-          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Scope &amp; Pricing</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-[0.3pt]">Scope &amp; Pricing</h3>
           <table className="mt-2 w-full border-collapse text-[11pt]">
             <thead>
               <tr>
@@ -304,7 +304,7 @@ function AgreementDocument({
         </section>
       ) : (
         <section className="mt-5 break-inside-avoid">
-          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Contract Value</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-[0.3pt]">Contract Value</h3>
           <p className="mt-2 rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
             Contract Value:{' '}
             <span className="tabular-nums text-[#0F1F3D]">{formatMoney(a.value, currency)}</span>{' '}
@@ -316,7 +316,7 @@ function AgreementDocument({
       {/* ---- Installments ---- */}
       {installments.length > 0 ? (
         <section className="mt-6 break-inside-avoid">
-          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Payment Schedule</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-[0.3pt]">Payment Schedule</h3>
           <table className="mt-2 w-full border-collapse text-[11pt]">
             <thead>
               <tr>
@@ -354,7 +354,7 @@ function AgreementDocument({
       {/* ---- Clauses ---- */}
       {clauses.length > 0 ? (
         <section className="mt-6">
-          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Terms &amp; Conditions</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-[0.3pt]">Terms &amp; Conditions</h3>
           <ol className="mt-2 space-y-3">
             {clauses.map((c) => (
               <li key={c.id ?? c.sr} className="break-inside-avoid">
@@ -373,7 +373,7 @@ function AgreementDocument({
       {/* ---- Notes ---- */}
       {a.notes ? (
         <section className="mt-6 break-inside-avoid">
-          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Notes</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-[0.3pt]">Notes</h3>
           <p className="mt-1.5 whitespace-pre-line text-[11pt] leading-relaxed text-[#1D2433]">
             {a.notes}
           </p>
@@ -391,7 +391,7 @@ function AgreementDocument({
             <div className="flex h-14 items-end">
               <div className="w-full border-t border-neutral-800" />
             </div>
-            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
               For {partyAName}
             </p>
             <p className="text-[10pt] text-[#1D2433]">Name / Signature: ____________________</p>
@@ -401,7 +401,7 @@ function AgreementDocument({
             <div className="flex h-14 items-end">
               <div className="w-full border-t border-neutral-800" />
             </div>
-            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
+            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
               For {a.clientName}
             </p>
             <p className="text-[10pt] text-[#1D2433]">Name / Signature: ____________________</p>

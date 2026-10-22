@@ -107,14 +107,15 @@ function fmtQty(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString('en-US') : formatNumber(n)
 }
 
-/** Bilingual label: English left, Arabic right (rtl). */
+/** Bilingual label: EN + '|' + AR on one line; wraps the Arabic onto a
+ *  second line in narrow cells — never clipped. */
 function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
   return (
     <span
-      className={`flex gap-1.5 text-[8pt] font-semibold uppercase leading-tight tracking-[0.08em] ${center ? 'justify-center' : ''}`}
+      className={`flex flex-wrap gap-x-1.5 gap-y-[0.3mm] text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt] ${center ? 'justify-center' : ''}`}
       style={{ color: MUTED }}
     >
-      <span>{en}</span>
+      <span className="break-words">{en}</span>
       <span className="text-[#6B7488]">|</span>
       <span lang="ar" dir="rtl" className="normal-case tracking-normal">
         {ar}
@@ -147,7 +148,7 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
     : (map[status] ?? map.draft)
   return (
     <span
-      className="absolute -top-3 right-0 z-20 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      className="absolute -top-3 right-0 z-20 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.3pt] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
       style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
     >
       {entry.label}
@@ -510,7 +511,7 @@ export function EInvoiceDocument({
   // Mirror-template table: navy header (white EN over gold AR), horizontal-
   // only row separators, no vertical body lines.
   const th = 'px-1 py-[3px] text-center align-middle leading-[1.3]'
-  const td = 'px-1 py-[3px] align-top text-[8.5pt] leading-[1.35] text-neutral-900'
+  const td = 'px-1 py-[3px] align-top text-[9pt] leading-[1.35] text-neutral-900'
   const tdR = `${td} text-right tabular-nums`
 
   const currencyAr = CURRENCY_AR[currency] ?? ''
@@ -600,7 +601,7 @@ export function EInvoiceDocument({
 
             {/* ── content ── */}
             <div
-              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col"
+              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col [&>*]:shrink-0"
               style={{
                 paddingTop: `${topMm}mm`,
                 paddingBottom: `${bottomMm + FOOTER_MM}mm`,
@@ -610,11 +611,12 @@ export function EInvoiceDocument({
             >
               {pageIdx === 0 ? (
                 <>
-                  {/* 1 ─ mirror title row: EN title · invoice-no pill badge · AR title */}
-                  <div className="relative flex items-center justify-between gap-3">
+                  {/* 1 ─ mirror title row: EN title (≤35%) · invoice-no pill
+                      badge (centre) · AR title (≤35%) — grid zones never overlap */}
+                  <div className="relative grid grid-cols-[minmax(0,35fr)_auto_minmax(0,35fr)] items-center gap-3">
                     <StatusStamp status={inv.status} overdue={inv.overdue} />
                     <h1
-                      className="text-[18pt] font-extrabold uppercase leading-[1.15] tracking-[0.05em]"
+                      className="break-words text-[16pt] font-extrabold uppercase leading-[1.15] tracking-[0.04em]"
                       style={{ color: NAVY }}
                     >
                       {title.en}
@@ -622,11 +624,11 @@ export function EInvoiceDocument({
                     {/* pill badge — gold ring outside, navy fill inside */}
                     <div className="shrink-0 rounded-full p-[2px]" style={{ background: GOLD }}>
                       <div
-                        className={`rounded-full px-5 text-center ${plan.roomy ? 'py-[5px]' : 'py-1'}`}
+                        className="rounded-full px-4 text-center py-[4px]"
                         style={{ background: NAVY }}
                       >
                         <p
-                          className="whitespace-nowrap text-[8pt] font-bold uppercase tracking-[0.16em]"
+                          className="whitespace-nowrap text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {title.en.includes('TAX') ? 'Invoice No.' : 'Document No.'}{' '}
@@ -634,7 +636,7 @@ export function EInvoiceDocument({
                             رقم الفاتورة
                           </span>
                         </p>
-                        <p className="whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
+                        <p className="mt-[1px] whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
                           {inv.invoiceNumber}
                         </p>
                       </div>
@@ -642,7 +644,7 @@ export function EInvoiceDocument({
                     <h1
                       lang="ar"
                       dir="rtl"
-                      className="text-[16pt] font-extrabold leading-[1.3]"
+                      className="break-words text-[14pt] font-extrabold leading-[1.3]"
                       style={{ color: NAVY }}
                     >
                       {title.ar}
@@ -679,7 +681,7 @@ export function EInvoiceDocument({
 
                   {/* 3 ─ date & currency bar (cream, rounded, 4 cells) */}
                   <div
-                    className={`mt-2.5 grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomy ? 'mt-3' : ''}`}
+                    className="mt-2.5 grid grid-cols-4 rounded-lg border"
                     style={{ borderColor: BORDER, background: CREAM }}
                   >
                     {(
@@ -692,12 +694,12 @@ export function EInvoiceDocument({
                     ).map(([en, ar, value]) => (
                       <div
                         key={en}
-                        className={`border-r px-1.5 text-center last:border-r-0 ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}
+                        className="border-r px-1.5 py-[5px] text-center last:border-r-0"
                         style={{ borderColor: BORDER }}
                       >
                         <BiLabel en={en} ar={ar} center />
                         <p
-                          className={`mt-0.5 whitespace-nowrap text-[10pt] font-bold tabular-nums ${en === 'Currency' ? '' : 'font-mono'}`}
+                          className="mt-[1px] break-words text-[9pt] font-bold tabular-nums leading-snug"
                           style={{ color: NAVY }}
                         >
                           {value}
@@ -743,15 +745,15 @@ export function EInvoiceDocument({
                     ).map((box) => (
                       <div
                         key={box.label}
-                        className="overflow-hidden rounded-lg border"
+                        className="rounded-lg border"
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <div
-                          className="flex items-center justify-center gap-2 border-b px-2.5 py-[5px]"
+                          className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[5px]"
                           style={{ borderColor: BORDER, background: CREAM }}
                         >
                           <p
-                            className="text-[8.5pt] font-extrabold uppercase tracking-[0.18em]"
+                            className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                             style={{ color: DARK_GOLD }}
                           >
                             {box.label}
@@ -760,50 +762,50 @@ export function EInvoiceDocument({
                           <p
                             lang="ar"
                             dir="rtl"
-                            className="text-[9pt] font-bold leading-none"
+                            className="text-[8.5pt] font-bold leading-none"
                             style={{ color: DARK_GOLD }}
                           >
                             {box.labelAr}
                           </p>
                         </div>
-                        <div className={`px-2.5 ${plan.roomy ? 'space-y-1.5 py-2.5' : 'space-y-1 py-2'}`}>
-                          <p className="text-[10pt] font-bold leading-snug" style={{ color: NAVY }}>
+                        <div className="px-2.5 space-y-[4px] py-[6px]">
+                          <p className="break-words text-[9pt] font-bold leading-snug" style={{ color: NAVY }}>
                             {box.nameEn || '—'}
                           </p>
                           {box.nameAr ? (
                             <p
                               lang="ar"
                               dir="rtl"
-                              className="text-[10pt] font-semibold leading-snug"
+                              className="break-words text-[9pt] font-semibold leading-snug"
                               style={{ color: NAVY }}
                             >
                               {box.nameAr}
                             </p>
                           ) : null}
                           <div
-                            className="space-y-[3px] border-t border-dotted pt-1 text-[8.5pt] leading-[1.4]"
+                            className="space-y-[3px] border-t border-dotted pt-1 leading-[1.4]"
                             style={{ borderColor: '#C7CFDC' }}
                           >
-                            <p>
-                              <span className="font-semibold" style={{ color: MUTED }}>
+                            <p className="break-words">
+                              <span className="text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 VAT No. <span lang="ar" dir="rtl">الرقم الضريبي</span>:{' '}
                               </span>
-                              <span className="font-mono font-semibold">{box.vat || '—'}</span>
+                              <span className="font-mono text-[9pt] font-semibold">{box.vat || '—'}</span>
                             </p>
-                            <p>
-                              <span className="font-semibold" style={{ color: MUTED }}>
+                            <p className="break-words">
+                              <span className="text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 C.R. No. <span lang="ar" dir="rtl">السجل التجاري</span>:{' '}
                               </span>
-                              <span className="font-mono font-semibold">{box.cr || '—'}</span>
+                              <span className="font-mono text-[9pt] font-semibold">{box.cr || '—'}</span>
                             </p>
-                            <p>
-                              <span className="font-semibold" style={{ color: MUTED }}>
+                            <p className="break-words">
+                              <span className="text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
                               </span>
-                              <span className="text-neutral-800">{box.addressEn || '—'}</span>
+                              <span className="text-[9pt] text-neutral-800">{box.addressEn || '—'}</span>
                             </p>
                             {box.addressAr ? (
-                              <p lang="ar" dir="rtl" className="text-neutral-800">
+                              <p lang="ar" dir="rtl" className="break-words text-[9pt] text-neutral-800">
                                 {box.addressAr}
                               </p>
                             ) : null}
@@ -815,7 +817,7 @@ export function EInvoiceDocument({
 
                   {/* 5 ─ project info strip (P.O. · Project · Terms · Method) */}
                   <div
-                    className={`grid grid-cols-4 overflow-hidden rounded-lg border ${plan.roomy ? 'mt-3' : 'mt-2.5'}`}
+                    className="mt-2.5 grid grid-cols-4 rounded-lg border"
                     style={{ borderColor: BORDER, background: CREAM }}
                   >
                     <div
@@ -893,11 +895,11 @@ export function EInvoiceDocument({
                 </>
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
-                <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
-                  <p className="text-[10pt] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 border-b pb-1" style={{ borderColor: BORDER }}>
+                  <p className="break-words text-[8.5pt] font-bold uppercase tracking-[0.3pt]" style={{ color: NAVY }}>
                     {companyName} — {title.en} <span className="font-mono">{inv.invoiceNumber}</span>
                   </p>
-                  <p className="text-[8.5pt] italic" style={{ color: MUTED }}>
+                  <p className="shrink-0 text-[7.5pt] italic" style={{ color: MUTED }}>
                     continued · <span lang="ar" dir="rtl">تابع</span>
                   </p>
                 </div>
@@ -906,7 +908,7 @@ export function EInvoiceDocument({
               {/* 6 ─ items chunk — mirror-template table (thead repeats, tail-only pages skip) */}
               {chunk.length > 0 || pageIdx === 0 ? (
                 <div
-                  className="overflow-hidden rounded-lg border"
+                  className="rounded-lg border"
                   style={{ borderColor: BORDER, background: 'white' }}
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
@@ -1091,7 +1093,7 @@ export function EInvoiceDocument({
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <p
-                          className="flex items-center gap-2 text-[8.5pt] font-extrabold uppercase tracking-[0.14em]"
+                          className="flex flex-wrap items-center gap-x-2 gap-y-[0.3mm] text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
                           Amount in Words
@@ -1101,7 +1103,7 @@ export function EInvoiceDocument({
                           </span>
                         </p>
                         <p
-                          className="mt-1 text-[10pt] font-semibold leading-snug"
+                          className="mt-1 break-words text-[8.5pt] font-semibold leading-snug"
                           style={{ color: NAVY }}
                         >
                           {words.en}
@@ -1109,7 +1111,7 @@ export function EInvoiceDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="mt-0.5 text-[10pt] font-semibold leading-snug"
+                          className="mt-0.5 break-words text-[8.5pt] font-semibold leading-snug"
                           style={{ color: NAVY }}
                         >
                           {words.ar}
@@ -1121,7 +1123,7 @@ export function EInvoiceDocument({
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <p
-                          className="flex items-center gap-2 text-[8.5pt] font-extrabold uppercase tracking-[0.14em]"
+                          className="flex flex-wrap items-center gap-x-2 gap-y-[0.3mm] text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
                           style={{ color: DARK_GOLD }}
                         >
                           Bank Details
@@ -1136,45 +1138,45 @@ export function EInvoiceDocument({
                         settings.bankAccountName ||
                         settings.bankSwiftCode ? (
                           <div
-                            className={`mt-1.5 grid grid-cols-2 gap-x-4 ${plan.roomy ? 'gap-y-2' : 'gap-y-1.5'} text-[8.5pt] leading-[1.35]`}
+                            className={`mt-1.5 grid grid-cols-2 gap-x-4 ${plan.roomy ? 'gap-y-2' : 'gap-y-1.5'} leading-[1.35]`}
                           >
                             <div>
-                              <p className="font-semibold" style={{ color: MUTED }}>
+                              <p className="break-words text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 Account Name · <span lang="ar" dir="rtl">اسم الحساب</span>
                               </p>
-                              <p className="font-semibold" style={{ color: NAVY }}>
+                              <p className="break-words text-[9pt] font-semibold" style={{ color: NAVY }}>
                                 {settings.bankAccountName || '—'}
                               </p>
                             </div>
                             <div>
-                              <p className="font-semibold" style={{ color: MUTED }}>
+                              <p className="break-words text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 Bank · <span lang="ar" dir="rtl">البنك</span>
                               </p>
-                              <p className="font-semibold" style={{ color: NAVY }}>
+                              <p className="break-words text-[9pt] font-semibold" style={{ color: NAVY }}>
                                 {settings.bankName || '—'}
                               </p>
                             </div>
                             <div>
-                              <p className="font-semibold" style={{ color: MUTED }}>
+                              <p className="break-words text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 Account No. · <span lang="ar" dir="rtl">رقم الحساب</span>
                               </p>
-                              <p className="font-mono font-semibold" style={{ color: NAVY }}>
+                              <p className="break-words font-mono text-[9pt] font-semibold" style={{ color: NAVY }}>
                                 {settings.bankAccountNumber || '—'}
                               </p>
                             </div>
                             <div>
-                              <p className="font-semibold" style={{ color: MUTED }}>
+                              <p className="break-words text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 SWIFT · <span lang="ar" dir="rtl">السويفت</span>
                               </p>
-                              <p className="font-mono font-semibold" style={{ color: NAVY }}>
+                              <p className="break-words font-mono text-[9pt] font-semibold" style={{ color: NAVY }}>
                                 {settings.bankSwiftCode || '—'}
                               </p>
                             </div>
                             <div className="col-span-2">
-                              <p className="font-semibold" style={{ color: MUTED }}>
+                              <p className="break-words text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                                 IBAN · <span lang="ar" dir="rtl">الآيبان</span>
                               </p>
-                              <p className="break-all font-mono font-semibold" style={{ color: NAVY }}>
+                              <p className="break-all font-mono text-[9pt] font-semibold" style={{ color: NAVY }}>
                                 {settings.bankIban || '—'}
                               </p>
                             </div>
@@ -1189,7 +1191,7 @@ export function EInvoiceDocument({
 
                     {/* ── right column (40%): totals box ── */}
                     <div
-                      className="col-span-2 overflow-hidden rounded-lg border"
+                      className="col-span-2 rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       {(
@@ -1199,13 +1201,13 @@ export function EInvoiceDocument({
                           ['Taxable Amount', 'المبلغ الخاضع للضريبة', money(inv.taxableAmount)],
                           [`VAT ${vatLabel}`.trim(), 'ضريبة القيمة المضافة', money(inv.vatAmount)],
                         ] as Array<[string, string, string]>
-                      ).map(([en, ar, value]) => (
+                      ).map(([en, ar, value], i) => (
                         <div
                           key={en}
-                          className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9pt]`}
+                          className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-[0.3mm] border-b px-2.5 ${i === 0 ? 'rounded-t-[7px] ' : ''}${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9.5pt]`}
                           style={{ borderColor: BORDER, background: LIGHT_BG }}
                         >
-                          <span className="font-semibold" style={{ color: MUTED }}>
+                          <span className="text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                             {en} <span lang="ar" dir="rtl">{ar}</span>
                           </span>
                           <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
@@ -1215,40 +1217,40 @@ export function EInvoiceDocument({
                       ))}
                       {/* TOTAL DUE — navy row, white label, gold amount */}
                       <div
-                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[9px]' : 'py-[7px]'}`}
+                        className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-[0.3mm] border-b px-2.5 ${plan.roomy ? 'py-[9px]' : 'py-[7px]'}`}
                         style={{ borderColor: BORDER, background: DARK_NAVY }}
                       >
                         <span
-                          className="text-[11pt] font-extrabold uppercase tracking-wide text-white"
+                          className="text-[9.5pt] font-extrabold uppercase tracking-[0.3pt] text-white"
                         >
                           Total Due <span lang="ar" dir="rtl" className="tracking-normal">الإجمالي المستحق</span>
                         </span>
                         <span
-                          className="text-[14pt] font-extrabold tabular-nums"
+                          className="text-[13pt] font-extrabold tabular-nums"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {money(inv.totalDue)}
                         </span>
                       </div>
                       <div
-                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9pt]`}
+                        className={`flex flex-wrap items-center justify-between gap-x-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9.5pt]`}
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
-                        <span className="font-semibold" style={{ color: MUTED }}>
+                        <span className="text-[7.5pt] font-semibold" style={{ color: MUTED }}>
                           Amount Paid <span lang="ar" dir="rtl">المدفوع</span>
                         </span>
-                        <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                        <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                           {money(inv.paidAmount)}
                         </span>
                       </div>
                       <div
-                        className={`flex items-center justify-between gap-2 px-2.5 ${plan.roomy ? 'py-[8px]' : 'py-[6px]'} text-[9pt]`}
+                        className={`flex flex-wrap items-center justify-between gap-x-2 px-2.5 ${plan.roomy ? 'py-[8px]' : 'py-[6px]'} text-[9.5pt]`}
                         style={{ background: LIGHT_BG }}
                       >
-                        <span className="font-bold" style={{ color: NAVY }}>
+                        <span className="text-[9.5pt] font-bold" style={{ color: NAVY }}>
                           Balance Due <span lang="ar" dir="rtl">الرصيد المستحق</span>
                         </span>
-                        <span className="font-extrabold tabular-nums" style={{ color: NAVY }}>
+                        <span className="text-[9.5pt] font-extrabold tabular-nums" style={{ color: NAVY }}>
                           {money(balanceDue)}
                         </span>
                       </div>
@@ -1371,10 +1373,10 @@ export function EInvoiceDocument({
 
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div
-              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between border-t pt-[1mm] text-[8pt]"
+              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between gap-2 border-t pt-[1mm] text-[7.5pt]"
               style={{ bottom: `${bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
             >
-              <span className="truncate">
+              <span className="min-w-0 break-words">
                 {companyName} · {inv.invoiceNumber}
               </span>
               <span className="shrink-0 tabular-nums">

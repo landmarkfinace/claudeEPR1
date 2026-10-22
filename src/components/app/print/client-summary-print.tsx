@@ -160,10 +160,10 @@ export function ClientSummaryPrintDialog({
                   className="h-16 w-16 rounded object-contain"
                 />
                 <div>
-                  <h1 className="text-xl font-bold uppercase tracking-wide text-[#0F1F3D]">
+                  <h1 className="text-xl font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">
                     {settings.companyName}
                   </h1>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B8942C]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3pt] text-[#B8942C]">
                     Client Salary Summary — Manpower Billing
                   </p>
                   {settings.address ? (
@@ -175,11 +175,11 @@ export function ClientSummaryPrintDialog({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   Billing Period
                 </p>
                 <p className="text-base font-bold text-[#0F1F3D]">{periodLabel}</p>
-                <p className="mt-2 text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="mt-2 text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   Grand Total (incl. {vatPercent}% VAT)
                 </p>
                 <p className="text-xl font-bold tabular-nums">{money(group.grandTotal)}</p>
@@ -190,7 +190,7 @@ export function ClientSummaryPrintDialog({
             {/* Bill-To block */}
             <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   Bill To
                 </p>
                 <p className="mt-0.5 text-base font-bold text-[#0F1F3D]">{group.clientName}</p>

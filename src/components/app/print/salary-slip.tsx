@@ -101,8 +101,8 @@ export function SalarySlipDialog({
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10pt] font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
-      <p className="truncate text-sm font-medium text-neutral-900" title={value}>
+      <p className="text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">{label}</p>
+      <p className="break-words text-sm font-medium text-neutral-900">
         {value}
       </p>
     </div>
@@ -131,21 +131,21 @@ function SignatureBlock({
         <div className="w-full border-t border-neutral-800" />
       </div>
       <p
-        className={`mt-1.5 text-[11pt] font-bold uppercase tracking-widest ${
+        className={`mt-1.5 text-[11pt] font-bold uppercase tracking-[0.3pt] ${
           emphasize ? 'text-neutral-900' : 'text-[#1D2433]'
         }`}
       >
         {label}
       </p>
       {name ? (
-        <p className="truncate text-sm font-semibold text-neutral-900" title={name}>
+        <p className="break-words text-sm font-semibold text-neutral-900">
           {name}
         </p>
       ) : (
         <p className="text-sm italic text-[#6B7488]">Signature &amp; name</p>
       )}
       {sub ? (
-        <p className="truncate text-xs text-neutral-500" title={sub}>
+        <p className="break-words text-xs text-neutral-500">
           {sub}
         </p>
       ) : null}
@@ -183,7 +183,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
             className="h-20 w-20 shrink-0 object-contain"
           />
           <div className="min-w-0">
-            <h2 className="text-xl font-bold uppercase tracking-wide text-[#0F1F3D]">{companyName}</h2>
+            <h2 className="text-xl font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">{companyName}</h2>
             {settings.address ? (
               <p className="mt-1 text-xs leading-relaxed text-neutral-500">{settings.address}</p>
             ) : null}
@@ -194,12 +194,12 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
-          <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-widest text-white">
+          <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-[0.3pt] text-white">
             SALARY PAY SLIP
           </span>
           <span className="text-xs text-neutral-500">Issued: {formatDate(new Date())}</span>
           {p.status === 'paid' ? (
-            <span className="mt-3 inline-block -rotate-6 rounded-md border-[3px] border-emerald-600 px-3 py-1 shadow-[inset_0_0_0_1.5px_rgba(5,150,105,0.35)] text-sm font-black uppercase tracking-[0.25em] text-emerald-700">
+            <span className="mt-3 inline-block -rotate-6 rounded-md border-[3px] border-emerald-600 px-3 py-1 shadow-[inset_0_0_0_1.5px_rgba(5,150,105,0.35)] text-sm font-black uppercase tracking-[0.3pt] text-emerald-700">
               Paid
             </span>
           ) : (
@@ -228,7 +228,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
       {/* EARNINGS + DEDUCTIONS — side by side so the slip fits one A4 page */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <section>
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-500">
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.3pt] text-neutral-500">
             Earnings
           </h3>
           <table className="w-full border-collapse text-sm">
@@ -291,7 +291,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
         </section>
 
         <section>
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-neutral-500">
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.3pt] text-neutral-500">
             Deductions
           </h3>
           <table className="w-full border-collapse text-sm">
@@ -355,7 +355,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
 
       {/* NET PAYABLE BAR */}
       <div className="mt-4 flex flex-col items-center gap-1 bg-neutral-900 px-4 py-2.5 text-white sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm font-bold tracking-wide">NET SALARY PAYABLE</span>
+        <span className="text-sm font-bold tracking-[0.3pt]">NET SALARY PAYABLE</span>
         <span className="text-xs text-[#6B7488]">
           Disbursement for {monthName(p.month)} {p.year}
         </span>
@@ -365,7 +365,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
       {/* APPROVAL & ACKNOWLEDGMENT — printed with the slip so the approver
           and the staff member receiving the money can physically sign */}
       <section className="mt-4 break-inside-avoid rounded-lg border border-neutral-300 p-4">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+        <h3 className="text-xs font-bold uppercase tracking-[0.3pt] text-neutral-500">
           Approval &amp; Acknowledgment
         </h3>
         <p className="mt-1.5 text-xs leading-relaxed text-[#1D2433]">

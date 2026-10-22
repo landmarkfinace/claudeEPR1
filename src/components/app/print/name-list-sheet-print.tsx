@@ -148,10 +148,10 @@ function estLines(text: string, charsPerLine: number): number {
 }
 
 function rowHeightMm(w: NameListWorkerRow, hasResultBoxes: boolean, remarksShown: boolean): number {
-  let h = 8.4 // base row (name + padding) — raised with the bigger print fonts
-  if (hasResultBoxes) h = 10.4 // tick-box triple needs more room
-  if (remarksShown) h += Math.max(0, estLines(w.remarks ?? '', 16) - 1) * 2.2
-  h += Math.max(0, estLines(w.staff.fullName, 24) - 1) * 2.2
+  let h = 9.8 // base row (name + padding) — raised with the 7pt-floor print fonts
+  if (hasResultBoxes) h = 12.0 // tick-box triple needs more room
+  if (remarksShown) h += Math.max(0, estLines(w.remarks ?? '', 14) - 1) * 2.6
+  h += Math.max(0, estLines(w.staff.fullName, 22) - 1) * 2.6
   return h
 }
 
@@ -363,7 +363,7 @@ export function NameListSheetDocument({
   const ruleMm = 3.2 // gold rule
   const infoBarMm = 13.5 // cream info bar
   const refLineMm = 4.5 // reference line
-  const theadMm = 6.2 // table header
+  const theadMm = 7.2 // table header
   const chipsMm = 8 // trade chips + total capsule
   const signaturesMm = 30 // signature cards
   const page1FixedMm = headerMm + ruleMm + infoBarMm + refLineMm + theadMm + 3.5
@@ -415,7 +415,7 @@ export function NameListSheetDocument({
     trades.set(t, (trades.get(t) ?? 0) + 1)
   }
 
-  const th = 'px-1 py-[3px] text-center align-middle text-[8.2px] font-bold uppercase tracking-[0.04em] text-white'
+  const th = 'px-1 py-[3px] text-center align-middle text-[9.4px] font-bold uppercase tracking-[0.3pt] text-white'
   const rowFont = fontTier
 
   const letterheadArt = letterhead.mode === 'full' && letterhead.fullPageImage
@@ -466,7 +466,7 @@ export function NameListSheetDocument({
                       borderBottom: '1px dashed #C9D2DE',
                     }}
                   >
-                    <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    <p className="text-center text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: STRIPE_CAPTION }}>
                       Letterhead Header Area
                       <span className="mx-1.5 opacity-50">|</span>
                       <span lang="ar" dir="rtl" className="tracking-normal">مساحة رأس الخطاب</span>
@@ -491,7 +491,7 @@ export function NameListSheetDocument({
                       borderTop: '1px dashed #C9D2DE',
                     }}
                   >
-                    <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    <p className="text-center text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: STRIPE_CAPTION }}>
                       Letterhead Footer Area
                       <span className="mx-1.5 opacity-50">|</span>
                       <span lang="ar" dir="rtl" className="tracking-normal">مساحة ذيل الخطاب</span>
@@ -508,7 +508,7 @@ export function NameListSheetDocument({
                 style={{ top: `${Math.max(geo.topMm - 7, 2)}mm`, right: `${SIDE_PAD_MM}mm` }}
               >
                 <span
-                  className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.18em]"
+                  className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.3pt]"
                   style={{
                     borderColor:
                       list.status === 'sent'
@@ -532,7 +532,7 @@ export function NameListSheetDocument({
 
             {/* content */}
             <div
-              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col"
+              className="absolute inset-x-0 top-0 z-10 flex h-full flex-col [&>*]:shrink-0"
               style={{
                 paddingTop: `${geo.topMm}mm`,
                 paddingBottom: `${geo.bottomMm + FOOTER_MM}mm`,
@@ -543,16 +543,16 @@ export function NameListSheetDocument({
               {pageIdx === 0 ? (
                 <>
                   {/* 1 ─ header row: NAME LIST + subject · list-no capsule · client */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
+                  <div className="grid grid-cols-[minmax(0,35fr)_auto_minmax(0,35fr)] items-center gap-3">
+                    <div className="min-w-0">
                       <h1
-                        className="text-[18pt] font-extrabold uppercase leading-[1.1] tracking-[0.05em]"
+                        className="break-words text-[16pt] font-extrabold uppercase leading-[1.12] tracking-[0.04em]"
                         style={{ color: NAVY }}
                       >
                         Name List
                       </h1>
                       <p
-                        className="mt-[1mm] whitespace-nowrap text-[8pt] font-bold uppercase leading-none tracking-[0.22em]"
+                        className="mt-[1mm] break-words text-[7.5pt] font-bold uppercase leading-snug tracking-[0.3pt]"
                         style={{ color: GOLD }}
                       >
                         {list.subjectName} List
@@ -571,17 +571,16 @@ export function NameListSheetDocument({
                         </p>
                       </div>
                     </div>
-                    <div className="min-w-0 flex-1 text-right">
+                    <div className="min-w-0 text-right">
                       <p
-                        className="text-[8pt] font-semibold uppercase tracking-[0.14em]"
+                        className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         Client
                       </p>
                       <p
-                        className="mt-[0.6mm] truncate text-[10pt] font-bold leading-tight"
+                        className="mt-[0.6mm] break-words text-[9pt] font-bold leading-snug"
                         style={{ color: NAVY }}
-                        title={list.clientName}
                       >
                         {list.clientName}
                       </p>
@@ -606,11 +605,11 @@ export function NameListSheetDocument({
                   >
                     {/* subject badge */}
                     <div>
-                      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+                      <p className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: MUTED }}>
                         Subject
                       </p>
                       <span
-                        className="mt-[0.5mm] inline-block rounded-full px-2.5 py-[1.2px] text-[8pt] font-bold uppercase tracking-[0.08em] text-white"
+                        className="mt-[0.5mm] inline-block break-words rounded-full px-2.5 py-[1.2px] text-[7.5pt] font-bold uppercase tracking-[0.3pt] text-white"
                         style={{ background: list.subjectColor }}
                       >
                         {list.subjectName}
@@ -643,17 +642,17 @@ export function NameListSheetDocument({
                       </>
                     )}
                     <div className="text-right">
-                      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+                      <p className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: MUTED }}>
                         Total Workers
                       </p>
-                      <p className="text-[12pt] font-extrabold leading-tight" style={{ color: NAVY }}>
+                      <p className="text-[11pt] font-extrabold leading-tight" style={{ color: NAVY }}>
                         {list.workers.length}
                       </p>
                     </div>
                   </div>
 
                   {/* 4 ─ reference line */}
-                  <p className="mt-[1.2mm] text-[6.8px] leading-snug" style={{ color: '#4B5563' }}>
+                  <p className="mt-[1.2mm] break-words text-[9.4px] leading-snug" style={{ color: '#4B5563' }}>
                     {isMob ? (
                       <>
                         {list.refInterviewListNo ? (
@@ -764,7 +763,7 @@ export function NameListSheetDocument({
               className="pointer-events-none absolute inset-x-0 z-10 flex items-center justify-center"
               style={{ bottom: `${geo.bottomMm + 0.8}mm` }}
             >
-              <p className="text-[8pt] font-semibold tracking-[0.14em] uppercase" style={{ color: MUTED }}>
+              <p className="text-[7.5pt] font-semibold tracking-[0.3pt] uppercase" style={{ color: MUTED }}>
                 Page {pageIdx + 1} of {totalPages}
                 <span className="mx-1.5 opacity-50">|</span>
                 <span lang="ar" dir="rtl" className="tracking-normal">
@@ -782,7 +781,7 @@ export function NameListSheetDocument({
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+      <p className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: MUTED }}>
         {label}
       </p>
       <p
@@ -864,7 +863,7 @@ function SheetTable({
             <tr key={w.id} style={{ borderBottom: `1px solid ${ROW_SEP}` }}>
               <td className={`${td} text-center`}>
                 <span
-                  className="inline-flex h-[4.6mm] w-[4.6mm] items-center justify-center rounded-full text-[7.6px] font-bold"
+                  className="inline-flex h-[5mm] w-[5mm] items-center justify-center rounded-full text-[9.4px] font-bold"
                   style={{ border: `1.3px solid ${GOLD}`, color: NAVY }}
                 >
                   {idx + 1}
@@ -909,7 +908,7 @@ function CellContent({
     case 'blood':
       return w.staff.bloodGroup ? (
         <span
-          className="inline-block rounded-full px-1.5 py-[0.5px] text-[7.6px] font-bold"
+          className="inline-block break-words rounded-full px-1.5 py-[0.5px] text-[9.4px] font-bold"
           style={{ background: BLOOD_BG, color: BLOOD_FG }}
         >
           {w.staff.bloodGroup}
@@ -932,14 +931,14 @@ function CellContent({
                 ? '#B45309'
                 : '#6D28D9'
         return (
-          <span className="text-[8.2px] font-bold uppercase" style={{ color }}>
+          <span className="break-words text-[9.4px] font-bold uppercase" style={{ color }}>
             {w.result === 'onhold' ? 'On hold' : w.result}
           </span>
         )
       }
       // 3 empty tick boxes — the client ticks by hand
       return (
-        <span className="inline-flex items-center gap-[3px] whitespace-nowrap text-[6.6px] text-[#1D2433]">
+        <span className="inline-flex items-center gap-[3px] text-[9.4px] text-[#1D2433]">
           <TickBox label="Selected" />
           <TickBox label="Rejected" />
           <TickBox label="Absent" />
@@ -971,7 +970,7 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
       style={{ background: CREAM, border: `1px solid ${BORDER}` }}
     >
       <p
-        className="flex items-center justify-center gap-[4px] text-[8pt] font-bold uppercase tracking-[0.14em]"
+        className="flex flex-wrap items-center justify-center gap-[4px] text-[8pt] font-bold uppercase tracking-[0.3pt]"
         style={{ color: GOLD }}
       >
         <GoldDiamond size={3.5} />
@@ -981,10 +980,10 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1 pt-[7mm]">
           <div className="w-3/4 border-b border-neutral-500 pb-[0.4mm]" />
-          <p className="mt-[1.6mm] text-[8pt] text-[#1D2433]">
+          <p className="mt-[1.6mm] break-words text-[8pt] text-[#1D2433]">
             Name: <span className="ml-1 inline-block w-[22mm] border-b border-neutral-400 align-baseline" />
           </p>
-          <p className="mt-[1.2mm] text-[8pt] text-[#1D2433]">
+          <p className="mt-[1.2mm] break-words text-[8pt] text-[#1D2433]">
             Date: <span className="ml-1 tracking-[0.08em]">__ / __ / ____</span>
           </p>
         </div>
@@ -992,7 +991,7 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
           className="mt-[1.5mm] flex h-[19mm] w-[19mm] shrink-0 items-center justify-center rounded-full"
           style={{ border: `1.5px dashed ${GOLD}99` }}
         >
-          <p className="text-center text-[8pt] font-bold uppercase leading-snug" style={{ color: GOLD }}>
+          <p className="break-words text-center text-[8pt] font-bold uppercase leading-snug" style={{ color: GOLD }}>
             {stamp}
           </p>
         </div>

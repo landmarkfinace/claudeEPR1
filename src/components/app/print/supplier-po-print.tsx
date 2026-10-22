@@ -306,7 +306,7 @@ function StatusStamp({ status }: { status: string }) {
   }
   return (
     <span
-      className={`inline-block -rotate-6 rounded-md border-[3px] bg-white/85 px-2.5 py-0.5 text-[10pt] font-black uppercase tracking-[0.2em] ${styles[status] ?? styles.draft}`}
+      className={`inline-block -rotate-6 rounded-md border-[3px] bg-white/85 px-2.5 py-0.5 text-[10pt] font-black uppercase tracking-[0.3pt] ${styles[status] ?? styles.draft}`}
     >
       {labels[status] ?? status}
     </span>
@@ -413,7 +413,7 @@ export function SupplierPoPrintDialog({
 function SectionLabel({ children }: { children: string }) {
   return (
     <p
-      className="pt-[0.4mm] text-[8.5pt] font-extrabold uppercase leading-tight tracking-[0.22em]"
+      className="pt-[0.4mm] text-[8.5pt] font-extrabold uppercase leading-tight tracking-[0.3pt]"
       style={{ color: DARK_GOLD }}
     >
       {children}
@@ -425,12 +425,11 @@ function SectionLabel({ children }: { children: string }) {
 function MetaCol({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[8pt] font-semibold uppercase tracking-[0.1em]" style={{ color: MUTED }}>
+      <p className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]" style={{ color: MUTED }}>
         {label}
       </p>
       <p
-        className="mt-[0.6mm] truncate text-[10pt] font-bold leading-snug text-neutral-900"
-        title={value}
+        className="mt-[0.6mm] break-words text-[9pt] font-bold leading-snug text-neutral-900"
       >
         {value}
       </p>
@@ -486,7 +485,7 @@ export function SupplierPoDocument({
   const lastItemsPageIdx = plans.reduce((acc, pl, i) => (pl.items.length > 0 ? i : acc), 0)
 
   const thCls =
-    'pb-[1.2mm] pt-[0.8mm] text-left align-bottom text-[8.5pt] font-bold uppercase tracking-[0.1em] text-[#1D2433]'
+    'pb-[1.2mm] pt-[0.8mm] text-left align-bottom text-[8pt] font-bold uppercase tracking-[0.3pt] text-[#1D2433]'
   const tdCls = 'py-[1.6mm] pr-[2mm] align-top'
 
   // assignment strip is skipped entirely when nothing is filled in
@@ -538,7 +537,7 @@ export function SupplierPoDocument({
 
             {/* ── content ── */}
             <div
-              className="absolute inset-x-0 top-0 flex flex-col"
+              className="absolute inset-x-0 top-0 flex flex-col [&>*]:shrink-0"
               style={{
                 paddingTop: `${geo.padTop}mm`,
                 paddingBottom: `${geo.padBottom}mm`,
@@ -563,14 +562,14 @@ export function SupplierPoDocument({
                         />
                         <div className="min-w-0">
                           <h2
-                            className="text-[12pt] font-extrabold uppercase tracking-wide"
+                            className="break-words text-[11pt] font-extrabold uppercase tracking-[0.3pt]"
                             style={{ color: NAVY }}
                           >
                             {companyName}
                           </h2>
                           {letterhead.showCompanyDetails && settings.address ? (
                             <p
-                              className="mt-px max-w-[105mm] text-[8.5pt] leading-relaxed"
+                              className="mt-px max-w-[105mm] break-words text-[8pt] leading-relaxed"
                               style={{ color: MUTED }}
                             >
                               {settings.address}
@@ -578,7 +577,7 @@ export function SupplierPoDocument({
                           ) : null}
                           {letterhead.showCompanyDetails ? (
                             <div
-                              className="mt-px flex flex-wrap gap-x-[3mm] gap-y-0.5 text-[8.5pt]"
+                              className="mt-px flex flex-wrap gap-x-[3mm] gap-y-0.5 text-[8pt]"
                               style={{ color: MUTED }}
                             >
                               {settings.phone ? <span>Tel: {settings.phone}</span> : null}
@@ -608,13 +607,13 @@ export function SupplierPoDocument({
                         aria-hidden
                       />
                       <p
-                        className="mt-[1.4mm] font-serif text-[11pt] italic leading-none tracking-wide"
+                        className="mt-[1.4mm] font-serif text-[10pt] italic leading-none tracking-[0.3pt]"
                         style={{ color: DARK_GOLD }}
                       >
                         Manpower
                       </p>
                       <h1
-                        className="mt-[0.8mm] text-[24px] font-extrabold leading-none tracking-tight"
+                        className="mt-[0.8mm] text-[16pt] font-extrabold leading-none tracking-tight"
                         style={{ color: NAVY }}
                       >
                         Purchase Order
@@ -622,13 +621,13 @@ export function SupplierPoDocument({
                     </div>
                     <div className="shrink-0 pb-[0.5mm] text-right">
                       <p
-                        className="text-[8pt] font-bold uppercase tracking-[0.24em]"
+                        className="break-words text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         PO Number
                       </p>
                       <p
-                        className="mt-[1mm] font-mono text-[14pt] font-extrabold leading-none"
+                        className="mt-[1mm] break-words font-mono text-[11pt] font-extrabold leading-tight"
                         style={{ color: NAVY }}
                       >
                         {p.poNumber}
@@ -663,31 +662,31 @@ export function SupplierPoDocument({
                     {/* Issued by — the company (letterhead info) */}
                     <div className="min-w-0">
                       <p
-                        className="text-[8pt] font-semibold uppercase tracking-[0.1em]"
+                        className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         Issued by
                       </p>
                       <p
-                        className="mt-[0.6mm] text-[11pt] font-bold leading-tight"
+                        className="mt-[0.6mm] break-words text-[9.5pt] font-bold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {companyName}
                       </p>
                       {settings.address ? (
-                        <p className="mt-[0.5mm] text-[8.5pt] leading-snug text-[#1D2433]">
+                        <p className="mt-[0.5mm] break-words text-[8.5pt] leading-snug text-[#1D2433]">
                           {settings.address}
                         </p>
                       ) : null}
                       {settings.vatNumber || settings.crNumber ? (
-                        <p className="mt-[0.5mm] text-[8.5pt] leading-snug" style={{ color: MUTED }}>
+                        <p className="mt-[0.5mm] break-words text-[8.5pt] leading-snug" style={{ color: MUTED }}>
                           {settings.vatNumber ? `VAT ${settings.vatNumber}` : ''}
                           {settings.vatNumber && settings.crNumber ? ' · ' : ''}
                           {settings.crNumber ? `C.R. ${settings.crNumber}` : ''}
                         </p>
                       ) : null}
                       {settings.phone || settings.email ? (
-                        <p className="mt-[0.4mm] text-[8.5pt] leading-snug text-[#1D2433]">
+                        <p className="mt-[0.4mm] break-words text-[8.5pt] leading-snug text-[#1D2433]">
                           {[settings.phone, settings.email].filter(Boolean).join(' · ')}
                         </p>
                       ) : null}
@@ -695,31 +694,31 @@ export function SupplierPoDocument({
                     {/* Supplier */}
                     <div className="min-w-0">
                       <p
-                        className="text-[8pt] font-semibold uppercase tracking-[0.1em]"
+                        className="break-words text-[7.5pt] font-semibold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         Supplier
                       </p>
                       <p
-                        className="mt-[0.6mm] text-[11pt] font-bold leading-tight"
+                        className="mt-[0.6mm] break-words text-[9.5pt] font-bold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {p.supplierName}
                       </p>
                       {p.supplierAddress ? (
-                        <p className="mt-[0.5mm] text-[8.5pt] leading-snug text-[#1D2433]">
+                        <p className="mt-[0.5mm] break-words text-[8.5pt] leading-snug text-[#1D2433]">
                           {p.supplierAddress}
                         </p>
                       ) : null}
                       {p.supplierVat || p.supplierCr ? (
-                        <p className="mt-[0.5mm] text-[8.5pt] leading-snug" style={{ color: MUTED }}>
+                        <p className="mt-[0.5mm] break-words text-[8.5pt] leading-snug" style={{ color: MUTED }}>
                           {p.supplierVat ? `VAT ${p.supplierVat}` : ''}
                           {p.supplierVat && p.supplierCr ? ' · ' : ''}
                           {p.supplierCr ? `C.R. ${p.supplierCr}` : ''}
                         </p>
                       ) : null}
                       {p.attention || p.supplierPhone ? (
-                        <p className="mt-[0.4mm] text-[8.5pt] leading-snug text-[#1D2433]">
+                        <p className="mt-[0.4mm] break-words text-[8.5pt] leading-snug text-[#1D2433]">
                           {[p.attention, p.supplierPhone].filter(Boolean).join(' · ')}
                         </p>
                       ) : null}
@@ -759,7 +758,7 @@ export function SupplierPoDocument({
                       />
                     ) : null}
                     <p
-                      className="truncate text-[11pt] font-extrabold uppercase tracking-[0.12em]"
+                      className="break-words text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]"
                       style={{ color: NAVY }}
                     >
                       {companyName} — Purchase Order <span className="font-mono">{p.poNumber}</span>
@@ -767,7 +766,7 @@ export function SupplierPoDocument({
                         ·
                       </span>
                       <span
-                        className="font-semibold normal-case tracking-normal"
+                        className="break-words font-semibold normal-case tracking-normal"
                         style={{ color: DARK_NAVY }}
                       >
                         {p.supplierName}
@@ -775,7 +774,7 @@ export function SupplierPoDocument({
                     </p>
                   </div>
                   <p
-                    className="shrink-0 rounded-[2px] px-[2mm] py-[0.7mm] text-[8pt] font-bold uppercase tracking-[0.22em] text-white"
+                    className="shrink-0 rounded-[2px] px-[2mm] py-[0.7mm] text-[7.5pt] font-bold uppercase tracking-[0.3pt] text-white"
                     style={{ background: GOLD }}
                   >
                     Continued
@@ -785,7 +784,7 @@ export function SupplierPoDocument({
 
               {/* items chunk — thead repeats on every page (tail-only pages skip the table) */}
               {chunk.length > 0 || pageIdx === 0 ? (
-                <table className="mt-[1.5mm] w-full border-collapse text-[10pt]">
+                <table className="mt-[1.5mm] w-full border-collapse text-[9pt]">
                   <thead>
                     <tr style={{ borderBottom: `0.45mm solid ${DARK_NAVY}` }}>
                       {isManpower ? (
@@ -836,22 +835,22 @@ export function SupplierPoDocument({
                           {isManpower ? (
                             <>
                               <td className={tdCls}>
-                                <p className="text-[10pt] font-bold" style={{ color: DARK_NAVY }}>
+                                <p className="break-words text-[9pt] font-bold" style={{ color: DARK_NAVY }}>
                                   {it.description}
                                 </p>
                               </td>
                               <td
-                                className={`${tdCls} text-center text-[10pt] tabular-nums`}
+                                className={`${tdCls} text-center text-[9pt] tabular-nums`}
                               >
                                 {it.quantity.toLocaleString('en-US')}
                               </td>
                               <td
-                                className={`${tdCls} text-right text-[10pt] tabular-nums`}
+                                className={`${tdCls} text-right text-[9pt] tabular-nums`}
                               >
                                 {money(it.unitPrice)}
                               </td>
                               <td
-                                className={`${tdCls} text-right text-[10pt] font-bold tabular-nums`}
+                                className={`${tdCls} text-right text-[9pt] font-bold tabular-nums`}
                                 style={{ color: DARK_NAVY }}
                               >
                                 {money(it.lineTotal)}
@@ -866,22 +865,22 @@ export function SupplierPoDocument({
                                 {it.sr}
                               </td>
                               <td className={tdCls}>
-                                <p className="text-[10pt] font-bold" style={{ color: DARK_NAVY }}>
+                                <p className="break-words text-[9pt] font-bold" style={{ color: DARK_NAVY }}>
                                   {it.description}
                                 </p>
                               </td>
                               <td
-                                className={`${tdCls} text-center text-[10pt] tabular-nums`}
+                                className={`${tdCls} text-center text-[9pt] tabular-nums`}
                               >
                                 {it.quantity.toLocaleString('en-US')}
                               </td>
                               <td
-                                className={`${tdCls} text-right text-[10pt] tabular-nums`}
+                                className={`${tdCls} text-right text-[9pt] tabular-nums`}
                               >
                                 {money(it.unitPrice)}
                               </td>
                               <td
-                                className={`${tdCls} text-right text-[10pt] font-bold tabular-nums`}
+                                className={`${tdCls} text-right text-[9pt] font-bold tabular-nums`}
                                 style={{ color: DARK_NAVY }}
                               >
                                 {money(it.lineTotal)}
@@ -900,20 +899,20 @@ export function SupplierPoDocument({
                         {isManpower ? (
                           <>
                             <td
-                              className="py-[1.8mm] pr-[2mm] text-[10pt] font-extrabold uppercase tracking-wide"
+                              className="py-[1.8mm] pr-[2mm] text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]"
                               style={{ color: NAVY }}
                             >
                               Total
                             </td>
                             <td
-                              className="py-[1.8mm] text-center text-[10pt] font-extrabold tabular-nums"
+                              className="py-[1.8mm] text-center text-[9.5pt] font-extrabold tabular-nums"
                               style={{ color: NAVY }}
                             >
                               {totalWorkers.toLocaleString('en-US')}
                             </td>
                             <td />
                             <td
-                              className="py-[1.8mm] pr-[2mm] text-right text-[10pt] font-extrabold tabular-nums"
+                              className="py-[1.8mm] pr-[2mm] text-right text-[9.5pt] font-extrabold tabular-nums"
                               style={{ color: NAVY }}
                             >
                               {money(p.subtotal)}
@@ -923,7 +922,7 @@ export function SupplierPoDocument({
                           <>
                             <td />
                             <td
-                              className="py-[1.8mm] pr-[2mm] text-[10pt] font-extrabold uppercase tracking-wide"
+                              className="py-[1.8mm] pr-[2mm] text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]"
                               style={{ color: NAVY }}
                             >
                               Total
@@ -931,7 +930,7 @@ export function SupplierPoDocument({
                             <td />
                             <td />
                             <td
-                              className="py-[1.8mm] pr-[2mm] text-right text-[10pt] font-extrabold tabular-nums"
+                              className="py-[1.8mm] pr-[2mm] text-right text-[9.5pt] font-extrabold tabular-nums"
                               style={{ color: NAVY }}
                             >
                               {money(p.subtotal)}
@@ -949,7 +948,7 @@ export function SupplierPoDocument({
                 <section className="mt-[2.5mm]">
                   {/* formula note — the template's line under the table */}
                   {isManpower ? (
-                    <p className="text-[8.5pt] leading-snug" style={{ color: MUTED }}>
+                    <p className="text-[8pt] leading-snug" style={{ color: MUTED }}>
                       Amount = No. of Workers × Hourly Rate × {hoursPerMonth} hours / month
                     </p>
                   ) : null}
@@ -963,13 +962,13 @@ export function SupplierPoDocument({
                       style={{ borderColor: BORDER, background: '#FFFFFF' }}
                     >
                       <p
-                        className="px-[1mm] text-[8pt] font-bold uppercase tracking-[0.14em]"
+                        className="px-[1mm] break-words text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         {isManpower ? 'Monthly Subtotal' : 'Subtotal'}
                       </p>
                       <p
-                        className="mt-[0.8mm] text-[11pt] font-extrabold tabular-nums"
+                        className="mt-[0.8mm] text-[9.5pt] font-extrabold tabular-nums"
                         style={{ color: NAVY }}
                       >
                         {money(p.subtotal)}
@@ -980,13 +979,13 @@ export function SupplierPoDocument({
                       style={{ borderColor: BORDER, background: '#FFFFFF' }}
                     >
                       <p
-                        className="px-[1mm] text-[8pt] font-bold uppercase tracking-[0.14em]"
+                        className="px-[1mm] break-words text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                         style={{ color: MUTED }}
                       >
                         VAT {vatPercent}%
                       </p>
                       <p
-                        className="mt-[0.8mm] text-[11pt] font-extrabold tabular-nums"
+                        className="mt-[0.8mm] text-[9.5pt] font-extrabold tabular-nums"
                         style={{ color: NAVY }}
                       >
                         {money(p.vatAmount)}
@@ -998,11 +997,11 @@ export function SupplierPoDocument({
                       style={{ background: NAVY }}
                     >
                       <p
-                        className="px-[1mm] text-[9pt] font-bold uppercase tracking-[0.14em] text-white"
+                        className="px-[1mm] break-words text-[8.5pt] font-bold uppercase tracking-[0.3pt] text-white"
                       >
                         {isManpower ? `Total / Month (${currency})` : `Total (${currency})`}
                       </p>
-                      <p className="mt-[0.8mm] text-[14pt] font-extrabold leading-none tabular-nums text-white">
+                      <p className="mt-[0.8mm] text-[13pt] font-extrabold leading-none tabular-nums text-white">
                         {money(p.total)}
                       </p>
                     </div>
@@ -1012,13 +1011,13 @@ export function SupplierPoDocument({
                         style={{ borderColor: BORDER, background: '#FFFFFF' }}
                       >
                         <p
-                          className="px-[1mm] text-[8pt] font-bold uppercase tracking-[0.14em]"
+                          className="px-[1mm] break-words text-[7.5pt] font-bold uppercase tracking-[0.3pt]"
                           style={{ color: MUTED }}
                         >
                           PO Value ({durationMonths} Months)
                         </p>
                         <p
-                          className="mt-[0.8mm] text-[11pt] font-extrabold tabular-nums"
+                          className="mt-[0.8mm] text-[9.5pt] font-extrabold tabular-nums"
                           style={{ color: NAVY }}
                         >
                           {money(poValue)}
@@ -1040,12 +1039,12 @@ export function SupplierPoDocument({
                     {termsLeft.map((t) => (
                       <li
                         key={`${t.n}-${t.text.slice(0, 12)}`}
-                        className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
+                        className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
                       >
                         <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
                           {t.n}
                         </span>
-                        <span>{t.text}</span>
+                        <span className="break-words">{t.text}</span>
                       </li>
                     ))}
                   </ol>
@@ -1053,12 +1052,12 @@ export function SupplierPoDocument({
                     {termsRight.map((t) => (
                       <li
                         key={`${t.n}-${t.text.slice(0, 12)}`}
-                        className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
+                        className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
                       >
                         <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
                           {t.n}
                         </span>
-                        <span>{t.text}</span>
+                        <span className="break-words">{t.text}</span>
                       </li>
                     ))}
                   </ol>
@@ -1080,13 +1079,12 @@ export function SupplierPoDocument({
                       <div style={{ height: plan.roomy ? '14mm' : '10mm' }} aria-hidden />
                       <div className="border-t-[0.35mm] border-neutral-800" />
                       <p
-                        className="mt-[1.2mm] truncate text-[9pt] font-bold"
+                        className="mt-[1.2mm] break-words text-[9pt] font-bold"
                         style={{ color: DARK_NAVY }}
-                        title={`Authorized by — ${companyName}`}
                       >
                         Authorized by — {companyName}
                       </p>
-                      <p className="text-[8.5pt]" style={{ color: MUTED }}>
+                      <p className="break-words text-[8pt]" style={{ color: MUTED }}>
                         Signature, Stamp &amp; Date
                         {settings.authorizedSignatory ? ` · ${settings.authorizedSignatory}` : ''}
                       </p>
@@ -1096,19 +1094,18 @@ export function SupplierPoDocument({
                       <div style={{ height: plan.roomy ? '14mm' : '10mm' }} aria-hidden />
                       <div className="border-t-[0.35mm] border-neutral-800" />
                       <p
-                        className="mt-[1.2mm] truncate text-[9pt] font-bold"
+                        className="mt-[1.2mm] break-words text-[9pt] font-bold"
                         style={{ color: DARK_NAVY }}
-                        title={`Accepted by — ${p.supplierName}`}
                       >
                         Accepted by — Supplier
                       </p>
-                      <p className="text-[8.5pt]" style={{ color: MUTED }}>
+                      <p className="break-words text-[8pt]" style={{ color: MUTED }}>
                         Signature, Stamp &amp; Date · {p.supplierName}
                       </p>
                     </div>
                   </section>
 
-                  <p className="mt-[2mm] text-center text-[8.5pt]" style={{ color: MUTED }}>
+                  <p className="mt-[2mm] text-center text-[8pt]" style={{ color: MUTED }}>
                     This is a computer-generated purchase order from {companyName}. Please quote the
                     P.O. number on all deliveries, invoices and correspondence.
                     {orderedBy ? ` Prepared by ${orderedBy}.` : ''}
@@ -1119,10 +1116,10 @@ export function SupplierPoDocument({
 
             {/* ── page footer strip ── */}
             <div
-              className="pointer-events-none absolute inset-x-[12mm] bottom-[3.5mm] flex items-center justify-between border-t pt-[1mm] text-[8.5pt]"
+              className="pointer-events-none absolute inset-x-[12mm] bottom-[3.5mm] flex items-center justify-between gap-2 border-t pt-[1mm] text-[7.5pt]"
               style={{ borderColor: BORDER, color: MUTED }}
             >
-              <span className="truncate">
+              <span className="min-w-0 break-words">
                 {companyName} · {p.poNumber}
                 {p.quotationRef ? ` · Ref ${p.quotationRef}` : ''}
               </span>

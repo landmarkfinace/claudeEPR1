@@ -52,7 +52,7 @@ function SignatureCell({ label, title }: { label: string; title: string }) {
       <div className="flex h-12 items-end">
         <div className="w-full border-t border-neutral-800" />
       </div>
-      <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">{label}</p>
+      <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">{label}</p>
       <p className="text-[10pt] text-[#1D2433]">{title}</p>
     </div>
   )
@@ -154,10 +154,10 @@ export function ExpenseStatementPrintDialog({
                   className="h-16 w-16 rounded object-contain"
                 />
                 <div>
-                  <h1 className="text-xl font-bold uppercase tracking-wide text-[#0F1F3D]">
+                  <h1 className="text-xl font-bold uppercase tracking-[0.3pt] text-[#0F1F3D]">
                     {settings.companyName}
                   </h1>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B8942C]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.3pt] text-[#B8942C]">
                     Worker Expense Statement
                   </p>
                   {settings.address ? (
@@ -169,11 +169,11 @@ export function ExpenseStatementPrintDialog({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   Statement Year
                 </p>
                 <p className="text-base font-bold text-[#0F1F3D]">{statement.year}</p>
-                <p className="mt-2 text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="mt-2 text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                   {isSingle ? 'Worker Total' : 'Grand Total'}
                 </p>
                 <p className="text-xl font-bold tabular-nums">
@@ -191,7 +191,7 @@ export function ExpenseStatementPrintDialog({
                 {/* Worker identity block */}
                 <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
+                    <p className="text-[10pt] font-semibold uppercase tracking-[0.3pt] text-neutral-500">
                       Worker
                     </p>
                     <p className="mt-0.5 text-base font-bold text-[#0F1F3D]">
