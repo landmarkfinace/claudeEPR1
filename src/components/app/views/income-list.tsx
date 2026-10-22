@@ -23,7 +23,7 @@ import {
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, toDateInputValue } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import type {
   Paginated,
@@ -443,7 +443,7 @@ export function TransactionsListView({
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Export CSV
           </Button>
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Button variant="outline" size="sm" onClick={(e) => printPrintArea(e.currentTarget)}>
             <Printer className="h-4 w-4" />
             Print Statement
           </Button>

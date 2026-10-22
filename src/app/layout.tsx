@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, IBM_Plex_Sans_Arabic, Geist_Mono } from "next/font/google";
+import { Inter, Cairo, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Providers } from "@/components/app/providers";
@@ -11,10 +11,11 @@ const inter = Inter({
   display: "swap",
 });
 
-// IBM Plex Sans Arabic — bilingual documents & Arabic UI text
-const plexArabic = IBM_Plex_Sans_Arabic({
-  variable: "--font-plex-arabic",
-  weight: ["400", "500", "600", "700"],
+// Cairo — Arabic (bilingual documents & Arabic UI text): proper OpenType
+// shaping for connected letters, full RTL support, self-hosted by next/font
+// so it embeds cleanly in the print PDFs.
+const cairoArabic = Cairo({
+  variable: "--font-cairo",
   subsets: ["arabic", "latin"],
   display: "swap",
 });
@@ -48,7 +49,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${plexArabic.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground`}
+        className={`${inter.variable} ${cairoArabic.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground`}
       >
         <Providers>
           {children}

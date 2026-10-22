@@ -73,14 +73,13 @@ import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
-import { printWithPageRule } from '@/components/app/print/print-page-rule'
 import { AdvanceReceiptDialog } from '@/components/app/print/advance-receipt'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, formatNumber, monthName, toDateInputValue } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import {
   MONTHS,
@@ -363,8 +362,8 @@ export function AdvancesView() {
     }
   }
 
-  function handlePrint() {
-    printWithPageRule('size: A4 landscape; margin: 8mm;')
+  function handlePrint(anchor?: HTMLElement | null) {
+    void printPrintArea(anchor ?? null)
   }
 
   const maxMonthly = summary ? Math.max(...summary.monthly.map((m) => m.given), 0) : 0
@@ -384,7 +383,7 @@ export function AdvancesView() {
           variant="outline"
           size="sm"
           className="h-9 print-hidden"
-          onClick={handlePrint}
+          onClick={(e) => handlePrint(e.currentTarget)}
           disabled={loading || rows.length === 0}
         >
           <Printer className="mr-2 h-4 w-4" />

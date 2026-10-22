@@ -6,11 +6,12 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* Inter for Latin UI + IBM Plex Sans Arabic per-glyph fallback for Arabic text */
-  --font-sans: var(--font-inter), var(--font-plex-arabic), ui-sans-serif, system-ui,
+  /* Inter for Latin UI + Cairo per-glyph fallback for Arabic text (proper
+     OpenType shaping: connected letters, correct RTL) */
+  --font-sans: var(--font-inter), var(--font-cairo), ui-sans-serif, system-ui,
     -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono);
-  --font-arabic-ui: "IBM Plex Sans Arabic", "Cairo", "Tajawal", "Segoe UI", Tahoma, sans-serif;
+  --font-arabic-ui: "Cairo", "Noto Sans Arabic", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -215,8 +216,8 @@
     outline-offset: 2px;
     border-radius: 2px;
   }
-  /* Arabic runs anywhere in the UI pick up Plex Arabic per-glyph from the
-     --font-sans chain; explicit .font-arabic stays on Cairo for print docs. */
+  /* Arabic runs anywhere in the UI pick up Cairo per-glyph from the
+     --font-sans chain; [dir=rtl] keeps right alignment for mixed lines. */
   [lang="ar"], [dir="rtl"] {
     text-align: right;
   }
@@ -442,20 +443,14 @@ html {
   }
 }
 
-/* ---------- E-Invoice bilingual fonts (Cairo variable + Tajawal) ---------- */
-/* Cairo is a variable font (400–700); Arabic subsets carry the Arabic unicode
-   range so Latin text never loads the Arabic file. Used by the E-Invoice print
-   document and Arabic inputs in the e-invoice form. */
-@font-face { font-family: 'Cairo'; src: url('/fonts/cairo-arabic-400.woff2') format('woff2'); unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; font-weight: 400 700; font-display: swap; }
-@font-face { font-family: 'Cairo'; src: url('/fonts/cairo-latin-400.woff2') format('woff2'); font-weight: 400 700; font-display: swap; }
-@font-face { font-family: 'Tajawal'; src: url('/fonts/tajawal-arabic-400.woff2') format('woff2'); unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; font-weight: 400; font-display: swap; }
-@font-face { font-family: 'Tajawal'; src: url('/fonts/tajawal-arabic-700.woff2') format('woff2'); unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF; font-weight: 700; font-display: swap; }
-@font-face { font-family: 'Tajawal'; src: url('/fonts/tajawal-latin-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }
-@font-face { font-family: 'Tajawal'; src: url('/fonts/tajawal-latin-700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
-
-/* Arabic input fields in the e-invoice form (RTL, Cairo) */
+/* ---------- E-Invoice bilingual fonts ---------- */
+/* Cairo + Tajawal are self-hosted by next/font (layout.tsx) with proper
+   OpenType Arabic shaping; the font stack falls back per-glyph. The old
+   /fonts/*.woff2 @font-face rules were removed — they collided with the
+   next/font faces (same family name) and their fixed 400–700 range broke
+   weights outside it. */
 .font-arabic {
-  font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
+  font-family: var(--font-cairo), 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
 }
 
 /* ---------- AI Assistant ---------- */

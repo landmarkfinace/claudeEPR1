@@ -66,13 +66,12 @@ import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/fi
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
 import { StatusBadge } from '@/components/app/shared/status-badge'
 import { ConfirmDialog } from '@/components/app/shared/confirm-dialog'
-import { printWithPageRule } from '@/components/app/print/print-page-rule'
 import { ClientSummaryPrintDialog } from '@/components/app/print/client-summary-print'
 import { useDebounce } from '@/hooks/use-debounce'
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatMoney, formatNumber, monthName, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type {
@@ -435,7 +434,7 @@ function BulkRateApply({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <span className="text-[10pt] font-semibold uppercase tracking-wide text-[#4A5468]">
         Apply to all {workerCount}:
       </span>
       <Input
@@ -1277,7 +1276,7 @@ export function ClientSalarySummaryView() {
         </Button>
         <Button
           className="print-hidden"
-          onClick={() => printWithPageRule('size: A4 landscape; margin: 8mm;')}
+          onClick={(e) => printPrintArea(e.currentTarget)}
           disabled={!view || groups.length === 0}
         >
           <Printer className="h-4 w-4" />
@@ -1915,7 +1914,7 @@ export function ClientSalarySummaryView() {
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5">
                                               <p className="font-medium">{r.fullName}</p>
-                                              <p className="text-[10px] text-muted-foreground">
+                                              <p className="text-[10pt] text-[#1D2433]">
                                                 IQAMA {r.iqamaId}
                                                 {r.source === 'manual' ? ' · added by hand' : ''}
                                               </p>
@@ -1976,7 +1975,7 @@ export function ClientSalarySummaryView() {
                                                     onChange={(v) => setEdit(r.payrollId, { otRate: v })}
                                                     onCommit={(v) => commitOtRate(r.payrollId, v)}
                                                   />
-                                                  <span className="text-[9px] text-muted-foreground">
+                                                  <span className="text-[8.5pt] text-[#4A5468]">
                                                     {r.manualOtRate > 0 ? 'manual' : '= regular'}
                                                   </span>
                                                 </div>
@@ -2071,7 +2070,7 @@ export function ClientSalarySummaryView() {
         </SectionCard>
 
         {/* Print footer note */}
-        <p className="hidden text-center text-[9px] text-neutral-400 print:block">
+        <p className="hidden text-center text-[8pt] text-[#6B7488] print:block">
           Computer-generated summary — {settings.companyName} Workforce, Payroll &amp; Accounts System
         </p>
       </div>

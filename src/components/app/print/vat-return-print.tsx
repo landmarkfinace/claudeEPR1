@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, monthName } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { VatBillRow, VatBillTotals, VatSummaryData } from '@/lib/types'
 
@@ -84,7 +84,7 @@ export function VatReturnPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button onClick={() => window.print()}>
+            <Button onClick={(e) => printPrintArea(e.currentTarget)}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
             </Button>
@@ -98,25 +98,25 @@ export function VatReturnPrintDialog({
             <div className="flex items-start justify-between gap-4 border-b-2 border-neutral-800 pb-4">
               <div className="min-w-0">
                 <p className="text-xl font-bold tracking-tight">{settings.companyName}</p>
-                <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-neutral-600">
+                <p className="mt-1 max-w-[420px] text-[11pt] leading-relaxed text-[#1D2433]">
                   {settings.address}
                 </p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm font-bold uppercase tracking-widest">VAT Return Expense</p>
-                <p className="mt-1 text-[11px] text-neutral-600">Period: {periodLabel}</p>
-                <p className="text-[11px] text-neutral-600">VAT Rate: {vatPercent}%</p>
-                <p className="text-[11px] text-neutral-600">
+                <p className="mt-1 text-[11pt] text-[#1D2433]">Period: {periodLabel}</p>
+                <p className="text-[11pt] text-[#1D2433]">VAT Rate: {vatPercent}%</p>
+                <p className="text-[11pt] text-[#1D2433]">
                   Generated: {formatDate(new Date())}
                 </p>
               </div>
             </div>
 
             {/* ---- Bills table ---- */}
-            <h3 className="mt-5 text-[13px] font-bold uppercase tracking-wider">
+            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-wider">
               Expense Bills with VAT
             </h3>
-            <table className="mt-2 w-full border-collapse text-[11px]">
+            <table className="mt-2 w-full border-collapse text-[11pt]">
               <thead>
                 <tr>
                   <th className={th}>#</th>
@@ -144,7 +144,7 @@ export function VatReturnPrintDialog({
                       <td className={td}>
                         {b.supplierName ?? '—'}
                         {b.supplierVatNumber ? (
-                          <span className="block text-[10px] text-neutral-500">
+                          <span className="block text-[10pt] text-neutral-500">
                             VAT No: {b.supplierVatNumber}
                           </span>
                         ) : null}
@@ -171,10 +171,10 @@ export function VatReturnPrintDialog({
             {/* ---- Quarterly breakdown ---- */}
             {summary ? (
               <>
-                <h3 className="mt-6 text-[13px] font-bold uppercase tracking-wider">
+                <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-wider">
                   Quarterly VAT Breakdown — {summary.year}
                 </h3>
-                <table className="mt-2 w-full border-collapse text-[11px]">
+                <table className="mt-2 w-full border-collapse text-[11pt]">
                   <thead>
                     <tr>
                       <th className={th}>Quarter</th>
@@ -214,7 +214,7 @@ export function VatReturnPrintDialog({
                     </tr>
                   </tfoot>
                 </table>
-                <p className="mt-2 text-[10px] italic text-neutral-600">
+                <p className="mt-2 text-[10pt] italic text-[#1D2433]">
                   Input VAT shown above is the recoverable VAT on purchase expenses for the period
                   — transfer it to the &quot;Input VAT&quot; section of the VAT return form.
                 </p>
@@ -227,19 +227,19 @@ export function VatReturnPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
                   Prepared By
                 </p>
-                <p className="text-[10px] text-neutral-600">Accounts Department</p>
+                <p className="text-[10pt] text-[#1D2433]">Accounts Department</p>
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
                   {settings.signatoryTitle || 'Authorized Signatory'}
                 </p>
-                <p className="text-[10px] text-neutral-600">
+                <p className="text-[10pt] text-[#1D2433]">
                   {settings.authorizedSignatory || settings.companyName}
                 </p>
               </div>

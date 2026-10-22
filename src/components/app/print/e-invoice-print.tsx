@@ -39,7 +39,7 @@ import {
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { formatNumber, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { AppSettings, EInvoiceConfig, EInvoiceItemRow, EInvoiceRow } from '@/lib/types'
 
@@ -59,7 +59,7 @@ const CREAM = '#FBF9F3'
 const STRIPE_A = '#F3F5F8'
 const STRIPE_CAPTION = '#9AA5B5'
 
-const DOC_FONT = "'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif"
+const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
 
 export const DEFAULT_EI_CONFIG: EInvoiceConfig = {
   letterhead: '',
@@ -111,11 +111,11 @@ function fmtQty(n: number): string {
 function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
   return (
     <span
-      className={`flex gap-1.5 text-[7px] font-semibold uppercase leading-tight tracking-[0.08em] ${center ? 'justify-center' : ''}`}
+      className={`flex gap-1.5 text-[8pt] font-semibold uppercase leading-tight tracking-[0.08em] ${center ? 'justify-center' : ''}`}
       style={{ color: MUTED }}
     >
       <span>{en}</span>
-      <span className="text-neutral-300">|</span>
+      <span className="text-[#6B7488]">|</span>
       <span lang="ar" dir="rtl" className="normal-case tracking-normal">
         {ar}
       </span>
@@ -147,7 +147,7 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
     : (map[status] ?? map.draft)
   return (
     <span
-      className="absolute -top-3 right-0 z-20 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      className="absolute -top-3 right-0 z-20 inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
       style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
     >
       {entry.label}
@@ -272,7 +272,7 @@ function planPages(
  * Full-screen dialog rendering the paginated A4 e-invoice. Parent supplies:
  * the full EInvoiceRow (items included), the e-invoice print config, and the
  * ZATCA QR data URL (null for the unsaved-draft preview → placeholder box).
- * Print button calls window.print() — only the `.print-area` is printed.
+ * Print button renders the server PDF (vector, headless Chromium) and prints that.
  */
 export function EInvoicePrintDialog({
   invoice,
@@ -294,9 +294,8 @@ export function EInvoicePrintDialog({
 
   const isDraft = !invoice || invoice.id === 'draft'
 
-  function handlePrint() {
-    toast.info("Choose 'Save as PDF' in the print dialog for the PDF copy")
-    window.print()
+  function handlePrint(anchor?: HTMLElement | null) {
+    void printPrintArea(anchor ?? null)
   }
 
   return (
@@ -316,12 +315,12 @@ export function EInvoicePrintDialog({
             <p className="truncate text-sm font-semibold">
               {invoice ? `E-Invoice — ${invoice.invoiceNumber}` : 'E-Invoice'}
               {isDraft && invoice ? (
-                <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10pt] font-bold uppercase tracking-wider text-amber-700">
                   Draft preview
                 </span>
               ) : null}
               {invoice && (invoice.zatcaPhase ?? 1) === 2 ? (
-                <span className="ml-2 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+                <span className="ml-2 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10pt] font-bold uppercase tracking-wider text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
                   Phase 2
                 </span>
               ) : null}
@@ -363,7 +362,7 @@ export function EInvoicePrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button size="sm" onClick={handlePrint} disabled={!invoice}>
+            <Button size="sm" onClick={(e) => handlePrint(e.currentTarget)} disabled={!invoice}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
             </Button>
@@ -380,7 +379,7 @@ export function EInvoicePrintDialog({
               qrDataUrl={qrDataUrl}
             />
           ) : (
-            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
+            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
               No e-invoice selected.
             </div>
           )}
@@ -511,7 +510,7 @@ export function EInvoiceDocument({
   // Mirror-template table: navy header (white EN over gold AR), horizontal-
   // only row separators, no vertical body lines.
   const th = 'px-1 py-[3px] text-center align-middle leading-[1.3]'
-  const td = 'px-1 py-[3px] align-top text-[8.5px] leading-[1.35] text-neutral-900'
+  const td = 'px-1 py-[3px] align-top text-[8.5pt] leading-[1.35] text-neutral-900'
   const tdR = `${td} text-right tabular-nums`
 
   const currencyAr = CURRENCY_AR[currency] ?? ''
@@ -557,7 +556,7 @@ export function EInvoiceDocument({
                     borderBottom: `1px dashed #C9D2DE`,
                   }}
                 >
-                  <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                  <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
                     Letterhead Header Area
                     <span className="mx-1.5 opacity-50">|</span>
                     <span lang="ar" dir="rtl" className="tracking-normal">مساحة رأس الخطاب</span>
@@ -572,7 +571,7 @@ export function EInvoiceDocument({
                     borderTop: `1px dashed #C9D2DE`,
                   }}
                 >
-                  <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                  <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
                     Letterhead Footer Area
                     <span className="mx-1.5 opacity-50">|</span>
                     <span lang="ar" dir="rtl" className="tracking-normal">مساحة ذيل الخطاب</span>
@@ -615,7 +614,7 @@ export function EInvoiceDocument({
                   <div className="relative flex items-center justify-between gap-3">
                     <StatusStamp status={inv.status} overdue={inv.overdue} />
                     <h1
-                      className="text-[16px] font-extrabold uppercase leading-[1.15] tracking-[0.05em]"
+                      className="text-[18pt] font-extrabold uppercase leading-[1.15] tracking-[0.05em]"
                       style={{ color: NAVY }}
                     >
                       {title.en}
@@ -627,7 +626,7 @@ export function EInvoiceDocument({
                         style={{ background: NAVY }}
                       >
                         <p
-                          className="whitespace-nowrap text-[6.5px] font-bold uppercase tracking-[0.16em]"
+                          className="whitespace-nowrap text-[8pt] font-bold uppercase tracking-[0.16em]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {title.en.includes('TAX') ? 'Invoice No.' : 'Document No.'}{' '}
@@ -635,7 +634,7 @@ export function EInvoiceDocument({
                             رقم الفاتورة
                           </span>
                         </p>
-                        <p className="whitespace-nowrap font-mono text-[12.5px] font-extrabold leading-tight text-white">
+                        <p className="whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
                           {inv.invoiceNumber}
                         </p>
                       </div>
@@ -643,19 +642,19 @@ export function EInvoiceDocument({
                     <h1
                       lang="ar"
                       dir="rtl"
-                      className="text-[16px] font-extrabold leading-[1.3]"
+                      className="text-[16pt] font-extrabold leading-[1.3]"
                       style={{ color: NAVY }}
                     >
                       {title.ar}
                     </h1>
                   </div>
                   {inv.relatedInvoiceNumber ? (
-                    <p className="mt-1 text-center text-[8.5px] font-semibold" style={{ color: MUTED }}>
+                    <p className="mt-1 text-center text-[8.5pt] font-semibold" style={{ color: MUTED }}>
                       Original Invoice:{' '}
                       <span className="font-mono font-bold" style={{ color: NAVY }}>
                         {inv.relatedInvoiceNumber}
                       </span>
-                      <span className="mx-1.5 text-neutral-300">|</span>
+                      <span className="mx-1.5 text-[#6B7488]">|</span>
                       <span lang="ar" dir="rtl">الفاتورة الأصلية: </span>
                       <span lang="ar" dir="rtl" className="font-mono font-bold" style={{ color: NAVY }}>
                         {inv.relatedInvoiceNumber}
@@ -663,7 +662,7 @@ export function EInvoiceDocument({
                     </p>
                   ) : null}
                   {inv.docType !== 'invoice' && inv.noteReason ? (
-                    <p className="mt-0.5 text-center text-[8.5px]" style={{ color: MUTED }}>
+                    <p className="mt-0.5 text-center text-[8.5pt]" style={{ color: MUTED }}>
                       Reason <span lang="ar" dir="rtl">(السبب)</span>:{' '}
                       <span className="font-semibold" style={{ color: NAVY }}>
                         {inv.noteReason}
@@ -698,7 +697,7 @@ export function EInvoiceDocument({
                       >
                         <BiLabel en={en} ar={ar} center />
                         <p
-                          className={`mt-0.5 whitespace-nowrap text-[10px] font-bold tabular-nums ${en === 'Currency' ? '' : 'font-mono'}`}
+                          className={`mt-0.5 whitespace-nowrap text-[10pt] font-bold tabular-nums ${en === 'Currency' ? '' : 'font-mono'}`}
                           style={{ color: NAVY }}
                         >
                           {value}
@@ -752,7 +751,7 @@ export function EInvoiceDocument({
                           style={{ borderColor: BORDER, background: CREAM }}
                         >
                           <p
-                            className="text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
+                            className="text-[8.5pt] font-extrabold uppercase tracking-[0.18em]"
                             style={{ color: DARK_GOLD }}
                           >
                             {box.label}
@@ -761,28 +760,28 @@ export function EInvoiceDocument({
                           <p
                             lang="ar"
                             dir="rtl"
-                            className="text-[9.5px] font-bold leading-none"
+                            className="text-[9pt] font-bold leading-none"
                             style={{ color: DARK_GOLD }}
                           >
                             {box.labelAr}
                           </p>
                         </div>
                         <div className={`px-2.5 ${plan.roomy ? 'space-y-1.5 py-2.5' : 'space-y-1 py-2'}`}>
-                          <p className="text-[10.5px] font-bold leading-snug" style={{ color: NAVY }}>
+                          <p className="text-[10pt] font-bold leading-snug" style={{ color: NAVY }}>
                             {box.nameEn || '—'}
                           </p>
                           {box.nameAr ? (
                             <p
                               lang="ar"
                               dir="rtl"
-                              className="text-[10px] font-semibold leading-snug"
+                              className="text-[10pt] font-semibold leading-snug"
                               style={{ color: NAVY }}
                             >
                               {box.nameAr}
                             </p>
                           ) : null}
                           <div
-                            className="space-y-[3px] border-t border-dotted pt-1 text-[8.5px] leading-[1.4]"
+                            className="space-y-[3px] border-t border-dotted pt-1 text-[8.5pt] leading-[1.4]"
                             style={{ borderColor: '#C7CFDC' }}
                           >
                             <p>
@@ -824,11 +823,11 @@ export function EInvoiceDocument({
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="P.O. / Contract Ref" ar="رقم أمر الشراء" center />
-                      <p className="mt-0.5 break-words text-[9px] font-bold" style={{ color: NAVY }}>
+                      <p className="mt-0.5 break-words text-[9pt] font-bold" style={{ color: NAVY }}>
                         {inv.poRef || '—'}
                       </p>
                       {inv.contractRef ? (
-                        <p className="break-words text-[8px]" style={{ color: MUTED }}>
+                        <p className="break-words text-[8.5pt]" style={{ color: MUTED }}>
                           Contract <span lang="ar" dir="rtl">العقد</span>: {inv.contractRef}
                         </p>
                       ) : null}
@@ -838,14 +837,14 @@ export function EInvoiceDocument({
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="Project" ar="المشروع" center />
-                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                      <p className="mt-0.5 break-words text-[9pt] font-semibold" style={{ color: NAVY }}>
                         {inv.projectEn || '—'}
                       </p>
                       {inv.projectAr ? (
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="break-words text-[8.5px]"
+                          className="break-words text-[8.5pt]"
                           style={{ color: MUTED }}
                         >
                           {inv.projectAr}
@@ -857,14 +856,14 @@ export function EInvoiceDocument({
                       style={{ borderColor: BORDER }}
                     >
                       <BiLabel en="Payment Terms" ar="شروط الدفع" center />
-                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                      <p className="mt-0.5 break-words text-[9pt] font-semibold" style={{ color: NAVY }}>
                         {inv.paymentTermsEn || '—'}
                       </p>
                       {inv.paymentTermsAr ? (
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="break-words text-[8.5px]"
+                          className="break-words text-[8.5pt]"
                           style={{ color: MUTED }}
                         >
                           {inv.paymentTermsAr}
@@ -873,14 +872,14 @@ export function EInvoiceDocument({
                     </div>
                     <div className={`px-1.5 text-center ${plan.roomy ? 'py-2.5' : 'py-1.5'}`}>
                       <BiLabel en="Payment Method" ar="طريقة الدفع" center />
-                      <p className="mt-0.5 break-words text-[9px] font-semibold" style={{ color: NAVY }}>
+                      <p className="mt-0.5 break-words text-[9pt] font-semibold" style={{ color: NAVY }}>
                         {inv.paymentMethodEn || '—'}
                       </p>
                       {inv.paymentMethodAr ? (
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="break-words text-[8.5px]"
+                          className="break-words text-[8.5pt]"
                           style={{ color: MUTED }}
                         >
                           {inv.paymentMethodAr}
@@ -895,10 +894,10 @@ export function EInvoiceDocument({
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
                 <div className="flex items-baseline justify-between border-b pb-1" style={{ borderColor: BORDER }}>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
+                  <p className="text-[10pt] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
                     {companyName} — {title.en} <span className="font-mono">{inv.invoiceNumber}</span>
                   </p>
-                  <p className="text-[8.5px] italic" style={{ color: MUTED }}>
+                  <p className="text-[8.5pt] italic" style={{ color: MUTED }}>
                     continued · <span lang="ar" dir="rtl">تابع</span>
                   </p>
                 </div>
@@ -925,53 +924,53 @@ export function EInvoiceDocument({
                     <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
                       <tr>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">#</p>
+                          <p className="text-[8pt] font-bold text-white">#</p>
                         </th>
                         <th className={`${th} text-left`}>
-                          <p className="text-[7.5px] font-bold text-white">Description</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Description</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الوصف
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">Unit</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Unit</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الوحدة
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">Qty</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Qty</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الكمية
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">Unit Price</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Unit Price</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             سعر الوحدة
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">Discount</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Discount</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الخصم
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">Taxable</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">Taxable</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             القيمة الخاضعة
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">{`VAT${vatLabel ? ` ${vatLabel}` : ''}`}</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">{`VAT${vatLabel ? ` ${vatLabel}` : ''}`}</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الضريبة
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[7.5px] font-bold text-white">{`Total (${currency})`}</p>
-                          <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                          <p className="text-[8pt] font-bold text-white">{`Total (${currency})`}</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                             الإجمالي
                           </p>
                         </th>
@@ -981,7 +980,7 @@ export function EInvoiceDocument({
                       {chunk.length === 0 ? (
                         <tr>
                           <td
-                            className={`${td} border-b py-2 text-center text-neutral-400`}
+                            className={`${td} border-b py-2 text-center text-[#6B7488]`}
                             colSpan={9}
                             style={{ borderColor: ROW_SEP }}
                           >
@@ -1007,7 +1006,7 @@ export function EInvoiceDocument({
                             >
                               {/* index inside a thin gold ring — the template's touch */}
                               <span
-                                className="inline-flex h-[13px] w-[13px] items-center justify-center rounded-full border-[1.3px] text-[7.5px] font-bold tabular-nums"
+                                className="inline-flex h-[13px] w-[13px] items-center justify-center rounded-full border-[1.3px] text-[8pt] font-bold tabular-nums"
                                 style={{ borderColor: GOLD, color: NAVY }}
                               >
                                 {it.sr}
@@ -1019,14 +1018,14 @@ export function EInvoiceDocument({
                                 <p
                                   lang="ar"
                                   dir="rtl"
-                                  className="mt-px text-[8px]"
+                                  className="mt-px text-[8.5pt]"
                                   style={{ color: MUTED }}
                                 >
                                   {it.descriptionAr}
                                 </p>
                               ) : null}
                               {it.taxCategory && it.taxCategory !== 'S' ? (
-                                <p className="mt-px text-[7.5px] italic" style={{ color: MUTED }}>
+                                <p className="mt-px text-[8pt] italic" style={{ color: MUTED }}>
                                   {it.taxCategory === 'Z' ? 'Zero-rated' : it.taxCategory === 'E' ? 'VAT exempt' : 'Not subject to VAT'}
                                   {it.exemptionReason ? ` — ${it.exemptionReason}` : ''}
                                 </p>
@@ -1038,7 +1037,7 @@ export function EInvoiceDocument({
                                 <p
                                   lang="ar"
                                   dir="rtl"
-                                  className="text-[7.5px]"
+                                  className="text-[8pt]"
                                   style={{ color: MUTED }}
                                 >
                                   {it.unitAr}
@@ -1060,7 +1059,7 @@ export function EInvoiceDocument({
                             <td className={`${tdR} border-b`} style={{ borderColor: ROW_SEP }}>
                               {money(it.vatAmount)}
                               {rates.length > 1 ? (
-                                <p className="text-[7px]" style={{ color: MUTED }}>
+                                <p className="text-[8pt]" style={{ color: MUTED }}>
                                   {Math.round(it.vatPercent)}%
                                 </p>
                               ) : null}
@@ -1092,7 +1091,7 @@ export function EInvoiceDocument({
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <p
-                          className="flex items-center gap-2 text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          className="flex items-center gap-2 text-[8.5pt] font-extrabold uppercase tracking-[0.14em]"
                           style={{ color: DARK_GOLD }}
                         >
                           Amount in Words
@@ -1102,7 +1101,7 @@ export function EInvoiceDocument({
                           </span>
                         </p>
                         <p
-                          className="mt-1 text-[9.5px] font-semibold leading-snug"
+                          className="mt-1 text-[10pt] font-semibold leading-snug"
                           style={{ color: NAVY }}
                         >
                           {words.en}
@@ -1110,7 +1109,7 @@ export function EInvoiceDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="mt-0.5 text-[10.5px] font-semibold leading-snug"
+                          className="mt-0.5 text-[10pt] font-semibold leading-snug"
                           style={{ color: NAVY }}
                         >
                           {words.ar}
@@ -1122,7 +1121,7 @@ export function EInvoiceDocument({
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <p
-                          className="flex items-center gap-2 text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          className="flex items-center gap-2 text-[8.5pt] font-extrabold uppercase tracking-[0.14em]"
                           style={{ color: DARK_GOLD }}
                         >
                           Bank Details
@@ -1137,7 +1136,7 @@ export function EInvoiceDocument({
                         settings.bankAccountName ||
                         settings.bankSwiftCode ? (
                           <div
-                            className={`mt-1.5 grid grid-cols-2 gap-x-4 ${plan.roomy ? 'gap-y-2' : 'gap-y-1.5'} text-[8.5px] leading-[1.35]`}
+                            className={`mt-1.5 grid grid-cols-2 gap-x-4 ${plan.roomy ? 'gap-y-2' : 'gap-y-1.5'} text-[8.5pt] leading-[1.35]`}
                           >
                             <div>
                               <p className="font-semibold" style={{ color: MUTED }}>
@@ -1181,7 +1180,7 @@ export function EInvoiceDocument({
                             </div>
                           </div>
                         ) : (
-                          <p className="mt-1 text-[8.5px]" style={{ color: MUTED }}>
+                          <p className="mt-1 text-[8.5pt]" style={{ color: MUTED }}>
                             —
                           </p>
                         )}
@@ -1203,7 +1202,7 @@ export function EInvoiceDocument({
                       ).map(([en, ar, value]) => (
                         <div
                           key={en}
-                          className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9px]`}
+                          className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9pt]`}
                           style={{ borderColor: BORDER, background: LIGHT_BG }}
                         >
                           <span className="font-semibold" style={{ color: MUTED }}>
@@ -1220,19 +1219,19 @@ export function EInvoiceDocument({
                         style={{ borderColor: BORDER, background: DARK_NAVY }}
                       >
                         <span
-                          className="text-[9.5px] font-extrabold uppercase tracking-wide text-white"
+                          className="text-[11pt] font-extrabold uppercase tracking-wide text-white"
                         >
                           Total Due <span lang="ar" dir="rtl" className="tracking-normal">الإجمالي المستحق</span>
                         </span>
                         <span
-                          className="text-[13px] font-extrabold tabular-nums"
+                          className="text-[14pt] font-extrabold tabular-nums"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {money(inv.totalDue)}
                         </span>
                       </div>
                       <div
-                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9px]`}
+                        className={`flex items-center justify-between gap-2 border-b px-2.5 ${plan.roomy ? 'py-[7px]' : 'py-[5px]'} text-[9pt]`}
                         style={{ borderColor: BORDER, background: 'white' }}
                       >
                         <span className="font-semibold" style={{ color: MUTED }}>
@@ -1243,7 +1242,7 @@ export function EInvoiceDocument({
                         </span>
                       </div>
                       <div
-                        className={`flex items-center justify-between gap-2 px-2.5 ${plan.roomy ? 'py-[8px]' : 'py-[6px]'} text-[9.5px]`}
+                        className={`flex items-center justify-between gap-2 px-2.5 ${plan.roomy ? 'py-[8px]' : 'py-[6px]'} text-[9pt]`}
                         style={{ background: LIGHT_BG }}
                       >
                         <span className="font-bold" style={{ color: NAVY }}>
@@ -1276,23 +1275,23 @@ export function EInvoiceDocument({
                           className="flex flex-col items-center justify-center gap-1 rounded border border-dashed p-2 text-center"
                           style={{ width: '32mm', height: '32mm', borderColor: BORDER }}
                         >
-                          <span className="text-[7px] font-semibold" style={{ color: MUTED }}>
+                          <span className="text-[8pt] font-semibold" style={{ color: MUTED }}>
                             QR appears
                             <br />
                             after issuing
                           </span>
-                          <span lang="ar" dir="rtl" className="text-[7px]" style={{ color: MUTED }}>
+                          <span lang="ar" dir="rtl" className="text-[8pt]" style={{ color: MUTED }}>
                             يظهر الرمز بعد الإصدار
                           </span>
                         </div>
                       )}
                       {zatcaNotice ? (
-                        <p className="mt-1 max-w-[34mm] text-center text-[7px] font-bold leading-tight text-red-700">
+                        <p className="mt-1 max-w-[34mm] text-center text-[8pt] font-bold leading-tight text-red-700">
                           {zatcaNotice}
                         </p>
                       ) : null}
-                      <p className="mt-1 text-center text-[7px] leading-tight" style={{ color: MUTED }}>
-                        Scan to verify <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                      <p className="mt-1 text-center text-[8pt] leading-tight" style={{ color: MUTED }}>
+                        Scan to verify <span className="mx-0.5 text-[#6B7488]">|</span>{' '}
                         <span lang="ar" dir="rtl">امسح للتحقق</span>
                       </p>
                     </div>
@@ -1300,16 +1299,16 @@ export function EInvoiceDocument({
                     {/* Receiver signature (only when enabled) */}
                     {inv.showReceiverSignature ? (
                       <div className="flex flex-col justify-end">
-                        <p className="text-center text-[8px] font-bold" style={{ color: NAVY }}>
-                          Receiver Signature <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <p className="text-center text-[8.5pt] font-bold" style={{ color: NAVY }}>
+                          Receiver Signature <span className="mx-1 text-[#6B7488]">|</span>{' '}
                           <span lang="ar" dir="rtl">توقيع المستلم</span>
                         </p>
                         <div
                           className={`${plan.roomy ? 'mt-12' : 'mt-9'} w-full border-t-2`}
                           style={{ borderColor: NAVY }}
                         />
-                        <p className="mt-1 text-center text-[7px]" style={{ color: MUTED }}>
-                          Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
+                        <p className="mt-1 text-center text-[8pt]" style={{ color: MUTED }}>
+                          Name &amp; Date <span className="mx-1 text-[#6B7488]">|</span>{' '}
                           <span lang="ar" dir="rtl">الاسم والتاريخ</span>
                         </p>
                       </div>
@@ -1328,12 +1327,12 @@ export function EInvoiceDocument({
                         ) : null}
                       </div>
                       <div className="mt-1 w-full border-t-2" style={{ borderColor: NAVY }} />
-                      <p className="mt-1 text-center text-[8px] font-bold" style={{ color: NAVY }}>
-                        Authorized Signature <span className="mx-1 text-neutral-300">|</span>{' '}
+                      <p className="mt-1 text-center text-[8.5pt] font-bold" style={{ color: NAVY }}>
+                        Authorized Signature <span className="mx-1 text-[#6B7488]">|</span>{' '}
                         <span lang="ar" dir="rtl">التوقيع المعتمد</span>
                       </p>
-                      <p className="text-center text-[7px]" style={{ color: MUTED }}>
-                        Name &amp; Date <span className="mx-1 text-neutral-300">|</span>{' '}
+                      <p className="text-center text-[8pt]" style={{ color: MUTED }}>
+                        Name &amp; Date <span className="mx-1 text-[#6B7488]">|</span>{' '}
                         <span lang="ar" dir="rtl">الاسم والتاريخ</span>
                       </p>
                     </div>
@@ -1353,7 +1352,7 @@ export function EInvoiceDocument({
                           />
                         ) : (
                           <p
-                            className="px-2 text-center text-[6px] font-bold uppercase leading-[1.3]"
+                            className="px-2 text-center text-[8pt] font-bold uppercase leading-[1.3]"
                             style={{ color: DARK_GOLD }}
                           >
                             Company Stamp
@@ -1372,14 +1371,14 @@ export function EInvoiceDocument({
 
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div
-              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between border-t pt-[1mm] text-[7px]"
+              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between border-t pt-[1mm] text-[8pt]"
               style={{ bottom: `${bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
             >
               <span className="truncate">
                 {companyName} · {inv.invoiceNumber}
               </span>
               <span className="shrink-0 tabular-nums">
-                Page {pageIdx + 1} of {pages.length} <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                Page {pageIdx + 1} of {pages.length} <span className="mx-0.5 text-[#6B7488]">|</span>{' '}
                 <span lang="ar" dir="rtl">
                   صفحة {pageIdx + 1} من {pages.length}
                 </span>

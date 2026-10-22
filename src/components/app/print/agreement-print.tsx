@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, formatNumber } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { AgreementRow } from '@/lib/types'
 
@@ -27,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
 const STATUS_STAMPS: Record<string, { label: string; cls: string }> = {
   draft: {
     label: 'DRAFT',
-    cls: 'border-neutral-500 text-neutral-600 shadow-[inset_0_0_0_1.5px_rgba(115,115,115,0.3)]',
+    cls: 'border-neutral-500 text-[#1D2433] shadow-[inset_0_0_0_1.5px_rgba(115,115,115,0.3)]',
   },
   final: {
     label: 'FINAL',
@@ -46,7 +46,7 @@ const STATUS_STAMPS: Record<string, { label: string; cls: string }> = {
 /**
  * Full-screen preview dialog for a single agreement. `agreement` must be the
  * FULL row (items / installments / clauses included — GET /api/agreements/[id]).
- * The document is wrapped in `.print-area` so window.print() outputs ONLY it.
+ * The document is wrapped in `.print-area`; the print buttons render the server PDF.
  */
 export function AgreementPrintDialog({
   agreement,
@@ -105,7 +105,7 @@ export function AgreementPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button onClick={() => window.print()} disabled={!agreement}>
+            <Button onClick={(e) => printPrintArea(e.currentTarget)} disabled={!agreement}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
             </Button>
@@ -123,7 +123,7 @@ export function AgreementPrintDialog({
               />
             </div>
           ) : (
-            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
+            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
               No agreement selected.
             </div>
           )}
@@ -182,7 +182,7 @@ function AgreementDocument({
           <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-widest text-white">
             AGREEMENT
           </span>
-          <span className="text-xs font-medium text-neutral-600">
+          <span className="text-xs font-medium text-[#1D2433]">
             Ref No: <span className="font-mono font-semibold">{a.refNumber}</span>
           </span>
           <span className="text-xs text-neutral-500">
@@ -208,24 +208,24 @@ function AgreementDocument({
 
       {/* ---- Parties ---- */}
       <section className="mt-5">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.3em] text-neutral-500">
+        <p className="text-center text-[11pt] font-bold uppercase tracking-[0.3em] text-neutral-500">
           — BETWEEN —
         </p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-neutral-300 bg-neutral-50 p-3.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+            <p className="text-[10pt] font-bold uppercase tracking-widest text-neutral-500">
               First Party (Party A)
             </p>
             <p className="mt-1 text-sm font-bold text-[#0F1F3D]">{partyAName}</p>
             {settings.address ? (
-              <p className="mt-1 text-xs leading-relaxed text-neutral-600">{settings.address}</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#1D2433]">{settings.address}</p>
             ) : null}
             <p className="mt-1 text-xs text-neutral-500">
               hereinafter referred to as &quot;the First Party&quot;
             </p>
           </div>
           <div className="rounded-lg border border-neutral-300 bg-neutral-50 p-3.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+            <p className="text-[10pt] font-bold uppercase tracking-widest text-neutral-500">
               Second Party (Party B)
             </p>
             <p className="mt-1 text-sm font-bold text-[#0F1F3D]">{a.clientName}</p>
@@ -237,7 +237,7 @@ function AgreementDocument({
             </p>
           </div>
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-neutral-700">
+        <p className="mt-3 text-xs leading-relaxed text-[#1D2433]">
           This Agreement is made and entered into by and between the First Party and the Second
           Party on {formatDate(a.startDate)}
           {a.endDate ? `, effective through ${formatDate(a.endDate)}` : ', effective from the date above'},
@@ -248,7 +248,7 @@ function AgreementDocument({
       {/* ---- Type + value summary bar ---- */}
       <div className="mt-5 flex flex-col items-center gap-1 bg-[#0F1F3D] px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm font-bold tracking-wide">{typeLabel.toUpperCase()} AGREEMENT</span>
-        <span className="text-xs text-neutral-300">
+        <span className="text-xs text-[#6B7488]">
           {formatDate(a.startDate)}
           {a.endDate ? ` — ${formatDate(a.endDate)}` : ' — ongoing'}
         </span>
@@ -260,8 +260,8 @@ function AgreementDocument({
       {/* ---- Scope & pricing ---- */}
       {a.layoutStyle === 'detailed' ? (
         <section className="mt-5 break-inside-avoid">
-          <h3 className="text-[13px] font-bold uppercase tracking-wider">Scope &amp; Pricing</h3>
-          <table className="mt-2 w-full border-collapse text-[11px]">
+          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Scope &amp; Pricing</h3>
+          <table className="mt-2 w-full border-collapse text-[11pt]">
             <thead>
               <tr>
                 <th className={th}>Sr</th>
@@ -304,11 +304,11 @@ function AgreementDocument({
         </section>
       ) : (
         <section className="mt-5 break-inside-avoid">
-          <h3 className="text-[13px] font-bold uppercase tracking-wider">Contract Value</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Contract Value</h3>
           <p className="mt-2 rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-3 text-sm font-semibold text-neutral-900">
             Contract Value:{' '}
             <span className="tabular-nums text-[#0F1F3D]">{formatMoney(a.value, currency)}</span>{' '}
-            <span className="font-normal italic text-neutral-600">(price as per Purchase Order)</span>
+            <span className="font-normal italic text-[#1D2433]">(price as per Purchase Order)</span>
           </p>
         </section>
       )}
@@ -316,8 +316,8 @@ function AgreementDocument({
       {/* ---- Installments ---- */}
       {installments.length > 0 ? (
         <section className="mt-6 break-inside-avoid">
-          <h3 className="text-[13px] font-bold uppercase tracking-wider">Payment Schedule</h3>
-          <table className="mt-2 w-full border-collapse text-[11px]">
+          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Payment Schedule</h3>
+          <table className="mt-2 w-full border-collapse text-[11pt]">
             <thead>
               <tr>
                 <th className={th}>Sr</th>
@@ -354,14 +354,14 @@ function AgreementDocument({
       {/* ---- Clauses ---- */}
       {clauses.length > 0 ? (
         <section className="mt-6">
-          <h3 className="text-[13px] font-bold uppercase tracking-wider">Terms &amp; Conditions</h3>
+          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Terms &amp; Conditions</h3>
           <ol className="mt-2 space-y-3">
             {clauses.map((c) => (
               <li key={c.id ?? c.sr} className="break-inside-avoid">
-                <p className="text-[12px] font-bold text-neutral-900">
+                <p className="text-[11pt] font-bold text-neutral-900">
                   {c.sr}. {c.title ?? ''}
                 </p>
-                <p className="mt-0.5 whitespace-pre-line text-[11px] leading-relaxed text-neutral-700">
+                <p className="mt-0.5 whitespace-pre-line text-[11pt] leading-relaxed text-[#1D2433]">
                   {c.body}
                 </p>
               </li>
@@ -373,8 +373,8 @@ function AgreementDocument({
       {/* ---- Notes ---- */}
       {a.notes ? (
         <section className="mt-6 break-inside-avoid">
-          <h3 className="text-[13px] font-bold uppercase tracking-wider">Notes</h3>
-          <p className="mt-1.5 whitespace-pre-line text-[11px] leading-relaxed text-neutral-700">
+          <h3 className="text-[12pt] font-bold uppercase tracking-wider">Notes</h3>
+          <p className="mt-1.5 whitespace-pre-line text-[11pt] leading-relaxed text-[#1D2433]">
             {a.notes}
           </p>
         </section>
@@ -382,7 +382,7 @@ function AgreementDocument({
 
       {/* ---- Signatures ---- */}
       <div className="mt-10 break-inside-avoid">
-        <p className="text-center text-[11px] font-semibold text-neutral-600">
+        <p className="text-center text-[11pt] font-semibold text-[#1D2433]">
           IN WITNESS WHEREOF, the parties have executed this Agreement on the date first written
           above.
         </p>
@@ -391,26 +391,26 @@ function AgreementDocument({
             <div className="flex h-14 items-end">
               <div className="w-full border-t border-neutral-800" />
             </div>
-            <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
               For {partyAName}
             </p>
-            <p className="text-[10px] text-neutral-600">Name / Signature: ____________________</p>
-            <p className="text-[10px] text-neutral-600">Date: ______________</p>
+            <p className="text-[10pt] text-[#1D2433]">Name / Signature: ____________________</p>
+            <p className="text-[10pt] text-[#1D2433]">Date: ______________</p>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex h-14 items-end">
               <div className="w-full border-t border-neutral-800" />
             </div>
-            <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+            <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
               For {a.clientName}
             </p>
-            <p className="text-[10px] text-neutral-600">Name / Signature: ____________________</p>
-            <p className="text-[10px] text-neutral-600">Date: ______________</p>
+            <p className="text-[10pt] text-[#1D2433]">Name / Signature: ____________________</p>
+            <p className="text-[10pt] text-[#1D2433]">Date: ______________</p>
           </div>
         </div>
       </div>
 
-      <p className="mt-6 text-center text-[10px] text-neutral-400">
+      <p className="mt-6 text-center text-[10pt] text-[#6B7488]">
         This is a computer-generated agreement. Ref {a.refNumber}
         {a.createdByName ? ` · Prepared by ${a.createdByName}` : ''}.
       </p>

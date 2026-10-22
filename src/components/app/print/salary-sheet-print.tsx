@@ -8,7 +8,7 @@ import { Dialog, DialogContent,
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { api } from '@/lib/api-client'
 import { formatDateTime, formatMoney, formatNumber, monthName } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   CategoryBreakdown,
@@ -198,7 +198,7 @@ export function SalarySheetPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button onClick={() => window.print()}>
+            <Button onClick={(e) => printPrintArea(e.currentTarget)}>
               <Printer className="h-4 w-4" />
               Print Sheet
             </Button>
@@ -222,19 +222,19 @@ export function SalarySheetPrintDialog({
                   </h1>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B8942C]">Monthly Payroll Sheet</p>
                   {settings.address ? (
-                    <p className="text-[10px] text-neutral-500">{settings.address}</p>
+                    <p className="text-[10pt] text-neutral-500">{settings.address}</p>
                   ) : null}
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
                   Total Disbursement
                 </p>
                 <p className="text-2xl font-bold tabular-nums">{money(data.totals.net)}</p>
-                <p className="mt-1 text-[11px] font-medium text-neutral-700">
+                <p className="mt-1 text-[11pt] font-medium text-[#1D2433]">
                   Total Manpower: {data.totals.count}
                 </p>
-                <p className="text-[11px] text-neutral-500 tabular-nums">
+                <p className="text-[11pt] text-neutral-500 tabular-nums">
                   Gross: {money(data.totals.gross)} · Deductions: {money(data.totals.deductions)}
                 </p>
               </div>
@@ -246,20 +246,20 @@ export function SalarySheetPrintDialog({
             <div className="mt-5 flex flex-wrap items-end justify-between gap-2">
               <div>
                 <h2 className="text-lg font-bold">Salary Sheet — {periodLabel}</h2>
-                <p className="mt-1 text-[11px] text-neutral-600">
+                <p className="mt-1 text-[11pt] text-[#1D2433]">
                   Project: {projectLabel}
                   {clientLabel ? <> · Client: <span className="font-medium">{clientLabel}</span></> : null}
                   {' '}· Category: {categoryLabel} · Total Manpower:{' '}
                   {data.totals.count}
                 </p>
               </div>
-              <p className="text-[10px] text-neutral-500">
+              <p className="text-[10pt] text-neutral-500">
                 Generated: {formatDateTime(new Date())}
               </p>
             </div>
 
             {/* Main payroll table */}
-            <table className="mt-4 w-full border-collapse text-[11px]">
+            <table className="mt-4 w-full border-collapse text-[11pt]">
               <thead>
                 <tr>
                   <th className={`${th} text-center`}>SN</th>
@@ -285,14 +285,14 @@ export function SalarySheetPrintDialog({
                     <td className={`${td} text-center tabular-nums`}>{i + 1}</td>
                     <td className={td}>
                       <span className="font-semibold">{r.staff.fullName}</span>
-                      <span className="block text-[9px] text-neutral-500">
+                      <span className="block text-[9pt] text-neutral-500">
                         IQAMA: {r.staff.iqamaId}
                       </span>
                     </td>
                     <td className={td}>{r.staff.staffCategory?.name ?? 'Uncategorized'}</td>
                     <td className={td}>
                       <span className="font-medium">{r.project?.name ?? '—'}</span>
-                      <span className="block text-[9px] text-neutral-500">
+                      <span className="block text-[9pt] text-neutral-500">
                         {r.project?.clientName ?? 'No client company'}
                       </span>
                     </td>
@@ -337,7 +337,7 @@ export function SalarySheetPrintDialog({
             <h3 className="mt-8 text-sm font-bold uppercase tracking-wide">
               Staff Category Breakdown
             </h3>
-            <table className="mt-2 w-full border-collapse text-[11px]">
+            <table className="mt-2 w-full border-collapse text-[11pt]">
               <thead>
                 <tr>
                   <th className={th}>Category</th>
@@ -379,13 +379,13 @@ export function SalarySheetPrintDialog({
                   <div className="h-10" aria-hidden="true" />
                   <div className="border-t border-dashed border-neutral-600" />
                   <p className="mt-1.5 text-xs font-semibold">{s.label}</p>
-                  <p className="text-[10px] text-neutral-500">{s.title}</p>
+                  <p className="text-[10pt] text-neutral-500">{s.title}</p>
                 </div>
               ))}
             </div>
 
             {/* Footer note */}
-            <p className="mt-8 border-t border-neutral-200 pt-2 text-center text-[9px] text-neutral-400">
+            <p className="mt-8 border-t border-neutral-200 pt-2 text-center text-[9pt] text-[#6B7488]">
               This salary sheet is computer-generated by the {settings.companyName} Workforce,
               Payroll &amp; Accounts System · Generated on {formatDateTime(new Date())}
             </p>

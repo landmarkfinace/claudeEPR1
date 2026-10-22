@@ -25,7 +25,7 @@ import {
 
 import { api, qs } from '@/lib/api-client'
 import { formatDate, formatMoney, formatNumber, toDateInputValue } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { Paginated, ProjectRow, TransactionType } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -288,7 +288,7 @@ export function AccountsSummaryView() {
           title="Accounts Summary"
           description="Income vs expense performance across the selected period"
         >
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Button variant="outline" size="sm" onClick={(e) => printPrintArea(e.currentTarget)}>
             <Printer className="h-4 w-4" />
             Print Statement
           </Button>

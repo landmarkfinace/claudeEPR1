@@ -41,7 +41,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { usePageRule } from '@/components/app/print/print-page-rule'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   AppSettings,
@@ -76,7 +76,7 @@ const STRIPE_CAPTION = '#9AA5B5'
 const BLOOD_BG = '#FBE9E7'
 const BLOOD_FG = '#B03A2E'
 
-const DOC_FONT = "'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif"
+const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
 
 // ── A4 pagination geometry ──────────────────────────────────────────────────
 const PAGE_W_MM = 210
@@ -243,7 +243,7 @@ export function NameListSheetPrintDialog({
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-72">
                     <p className="mb-1 text-xs font-semibold">Visible columns</p>
-                    <p className="mb-2 text-[11px] text-muted-foreground">
+                    <p className="mb-2 text-[11pt] text-muted-foreground">
                       # and Employee Name are always shown. Hidden columns never appear in the PDF or
                       the Excel export. Changes save to this list instantly.
                     </p>
@@ -307,7 +307,7 @@ export function NameListSheetPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button size="sm" onClick={() => window.print()}>
+            <Button size="sm" onClick={(e) => printPrintArea(e.currentTarget)}>
               <Printer className="h-4 w-4" />
               Print / Save as PDF
             </Button>
@@ -466,7 +466,7 @@ export function NameListSheetDocument({
                       borderBottom: '1px dashed #C9D2DE',
                     }}
                   >
-                    <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
                       Letterhead Header Area
                       <span className="mx-1.5 opacity-50">|</span>
                       <span lang="ar" dir="rtl" className="tracking-normal">مساحة رأس الخطاب</span>
@@ -491,7 +491,7 @@ export function NameListSheetDocument({
                       borderTop: '1px dashed #C9D2DE',
                     }}
                   >
-                    <p className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
+                    <p className="text-center text-[8pt] font-semibold uppercase tracking-[0.16em]" style={{ color: STRIPE_CAPTION }}>
                       Letterhead Footer Area
                       <span className="mx-1.5 opacity-50">|</span>
                       <span lang="ar" dir="rtl" className="tracking-normal">مساحة ذيل الخطاب</span>
@@ -508,7 +508,7 @@ export function NameListSheetDocument({
                 style={{ top: `${Math.max(geo.topMm - 7, 2)}mm`, right: `${SIDE_PAD_MM}mm` }}
               >
                 <span
-                  className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em]"
+                  className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.18em]"
                   style={{
                     borderColor:
                       list.status === 'sent'
@@ -546,13 +546,13 @@ export function NameListSheetDocument({
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <h1
-                        className="text-[17px] font-extrabold uppercase leading-[1.1] tracking-[0.05em]"
+                        className="text-[18pt] font-extrabold uppercase leading-[1.1] tracking-[0.05em]"
                         style={{ color: NAVY }}
                       >
                         Name List
                       </h1>
                       <p
-                        className="mt-[1mm] whitespace-nowrap text-[7px] font-bold uppercase leading-none tracking-[0.22em]"
+                        className="mt-[1mm] whitespace-nowrap text-[8pt] font-bold uppercase leading-none tracking-[0.22em]"
                         style={{ color: GOLD }}
                       >
                         {list.subjectName} List
@@ -561,25 +561,25 @@ export function NameListSheetDocument({
                     <div className="shrink-0 rounded-full p-[2px]" style={{ background: GOLD }}>
                       <div className="rounded-full px-5 py-[4px] text-center" style={{ background: NAVY }}>
                         <p
-                          className="whitespace-nowrap text-[6.5px] font-bold uppercase tracking-[0.16em]"
+                          className="whitespace-nowrap text-[8pt] font-bold uppercase tracking-[0.16em]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           List No.
                         </p>
-                        <p className="whitespace-nowrap text-[11px] font-extrabold leading-tight text-white">
+                        <p className="whitespace-nowrap text-[11pt] font-extrabold leading-tight text-white">
                           {list.listNo}
                         </p>
                       </div>
                     </div>
                     <div className="min-w-0 flex-1 text-right">
                       <p
-                        className="text-[6.5px] font-semibold uppercase tracking-[0.14em]"
+                        className="text-[8pt] font-semibold uppercase tracking-[0.14em]"
                         style={{ color: MUTED }}
                       >
                         Client
                       </p>
                       <p
-                        className="mt-[0.6mm] truncate text-[10.5px] font-bold leading-tight"
+                        className="mt-[0.6mm] truncate text-[10pt] font-bold leading-tight"
                         style={{ color: NAVY }}
                         title={list.clientName}
                       >
@@ -606,11 +606,11 @@ export function NameListSheetDocument({
                   >
                     {/* subject badge */}
                     <div>
-                      <p className="text-[6px] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+                      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
                         Subject
                       </p>
                       <span
-                        className="mt-[0.5mm] inline-block rounded-full px-2.5 py-[1.2px] text-[7.5px] font-bold uppercase tracking-[0.08em] text-white"
+                        className="mt-[0.5mm] inline-block rounded-full px-2.5 py-[1.2px] text-[8pt] font-bold uppercase tracking-[0.08em] text-white"
                         style={{ background: list.subjectColor }}
                       >
                         {list.subjectName}
@@ -643,10 +643,10 @@ export function NameListSheetDocument({
                       </>
                     )}
                     <div className="text-right">
-                      <p className="text-[6px] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+                      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
                         Total Workers
                       </p>
-                      <p className="text-[13px] font-extrabold leading-tight" style={{ color: NAVY }}>
+                      <p className="text-[12pt] font-extrabold leading-tight" style={{ color: NAVY }}>
                         {list.workers.length}
                       </p>
                     </div>
@@ -702,10 +702,10 @@ export function NameListSheetDocument({
                 <>
                   {/* continuation mini header + repeated thead */}
                   <div className="flex items-center justify-between gap-3 pb-[1.2mm]">
-                    <p className="text-[8px] font-bold uppercase tracking-[0.1em]" style={{ color: NAVY }}>
+                    <p className="text-[8.5pt] font-bold uppercase tracking-[0.1em]" style={{ color: NAVY }}>
                       {list.subjectName} List — continued
                     </p>
-                    <p className="text-[7px] font-semibold" style={{ color: MUTED }}>
+                    <p className="text-[8pt] font-semibold" style={{ color: MUTED }}>
                       {list.listNo} · {list.clientName}
                     </p>
                   </div>
@@ -729,7 +729,7 @@ export function NameListSheetDocument({
                       {[...trades.entries()].map(([t, n]) => (
                         <span
                           key={t}
-                          className="rounded-full px-2 py-[1.6px] text-[7.5px]"
+                          className="rounded-full px-2 py-[1.6px] text-[8pt]"
                           style={{ border: `1px solid ${BORDER}`, color: '#374151' }}
                         >
                           {t} <b style={{ color: NAVY }}>{n}</b>
@@ -737,7 +737,7 @@ export function NameListSheetDocument({
                       ))}
                     </div>
                     <span
-                      className="rounded-full px-3 py-[2px] text-[8px] font-bold text-white"
+                      className="rounded-full px-3 py-[2px] text-[8.5pt] font-bold text-white"
                       style={{ background: NAVY }}
                     >
                       Total <span style={{ color: LIGHT_GOLD }}>{list.workers.length}</span> Workers
@@ -764,7 +764,7 @@ export function NameListSheetDocument({
               className="pointer-events-none absolute inset-x-0 z-10 flex items-center justify-center"
               style={{ bottom: `${geo.bottomMm + 0.8}mm` }}
             >
-              <p className="text-[6.5px] font-semibold tracking-[0.14em] uppercase" style={{ color: MUTED }}>
+              <p className="text-[8pt] font-semibold tracking-[0.14em] uppercase" style={{ color: MUTED }}>
                 Page {pageIdx + 1} of {totalPages}
                 <span className="mx-1.5 opacity-50">|</span>
                 <span lang="ar" dir="rtl" className="tracking-normal">
@@ -782,11 +782,11 @@ export function NameListSheetDocument({
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[6px] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
+      <p className="text-[8pt] font-semibold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
         {label}
       </p>
       <p
-        className="mt-[0.5mm] truncate text-[8.5px] font-bold leading-snug"
+        className="mt-[0.5mm] truncate text-[8.5pt] font-bold leading-snug"
         style={{ color: '#111827' }}
         title={value}
       >
@@ -939,7 +939,7 @@ function CellContent({
       }
       // 3 empty tick boxes — the client ticks by hand
       return (
-        <span className="inline-flex items-center gap-[3px] whitespace-nowrap text-[6.6px] text-neutral-700">
+        <span className="inline-flex items-center gap-[3px] whitespace-nowrap text-[6.6px] text-[#1D2433]">
           <TickBox label="Selected" />
           <TickBox label="Rejected" />
           <TickBox label="Absent" />
@@ -971,7 +971,7 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
       style={{ background: CREAM, border: `1px solid ${BORDER}` }}
     >
       <p
-        className="flex items-center justify-center gap-[4px] text-[6.5px] font-bold uppercase tracking-[0.14em]"
+        className="flex items-center justify-center gap-[4px] text-[8pt] font-bold uppercase tracking-[0.14em]"
         style={{ color: GOLD }}
       >
         <GoldDiamond size={3.5} />
@@ -981,10 +981,10 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1 pt-[7mm]">
           <div className="w-3/4 border-b border-neutral-500 pb-[0.4mm]" />
-          <p className="mt-[1.6mm] text-[7px] text-neutral-700">
+          <p className="mt-[1.6mm] text-[8pt] text-[#1D2433]">
             Name: <span className="ml-1 inline-block w-[22mm] border-b border-neutral-400 align-baseline" />
           </p>
-          <p className="mt-[1.2mm] text-[7px] text-neutral-700">
+          <p className="mt-[1.2mm] text-[8pt] text-[#1D2433]">
             Date: <span className="ml-1 tracking-[0.08em]">__ / __ / ____</span>
           </p>
         </div>
@@ -992,7 +992,7 @@ function SignatureCard({ title, stamp }: { title: string; stamp: string }) {
           className="mt-[1.5mm] flex h-[19mm] w-[19mm] shrink-0 items-center justify-center rounded-full"
           style={{ border: `1.5px dashed ${GOLD}99` }}
         >
-          <p className="text-center text-[6px] font-bold uppercase leading-snug" style={{ color: GOLD }}>
+          <p className="text-center text-[8pt] font-bold uppercase leading-snug" style={{ color: GOLD }}>
             {stamp}
           </p>
         </div>

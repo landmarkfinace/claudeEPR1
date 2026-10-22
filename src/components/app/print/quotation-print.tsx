@@ -54,7 +54,7 @@ import {
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { formatMoney, formatNumber, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   AppSettings,
@@ -85,8 +85,8 @@ const DEFAULT_LETTERHEAD: LetterheadConfig = {
   footerImage: null,
   fullPageImage: null,
   showCompanyDetails: true,
-  headerHeightMm: 30,
-  footerHeightMm: 18,
+  headerHeightMm: 45,
+  footerHeightMm: 25,
 }
 
 export { DEFAULT_LETTERHEAD }
@@ -101,18 +101,22 @@ const LIGHT_BG = '#F2F5FA'
 const BORDER = '#DDE3EC'
 const ROW_SEP = '#E8ECF2'
 const MUTED = '#6B7488'
+// print-spec ink: field values / table body
+const INK = '#1D2433'
+// print-spec soft ink: field labels, notes, footnotes (darker than the #6B7488 floor)
+const INK_SOFT = '#4A5468'
 // warm cream — the template's soft beige for bars and card headers
 const CREAM = '#FBF9F3'
 // striped letterhead placeholder hatching + caption tone
 const STRIPE_A = '#F3F5F8'
-const STRIPE_CAPTION = '#9AA5B5'
+const STRIPE_CAPTION = '#6B7488'
 
-const DOC_FONT = "'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif"
+const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
 
 // ── A4 pagination geometry ──────────────────────────────────────────────────
 const PAGE_W_MM = 210
 const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see header comment)
-const SIDE_PAD_MM = 8
+const SIDE_PAD_MM = 14
 const FOOTER_MM = 4 // page footer strip reserved above the bottom letterhead band
 // "continued" strip reserved at the top of every page ≥ 2
 const CONT_HEADER_MM = 8
@@ -158,12 +162,12 @@ function estLines(text: string | null | undefined, charsPerLine: number): number
 
 /** Conservative table-row height estimate in mm (over-estimate = safe page breaks). */
 function rowHeightMm(it: DocItemRow): number {
-  // Trade / Description column ≈ 40% × 194mm ≈ 78mm ≈ 60 latin chars at
-  // 8.5px — 48/56 keeps a safety margin against wrap drift. Compact mirror
-  // rows: bold trade line + small grey sub-line ≈ 5.7mm rendered.
-  const lines = Math.max(1, Math.ceil(it.description.length / 48))
-  const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / 56)) : 0
-  return 4.2 + 2.4 * (lines - 1) + 2.0 * subLines
+  // Trade / Description column ≈ 40% × 182mm ≈ 73mm ≈ 38 latin chars at
+  // 10pt bold — 40/46 keeps a safety margin against wrap drift. Mirror rows
+  // at the print spec: 10pt bold trade line + 8pt grey sub-line ≈ 6.5mm.
+  const lines = Math.max(1, Math.ceil(it.description.length / 40))
+  const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / 46)) : 0
+  return 5.6 + 3.0 * (lines - 1) + 2.6 * subLines
 }
 
 /** Split a bullet-list text into trimmed non-empty lines. */
@@ -197,11 +201,11 @@ function numberedTerms(terms: string): Array<{ n: string; text: string }> {
 function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
   return (
     <span
-      className={`flex gap-1.5 text-[7px] font-semibold uppercase leading-tight tracking-[0.08em] ${center ? 'justify-center' : ''}`}
-      style={{ color: MUTED }}
+      className={`flex gap-1.5 text-[8.5pt] font-semibold uppercase leading-tight tracking-[0.06em] ${center ? 'justify-center' : ''}`}
+      style={{ color: INK_SOFT }}
     >
       <span>{en}</span>
-      <span className="text-neutral-300">|</span>
+      <span style={{ color: MUTED }}>|</span>
       <span lang="ar" dir="rtl" className="normal-case tracking-normal">
         {ar}
       </span>
@@ -233,7 +237,7 @@ function StatusStamp({ status }: { status: string }) {
   const entry = map[status] ?? map.draft
   return (
     <span
-      className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8px] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
+      className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[9pt] font-black uppercase tracking-[0.18em] shadow-[inset_0_0_0_1.5px_rgba(0,0,0,0.06)]"
       style={{ borderColor: entry.border, color: entry.color, transform: 'rotate(-3deg)' }}
     >
       {entry.label}
@@ -382,7 +386,7 @@ function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: n
  * Full-screen dialog rendering the paginated A4 quotation.
  * Purely presentational — the parent supplies the company letterhead config
  * (fetched in its open/preview event handlers) and the quotation document.
- * Print button calls window.print() — only the `.print-area` is printed.
+ * Print button renders the server PDF (vector, headless Chromium) and prints that.
  */
 export function QuotationPrintDialog({
   quotation,
@@ -458,7 +462,7 @@ export function QuotationPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button size="sm" onClick={() => window.print()} disabled={!quotation}>
+            <Button size="sm" onClick={(e) => printPrintArea(e.currentTarget)} disabled={!quotation}>
               <Printer className="h-4 w-4" />
               Print / Save as PDF
             </Button>
@@ -528,20 +532,33 @@ export function QuotationDocument({
   const currencyAr = CURRENCY_AR[currency] ?? ''
   const printedAt = new Date()
 
-  // uniform hours/month across hourly lines → drives the working-hours cell
-  // and the "Amount = …" calculation note under the table
+  // uniform working-hours basis across hourly lines → drives the
+  // working-hours cell and the "Amount = …" calculation note under the table.
+  // Preferred form: hours/day × days/month = hours/month (10 × 26 = 260).
   const hoursVals = items
     .map((it) => it.hoursPerMonth)
     .filter((h): h is number => h != null && h > 0)
   const uniformHours =
     hoursVals.length > 0 && hoursVals.every((h) => h === hoursVals[0]) ? hoursVals[0] : null
-  const workingHoursLabel = uniformHours
-    ? uniformHours === 260
-      ? '10 hrs × 26 days'
-      : `${uniformHours} hrs / month`
-    : hoursVals.length > 0
-      ? 'As per trade'
-      : '—'
+  const hpdVals = items
+    .map((it) => it.hoursPerDay)
+    .filter((h): h is number => h != null && h > 0)
+  const uniformHpd =
+    hpdVals.length > 0 && hpdVals.every((h) => h === hpdVals[0]) ? hpdVals[0] : null
+  const dpmVals = items
+    .map((it) => it.daysPerMonth)
+    .filter((d): d is number => d != null && d > 0)
+  const uniformDpm =
+    dpmVals.length > 0 && dpmVals.every((d) => d === dpmVals[0]) ? dpmVals[0] : null
+  const dayBasis =
+    uniformHpd != null && uniformDpm != null ? round2(uniformHpd * uniformDpm) : null
+  const workingHoursLabel = dayBasis
+    ? `${uniformHpd} hrs × ${uniformDpm} days = ${dayBasis} hrs / month`
+    : uniformHours
+      ? `${uniformHours} hrs / month`
+      : hoursVals.length > 0
+        ? 'As per trade'
+        : '—'
   const contractPeriodLabel =
     q.contractPeriod || (contractMonths ? `${contractMonths} Months` : '—')
 
@@ -555,52 +572,52 @@ export function QuotationDocument({
   // card base ≈ 26.5mm (header + name + AR name + first line of each field);
   // each ADDITIONAL wrapped address line adds ~2.4mm; the TO card's Attention
   // row counts as one extra line. Only the TALLER card's wraps matter.
-  const fromExtra = Math.max(0, estLines(fromAddress, 50) - 1)
-  const toExtra = Math.max(0, estLines(toAddress, 50) - 1) + (client?.contactPerson ? 1 : 0)
-  const cardsMm = 26.5 + 2.4 * Math.max(fromExtra, toExtra)
+  const fromExtra = Math.max(0, estLines(fromAddress, 44) - 1)
+  const toExtra = Math.max(0, estLines(toAddress, 44) - 1) + (client?.contactPerson ? 1 : 0)
+  const cardsMm = 32 + 3.2 * Math.max(fromExtra, toExtra)
   const projectBarMm =
-    9.5 +
-    2.2 *
+    12 +
+    2.8 *
       Math.max(
-        estLines(q.projectName, 20),
-        estLines(q.projectLocation, 24),
-        estLines(q.mobilization, 20),
-        estLines(contractPeriodLabel, 20),
-        estLines(workingHoursLabel, 20)
+        estLines(q.projectName, 18),
+        estLines(q.projectLocation, 22),
+        estLines(q.mobilization, 18),
+        estLines(contractPeriodLabel, 18),
+        estLines(workingHoursLabel, 18)
       )
   const page1FixedMm =
-    10 + // title row
-    3.5 + // gold rule
-    10.5 + // date & currency bar
+    13 + // title row (18pt QUOTATION + 10pt subtitle)
+    4 + // gold rule
+    12 + // date & currency bar
     cardsMm +
     projectBarMm +
-    (hasRateBasis ? 6.5 : 5) + // centred heading + intro line
-    7 + // two-line bilingual thead
-    3 + // calculation note
-    4 // inter-section margins
+    (hasRateBasis ? 9 : 7) + // centred heading + intro line
+    9 + // two-line bilingual thead (9pt EN + 8pt AR)
+    4 + // calculation note
+    5 // inter-section margins
 
   // Tail block heights (over-estimate = safe breaks)
-  const termsLines = terms.reduce((n, t) => n + estLines(t.text, 78), 0)
-  const notesLines = estLines(q.notes, 78)
-  const incLines = inclusions.reduce((n, l) => n + estLines(l, 34), 0)
-  const excLines = exclusions.reduce((n, l) => n + estLines(l, 34), 0)
+  const termsLines = terms.reduce((n, t) => n + estLines(t.text, 52), 0)
+  const notesLines = estLines(q.notes, 52)
+  const incLines = inclusions.reduce((n, l) => n + estLines(l, 26), 0)
+  const excLines = exclusions.reduce((n, l) => n + estLines(l, 26), 0)
   const scopeMm =
-    4.5 + // cream header
-    3 + // included/not-included sub-headers
-    Math.max(incLines, excLines) * 3 +
-    2.5 + // dotted divider + padding
-    termsLines * 3.3 +
-    3.5 +
-    (q.notes ? 4 + notesLines * 3.3 : 0) +
-    2.5
+    5.5 + // cream header (10pt)
+    3.5 + // included/not-included sub-headers (8.5pt)
+    Math.max(incLines, excLines) * 3.6 +
+    3 + // dotted divider + padding
+    termsLines * 4.0 +
+    4 +
+    (q.notes ? 4.5 + notesLines * 4.0 : 0) +
+    3
   const summaryMm =
-    (2 + (q.discount > 0 ? 2 : 0)) * 5.8 + // subtotal (+ discount + net)
-    9.5 + // navy TOTAL / MONTH row
-    (contractMonths ? 8.3 : 0) + // contract value row + sub-line
-    5
+    (2 + (q.discount > 0 ? 2 : 0)) * 7 + // subtotal (+ discount + net)
+    12 + // navy TOTAL / MONTH row (11pt label + 14pt amount)
+    (contractMonths ? 9.5 : 0) + // contract value row + sub-line
+    6
   const blockH: Record<TailBlock, number> = {
-    scopeSummary: Math.max(scopeMm, summaryMm) + 2.5 + 4, // + gap + words line
-    signatures: 30,
+    scopeSummary: Math.max(scopeMm, summaryMm) + 3 + 5, // + gap + words line (8.5pt)
+    signatures: 34,
   }
 
   const plans = planPages(items, geo.topMm, geo.bottomMm, page1FixedMm, blockH)
@@ -615,8 +632,8 @@ export function QuotationDocument({
 
   // table cell styles — mirror table: navy header (white EN over gold AR),
   // horizontal-only row separators, no vertical body lines.
-  const th = 'px-1 py-[1px] text-center align-middle leading-[1.2]'
-  const td = 'px-1 py-[1.5px] align-top text-[8.5px] leading-[1.25] text-neutral-900'
+  const th = 'px-1 py-[2.5px] text-center align-middle leading-[1.25]'
+  const td = 'px-1 py-[2px] align-top text-[10pt] leading-[1.3] text-[#1D2433]'
   const tdR = `${td} text-right tabular-nums`
 
   return (
@@ -668,7 +685,7 @@ export function QuotationDocument({
                     }}
                   >
                     <p
-                      className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]"
+                      className="text-center text-[8pt] font-semibold uppercase tracking-[0.14em]"
                       style={{ color: STRIPE_CAPTION }}
                     >
                       Letterhead Header Area
@@ -698,7 +715,7 @@ export function QuotationDocument({
                     }}
                   >
                     <p
-                      className="text-center text-[7.5px] font-semibold uppercase tracking-[0.16em]"
+                      className="text-center text-[8pt] font-semibold uppercase tracking-[0.14em]"
                       style={{ color: STRIPE_CAPTION }}
                     >
                       Letterhead Footer Area
@@ -756,13 +773,13 @@ export function QuotationDocument({
                   <div className="relative flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <h1
-                        className="text-[16px] font-extrabold uppercase leading-[1.15] tracking-[0.05em]"
+                        className="text-[18pt] font-extrabold uppercase leading-[1.15] tracking-[0.04em]"
                         style={{ color: NAVY }}
                       >
                         Quotation
                       </h1>
                       <p
-                        className="mt-[0.8mm] whitespace-nowrap text-[7px] font-bold uppercase leading-none tracking-[0.2em]"
+                        className="mt-[1mm] whitespace-nowrap text-[10pt] font-bold uppercase leading-none tracking-[0.14em]"
                         style={{ color: DARK_GOLD }}
                       >
                         {subjectLine}
@@ -775,7 +792,7 @@ export function QuotationDocument({
                         style={{ background: NAVY }}
                       >
                         <p
-                          className="whitespace-nowrap text-[6.5px] font-bold uppercase tracking-[0.16em]"
+                          className="whitespace-nowrap text-[8pt] font-bold uppercase tracking-[0.14em]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           Quotation No.{' '}
@@ -783,21 +800,21 @@ export function QuotationDocument({
                             رقم عرض السعر
                           </span>
                         </p>
-                        <p className="whitespace-nowrap font-mono text-[12.5px] font-extrabold leading-tight text-white">
+                        <p className="whitespace-nowrap font-mono text-[11pt] font-extrabold leading-tight text-white">
                           {q.quoteNumber}
                         </p>
                       </div>
                     </div>
                     <div className="min-w-0 flex-1 text-right">
-                      <p className="text-[7px] font-semibold uppercase tracking-[0.08em]" style={{ color: MUTED }}>
+                      <p className="text-[8.5pt] font-semibold uppercase tracking-[0.06em]" style={{ color: INK_SOFT }}>
                         Prepared for{' '}
-                        <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                        <span className="mx-0.5" style={{ color: MUTED }}>|</span>{' '}
                         <span lang="ar" dir="rtl" className="normal-case tracking-normal">
                           أُعدّ لصالح
                         </span>
                       </p>
                       <p
-                        className="mt-[0.6mm] truncate text-[10.5px] font-extrabold leading-tight"
+                        className="mt-[0.8mm] truncate text-[12pt] font-extrabold leading-tight"
                         style={{ color: NAVY }}
                         title={q.clientName}
                       >
@@ -837,7 +854,7 @@ export function QuotationDocument({
                       >
                         <BiLabel en={en} ar={ar} center />
                         <p
-                          className={`mt-0.5 whitespace-nowrap text-[9.5px] font-bold tabular-nums ${en === 'Currency' || en === 'Your Reference' ? '' : 'font-mono'}`}
+                          className={`mt-0.5 whitespace-nowrap text-[10pt] font-bold tabular-nums ${en === 'Currency' || en === 'Your Reference' ? '' : 'font-mono'}`}
                           style={{ color: NAVY }}
                         >
                           {value}
@@ -858,7 +875,7 @@ export function QuotationDocument({
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
+                          className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
                           style={{ color: DARK_GOLD }}
                         >
                           From
@@ -867,53 +884,53 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[9.5px] font-bold leading-none"
+                          className="text-[10pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           من
                         </p>
                       </div>
                       <div className={`px-2.5 ${plan.roomyTier >= 1 ? 'space-y-[5px] py-[7px]' : 'space-y-[2px] py-[5px]'}`}>
-                        <p className="text-[10px] font-bold leading-snug" style={{ color: NAVY }}>
+                        <p className="text-[10pt] font-bold leading-snug" style={{ color: INK }}>
                           {companyName}
                         </p>
                         {settings.companyNameAr ? (
                           <p
                             lang="ar"
                             dir="rtl"
-                            className="text-[9.5px] font-semibold leading-snug"
-                            style={{ color: NAVY }}
+                            className="text-[10pt] font-semibold leading-snug"
+                            style={{ color: INK }}
                           >
                             {settings.companyNameAr}
                           </p>
                         ) : null}
                         <div
-                          className={`border-t border-dotted pt-[3px] text-[7.5px] leading-[1.35] ${plan.roomyTier >= 1 ? 'space-y-[4px]' : 'space-y-[2.5px]'}`}
+                          className={`border-t border-dotted pt-[3px] text-[8.5pt] leading-[1.45] ${plan.roomyTier >= 1 ? 'space-y-[5px]' : 'space-y-[3px]'}`}
                           style={{ borderColor: '#C7CFDC' }}
                         >
                           <p>
-                            <span className="font-semibold" style={{ color: MUTED }}>
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>
                               Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
                             </span>
-                            <span className="font-semibold" style={{ color: DARK_NAVY }}>
+                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
                               {fromAddress || '—'}
                             </span>
                           </p>
                           <p>
-                            <span className="font-semibold" style={{ color: MUTED }}>
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>
                               VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
                             </span>
-                            <span className="font-mono font-semibold" style={{ color: DARK_NAVY }}>
+                            <span className="font-mono font-semibold text-[10pt]" style={{ color: INK }}>
                               {settings.vatNumber || '—'}
                               {settings.vatNumber && settings.crNumber ? ' · ' : ''}
                               {settings.crNumber || ''}
                             </span>
                           </p>
                           <p>
-                            <span className="font-semibold" style={{ color: MUTED }}>
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>
                               Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
                             </span>
-                            <span className="font-semibold" style={{ color: DARK_NAVY }}>
+                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
                               {settings.phone || settings.email
                                 ? [settings.phone, settings.email].filter(Boolean).join(' · ')
                                 : '—'}
@@ -933,7 +950,7 @@ export function QuotationDocument({
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
+                          className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
                           style={{ color: DARK_GOLD }}
                         >
                           To
@@ -942,43 +959,43 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[9.5px] font-bold leading-none"
+                          className="text-[10pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           إلى
                         </p>
                       </div>
                       <div className={`px-2.5 ${plan.roomyTier >= 1 ? 'space-y-[5px] py-[7px]' : 'space-y-[2px] py-[5px]'}`}>
-                        <p className="text-[10px] font-bold leading-snug" style={{ color: NAVY }}>
+                        <p className="text-[10pt] font-bold leading-snug" style={{ color: INK }}>
                           {q.clientName}
                         </p>
                         <div
-                          className={`border-t border-dotted pt-[3px] text-[7.5px] leading-[1.35] ${plan.roomyTier >= 1 ? 'space-y-[4px]' : 'space-y-[2.5px]'}`}
+                          className={`border-t border-dotted pt-[3px] text-[8.5pt] leading-[1.45] ${plan.roomyTier >= 1 ? 'space-y-[5px]' : 'space-y-[3px]'}`}
                           style={{ borderColor: '#C7CFDC' }}
                         >
                           {client?.contactPerson ? (
                             <p>
-                              <span className="font-semibold" style={{ color: MUTED }}>
+                              <span className="font-semibold" style={{ color: INK_SOFT }}>
                                 Attention <span lang="ar" dir="rtl">عناية</span>:{' '}
                               </span>
-                              <span className="font-semibold" style={{ color: DARK_NAVY }}>
+                              <span className="font-semibold text-[10pt]" style={{ color: INK }}>
                                 {client.contactPerson}
                               </span>
                             </p>
                           ) : null}
                           <p>
-                            <span className="font-semibold" style={{ color: MUTED }}>
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>
                               Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
                             </span>
-                            <span className="font-semibold" style={{ color: DARK_NAVY }}>
+                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
                               {toAddress || '—'}
                             </span>
                           </p>
                           <p>
-                            <span className="font-semibold" style={{ color: MUTED }}>
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>
                               Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
                             </span>
-                            <span className="font-semibold" style={{ color: DARK_NAVY }}>
+                            <span className="font-semibold text-[10pt]" style={{ color: INK }}>
                               {client?.phone || client?.email
                                 ? [client?.phone, client?.email].filter(Boolean).join(' · ')
                                 : '—'}
@@ -986,10 +1003,10 @@ export function QuotationDocument({
                           </p>
                           {client?.vatNumber || client?.crNumber ? (
                             <p>
-                              <span className="font-semibold" style={{ color: MUTED }}>
+                              <span className="font-semibold" style={{ color: INK_SOFT }}>
                                 VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
                               </span>
-                              <span className="font-mono font-semibold" style={{ color: DARK_NAVY }}>
+                              <span className="font-mono font-semibold text-[10pt]" style={{ color: INK }}>
                                 {client.vatNumber || ''}
                                 {client.vatNumber && client.crNumber ? ' · ' : ''}
                                 {client.crNumber || ''}
@@ -1012,13 +1029,13 @@ export function QuotationDocument({
                     >
                       <BiLabel en="Project / Site" ar="المشروع / الموقع" center />
                       <p
-                        className="mt-0.5 break-words text-[9px] font-bold leading-snug"
+                        className="mt-0.5 break-words text-[10pt] font-bold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {q.projectName || '—'}
                       </p>
                       {q.projectLocation ? (
-                        <p className="break-words text-[7.5px]" style={{ color: MUTED }}>
+                        <p className="break-words text-[8pt]" style={{ color: INK_SOFT }}>
                           {q.projectLocation}
                         </p>
                       ) : null}
@@ -1029,7 +1046,7 @@ export function QuotationDocument({
                     >
                       <BiLabel en="Mobilization" ar="التجهيز" center />
                       <p
-                        className="mt-0.5 break-words text-[9px] font-semibold leading-snug"
+                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {q.mobilization || '—'}
@@ -1041,7 +1058,7 @@ export function QuotationDocument({
                     >
                       <BiLabel en="Contract Period" ar="مدة العقد" center />
                       <p
-                        className="mt-0.5 break-words text-[9px] font-semibold leading-snug"
+                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {contractPeriodLabel}
@@ -1050,7 +1067,7 @@ export function QuotationDocument({
                     <div className={`px-1.5 text-center ${plan.roomyTier >= 1 ? 'py-[7px]' : 'py-[3.5px]'}`}>
                       <BiLabel en="Working Hours" ar="ساعات العمل" center />
                       <p
-                        className="mt-0.5 break-words text-[9px] font-semibold leading-snug"
+                        className="mt-0.5 break-words text-[10pt] font-semibold leading-snug"
                         style={{ color: NAVY }}
                       >
                         {workingHoursLabel}
@@ -1060,13 +1077,13 @@ export function QuotationDocument({
 
                   {/* 6 ─ centred quotation heading + polite intro (mirror) */}
                   <div className="mt-[1.6mm] text-center">
-                    <p className="text-[10.5px] font-extrabold leading-tight" style={{ color: NAVY }}>
+                    <p className="text-[12pt] font-extrabold leading-tight" style={{ color: NAVY }}>
                       {hasRateBasis
                         ? 'Quotation for Supply of Skilled & Unskilled Manpower'
                         : 'Quotation Details'}
                     </p>
                     {hasRateBasis ? (
-                      <p className="mt-[0.8mm] text-[7.5px] italic leading-snug" style={{ color: MUTED }}>
+                      <p className="mt-[0.8mm] text-[8pt] italic leading-snug" style={{ color: INK_SOFT }}>
                         Dear Sir, we are pleased to submit our most competitive rates. All workers
                         are experienced, medically fit and hold valid Iqama.
                       </p>
@@ -1076,10 +1093,10 @@ export function QuotationDocument({
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
                 <div className="flex items-baseline justify-between border-b pb-[3px]" style={{ borderColor: BORDER }}>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: NAVY }}>
+                  <p className="text-[10pt] font-bold uppercase tracking-[0.12em]" style={{ color: NAVY }}>
                     {companyName} — Quotation <span className="font-mono">{q.quoteNumber}</span>
                   </p>
-                  <p className="text-[8.5px] italic" style={{ color: MUTED }}>
+                  <p className="text-[8.5pt] italic" style={{ color: INK_SOFT }}>
                     continued · <span lang="ar" dir="rtl">تابع</span>
                   </p>
                 </div>
@@ -1115,29 +1132,29 @@ export function QuotationDocument({
                       {hasRateBasis ? (
                         <tr>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">#</p>
+                            <p className="text-[9pt] font-bold text-white">#</p>
                           </th>
                           <th className={`${th} text-left`}>
-                            <p className="text-[7.5px] font-bold text-white">Trade / Category</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Trade / Category</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               المهنة / الفئة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">No. of Workers</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">No. of Workers</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               عدد العمال
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Hourly Rate (SAR)</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Hourly Rate (SAR)</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               السعر بالساعة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Amount (SAR)</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Amount (SAR)</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               المبلغ
                             </p>
                           </th>
@@ -1145,43 +1162,43 @@ export function QuotationDocument({
                       ) : (
                         <tr>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">#</p>
+                            <p className="text-[9pt] font-bold text-white">#</p>
                           </th>
                           <th className={`${th} text-left`}>
-                            <p className="text-[7.5px] font-bold text-white">Description</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Description</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الوصف
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Qty</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Qty</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الكمية
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Unit</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Unit</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الوحدة
                             </p>
                           </th>
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Unit Price</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Unit Price</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               سعر الوحدة
                             </p>
                           </th>
                           {showDiscountCol ? (
                             <th className={th}>
-                              <p className="text-[7.5px] font-bold text-white">Disc.</p>
-                              <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                              <p className="text-[9pt] font-bold text-white">Disc.</p>
+                              <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                                 الخصم
                               </p>
                             </th>
                           ) : null}
                           <th className={th}>
-                            <p className="text-[7.5px] font-bold text-white">Line Total</p>
-                            <p lang="ar" dir="rtl" className="text-[7px] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            <p className="text-[9pt] font-bold text-white">Line Total</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               الإجمالي
                             </p>
                           </th>
@@ -1192,7 +1209,7 @@ export function QuotationDocument({
                       {chunk.length === 0 ? (
                         <tr>
                           <td
-                            className={`${td} border-b py-2 text-center text-neutral-400`}
+                            className={`${td} border-b py-2 text-center text-[#4A5468]`}
                             colSpan={hasRateBasis ? 5 : showDiscountCol ? 7 : 6}
                             style={{ borderColor: ROW_SEP }}
                           >
@@ -1216,31 +1233,31 @@ export function QuotationDocument({
                             <td className={`${td} text-center`}>
                               {/* index inside a thin gold ring — the template's touch */}
                               <span
-                                className="inline-flex h-[13px] w-[13px] items-center justify-center rounded-full border-[1.3px] text-[7.5px] font-bold tabular-nums"
+                                className="inline-flex h-[17px] w-[17px] items-center justify-center rounded-full border-[1.5px] text-[8pt] font-bold tabular-nums"
                                 style={{ borderColor: GOLD, color: NAVY }}
                               >
                                 {it.sr}
                               </span>
                             </td>
                             <td className={td}>
-                              <p className="text-[8.5px] font-bold leading-[1.15]" style={{ color: DARK_NAVY }}>
+                              <p className="text-[10pt] font-bold leading-[1.15]" style={{ color: INK }}>
                                 {it.description}
                               </p>
                               {it.subText ? (
-                                <p className="text-[7px] italic leading-[1.1]" style={{ color: MUTED }}>
+                                <p className="text-[8pt] italic leading-[1.15]" style={{ color: INK_SOFT }}>
                                   {it.subText}
                                 </p>
                               ) : null}
                             </td>
                             {hasRateBasis ? (
                               <>
-                                <td className={`${td} text-center text-[9px] font-semibold tabular-nums`}>
+                                <td className={`${td} text-center font-semibold tabular-nums`}>
                                   {it.quantity.toLocaleString('en-US')}
                                 </td>
-                                <td className={`${tdR} text-[9px] font-bold`} style={{ color: DARK_NAVY }}>
+                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
                                   {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
                                 </td>
-                                <td className={`${tdR} font-bold`} style={{ color: DARK_NAVY }}>
+                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
                                   {money(it.lineTotal)}
                                 </td>
                               </>
@@ -1256,7 +1273,7 @@ export function QuotationDocument({
                                     {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
                                   </td>
                                 ) : null}
-                                <td className={`${tdR} font-bold`} style={{ color: DARK_NAVY }}>
+                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
                                   {money(it.lineTotal)}
                                 </td>
                               </>
@@ -1275,20 +1292,20 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[9px] font-extrabold uppercase tracking-wide`}
+                                className={`${td} text-[11pt] font-extrabold uppercase tracking-wide`}
                                 style={{ color: NAVY }}
                               >
                                 Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
                               </td>
                               <td
-                                className={`${td} text-center text-[9px] font-extrabold tabular-nums`}
+                                className={`${td} text-center text-[11pt] font-extrabold tabular-nums`}
                                 style={{ color: NAVY }}
                               >
                                 {totalWorkers.toLocaleString('en-US')}
                               </td>
                               <td className={td} />
                               <td
-                                className={`${tdR} text-[9.5px] font-extrabold`}
+                                className={`${tdR} text-[11pt] font-extrabold`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1298,7 +1315,7 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[9px] font-extrabold uppercase tracking-wide`}
+                                className={`${td} text-[11pt] font-extrabold uppercase tracking-wide`}
                                 style={{ color: NAVY }}
                               >
                                 Total Amount <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
@@ -1307,7 +1324,7 @@ export function QuotationDocument({
                               <td className={td} />
                               {showDiscountCol ? <td className={td} /> : null}
                               <td
-                                className={`${tdR} text-[9.5px] font-extrabold`}
+                                className={`${tdR} text-[11pt] font-extrabold`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1323,9 +1340,9 @@ export function QuotationDocument({
 
               {/* calculation note under the items table (hourly quotes) */}
               {hasRateBasis && chunk.length > 0 ? (
-                <p className="text-right text-[7px] italic mt-[1mm]" style={{ color: MUTED }}>
-                  * Amount = No. of Workers × Hourly Rate ×{' '}
-                  {uniformHours != null ? `${uniformHours} hours / month` : 'Hours / Month (per trade)'}
+                <p className="text-right text-[8pt] italic mt-[1mm]" style={{ color: INK_SOFT }}>
+                  * Amount = No. of Workers × Hourly Rate × Hours per Month
+                  {workingHoursLabel !== '—' ? ` — ${workingHoursLabel}` : ''}
                 </p>
               ) : null}
 
@@ -1344,7 +1361,7 @@ export function QuotationDocument({
                       style={{ borderColor: BORDER, background: CREAM }}
                     >
                       <p
-                        className="text-[8.5px] font-extrabold uppercase tracking-[0.18em]"
+                        className="text-[10pt] font-extrabold uppercase tracking-[0.14em]"
                         style={{ color: DARK_GOLD }}
                       >
                         Scope &amp; Terms
@@ -1353,7 +1370,7 @@ export function QuotationDocument({
                       <p
                         lang="ar"
                         dir="rtl"
-                        className="text-[9.5px] font-bold leading-none"
+                        className="text-[10pt] font-bold leading-none"
                         style={{ color: DARK_GOLD }}
                       >
                         النطاق والشروط
@@ -1365,7 +1382,7 @@ export function QuotationDocument({
                         <div className="grid grid-cols-2 gap-[3mm]">
                           <div>
                             <p
-                              className="text-[7px] font-extrabold uppercase tracking-[0.1em]"
+                              className="text-[8.5pt] font-extrabold uppercase tracking-[0.08em]"
                               style={{ color: DARK_GOLD }}
                             >
                               Included in rates{' '}
@@ -1377,7 +1394,7 @@ export function QuotationDocument({
                               {inclusions.map((l) => (
                                 <li
                                   key={l}
-                                  className="flex gap-[1.5mm] text-[7.5px] leading-snug text-neutral-700"
+                                  className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
                                 >
                                   <span
                                     className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
@@ -1393,7 +1410,7 @@ export function QuotationDocument({
                             style={{ borderColor: '#C7CFDC' }}
                           >
                             <p
-                              className="text-[7px] font-extrabold uppercase tracking-[0.1em]"
+                              className="text-[8.5pt] font-extrabold uppercase tracking-[0.08em]"
                               style={{ color: MUTED }}
                             >
                               Not included{' '}
@@ -1405,7 +1422,7 @@ export function QuotationDocument({
                               {exclusions.map((l) => (
                                 <li
                                   key={l}
-                                  className="flex gap-[1.5mm] text-[7.5px] leading-snug text-neutral-600"
+                                  className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
                                 >
                                   <span
                                     className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
@@ -1429,7 +1446,7 @@ export function QuotationDocument({
                             {terms.map((t) => (
                               <li
                                 key={`${t.n}-${t.text.slice(0, 12)}`}
-                                className="flex gap-[1.5mm] text-[7.5px] leading-snug text-neutral-700"
+                                className="flex gap-[1.5mm] text-[8.5pt] leading-snug text-[#1D2433]"
                               >
                                 <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
                                   {t.n}
@@ -1439,12 +1456,12 @@ export function QuotationDocument({
                             ))}
                           </ol>
                         ) : (
-                          <p className="text-[7.5px]" style={{ color: MUTED }}>
+                          <p className="text-[8.5pt]" style={{ color: INK_SOFT }}>
                             As mutually agreed between the parties.
                           </p>
                         )}
                         {q.notes ? (
-                          <p className="mt-[1.2mm] whitespace-pre-line text-[7.5px] italic leading-snug" style={{ color: MUTED }}>
+                          <p className="mt-[1.2mm] whitespace-pre-line text-[8pt] italic leading-snug" style={{ color: INK_SOFT }}>
                             {q.notes}
                           </p>
                         ) : null}
@@ -1458,59 +1475,59 @@ export function QuotationDocument({
                     style={{ borderColor: BORDER, background: 'white' }}
                   >
                     <div
-                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[9px]`}
+                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="font-semibold" style={{ color: MUTED }}>
+                      <span className="font-semibold" style={{ color: INK_SOFT }}>
                         Monthly Subtotal{' '}
-                        <span lang="ar" dir="rtl" className="text-[8px]">
+                        <span lang="ar" dir="rtl" className="text-[8pt]">
                           المجموع الشهري
                         </span>
                       </span>
-                      <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                         {money(q.subtotal)}
                       </span>
                     </div>
-                    <p className="px-2.5 text-right text-[6.5px]" style={{ color: MUTED }}>
+                    <p className="px-2.5 text-right text-[8pt]" style={{ color: INK_SOFT }}>
                       excl. VAT · {currency}
                     </p>
                     {q.discount > 0 ? (
                       <>
                         <div
-                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[9px]"
+                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[10pt]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="font-semibold" style={{ color: MUTED }}>
-                            Discount <span lang="ar" dir="rtl" className="text-[8px]">الخصم</span>
+                          <span className="font-semibold" style={{ color: INK_SOFT }}>
+                            Discount <span lang="ar" dir="rtl" className="text-[8pt]">الخصم</span>
                           </span>
                           <span className="font-semibold tabular-nums text-rose-700">
                             -{money(q.discount)}
                           </span>
                         </div>
                         <div
-                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[9px]"
+                          className="flex items-baseline justify-between gap-2 border-b px-2.5 py-[3.5px] text-[10pt]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="font-semibold" style={{ color: MUTED }}>
-                            Net Amount <span lang="ar" dir="rtl" className="text-[8px]">الصافي</span>
+                          <span className="font-semibold" style={{ color: INK_SOFT }}>
+                            Net Amount <span lang="ar" dir="rtl" className="text-[8pt]">الصافي</span>
                           </span>
-                          <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                          <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                             {money(netTotal)}
                           </span>
                         </div>
                       </>
                     ) : null}
                     <div
-                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[9px]`}
+                      className={`flex items-baseline justify-between gap-2 border-b px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="font-semibold" style={{ color: MUTED }}>
+                      <span className="font-semibold" style={{ color: INK_SOFT }}>
                         VAT ({vatPercent}%){' '}
-                        <span lang="ar" dir="rtl" className="text-[8px]">
+                        <span lang="ar" dir="rtl" className="text-[8pt]">
                           ضريبة القيمة المضافة
                         </span>
                       </span>
-                      <span className="font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[10pt] font-semibold tabular-nums" style={{ color: NAVY }}>
                         {money(q.vatAmount)}
                       </span>
                     </div>
@@ -1520,41 +1537,41 @@ export function QuotationDocument({
                       style={{ borderColor: BORDER, background: DARK_NAVY }}
                     >
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[9.5px] font-extrabold uppercase tracking-wide text-white">
+                        <span className="text-[11pt] font-extrabold uppercase tracking-wide text-white">
                           Total / Month{' '}
                           <span lang="ar" dir="rtl" className="normal-case tracking-normal">
                             الإجمالي شهرياً
                           </span>
                         </span>
                         <span
-                          className="text-[13px] font-extrabold tabular-nums"
+                          className="text-[14pt] font-extrabold tabular-nums"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {money(q.total)}
                         </span>
                       </div>
-                      <p className="text-right text-[6.5px] font-semibold text-white/70">
+                      <p className="text-right text-[8pt] font-semibold text-white">
                         incl. VAT · {currency}
                       </p>
                     </div>
                     {contractMonths && contractValue != null ? (
                       <div
-                        className={`flex items-baseline justify-between gap-2 px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[9px]`}
+                        className={`flex items-baseline justify-between gap-2 px-2.5 ${plan.roomyTier >= 1 ? 'py-[6px]' : 'py-[3.5px]'} text-[10pt]`}
                         style={{ background: LIGHT_BG }}
                       >
-                        <span className="font-semibold" style={{ color: MUTED }}>
+                        <span className="font-semibold" style={{ color: INK_SOFT }}>
                           Contract Value{' '}
-                          <span lang="ar" dir="rtl" className="text-[8px]">
+                          <span lang="ar" dir="rtl" className="text-[8pt]">
                             قيمة العقد
                           </span>
                         </span>
-                        <span className="font-extrabold tabular-nums" style={{ color: NAVY }}>
+                        <span className="text-[11pt] font-extrabold tabular-nums" style={{ color: NAVY }}>
                           {money(contractValue)}
                         </span>
                       </div>
                     ) : null}
                     {contractMonths && contractValue != null ? (
-                      <p className="px-2.5 pb-[3px] text-right text-[6.5px]" style={{ color: MUTED }}>
+                      <p className="px-2.5 pb-[3px] text-right text-[8pt]" style={{ color: INK_SOFT }}>
                         {contractMonths} months · incl. VAT · {currency}
                       </p>
                     ) : null}
@@ -1564,15 +1581,15 @@ export function QuotationDocument({
 
               {/* amount in words — slim bilingual line under the split */}
               {plan.blocks.includes('scopeSummary') ? (
-                <p className="mt-[1mm] text-[7.5px] leading-snug" style={{ color: MUTED }}>
-                  <span className="font-bold uppercase tracking-wide" style={{ color: DARK_GOLD }}>
+                <p className="mt-[1.5mm] text-[8.5pt] leading-snug" style={{ color: INK_SOFT }}>
+                  <span className="text-[8.5pt] font-bold uppercase tracking-wide" style={{ color: DARK_GOLD }}>
                     Amount in Words <span lang="ar" dir="rtl" className="normal-case">المبلغ كتابةً</span>:
                   </span>{' '}
-                  <span className="font-semibold" style={{ color: NAVY }}>
+                  <span className="text-[10pt] font-semibold" style={{ color: INK }}>
                     {words.en}
                   </span>{' '}
-                  <span className="mx-1 text-neutral-300">|</span>{' '}
-                  <span lang="ar" dir="rtl" className="font-semibold" style={{ color: NAVY }}>
+                  <span className="mx-1" style={{ color: MUTED }}>|</span>{' '}
+                  <span lang="ar" dir="rtl" className="text-[10pt] font-semibold" style={{ color: INK }}>
                     {words.ar}
                   </span>
                 </p>
@@ -1596,7 +1613,7 @@ export function QuotationDocument({
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          className="text-[10pt] font-extrabold uppercase tracking-[0.12em]"
                           style={{ color: DARK_GOLD }}
                         >
                           Approved By · {companyName}
@@ -1605,7 +1622,7 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[9px] font-bold leading-none"
+                          className="text-[10pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           اعتماد الشركة
@@ -1630,22 +1647,22 @@ export function QuotationDocument({
                               />
                             ) : null}
                           </div>
-                          <p className="text-[8px] text-neutral-700">
-                            <span className="font-semibold" style={{ color: MUTED }}>Name: </span>
+                          <p className="text-[10pt] text-[#1D2433]">
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>Name: </span>
                             {settings.authorizedSignatory || q.createdByName || preparedBy || '_____________________'}
                             <span style={{ color: MUTED }}>
                               {' '}· {settings.signatoryTitle || 'Manager'}
                             </span>
                           </p>
-                          <p className="text-[8px] text-neutral-700">
-                            <span className="font-semibold" style={{ color: MUTED }}>Date: </span>
+                          <p className="text-[10pt] text-[#1D2433]">
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>Date: </span>
                             ____ / ____ / ________
                           </p>
                         </div>
                         {/* Stamp circle — uploaded stamp fills it EXACTLY
                             (dashed frame kept; placeholder text hidden). */}
                         <div
-                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[6px] font-bold uppercase leading-tight tracking-wide`}
+                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[8pt] font-bold uppercase leading-tight tracking-wide`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           {stampAsset ? (
@@ -1676,7 +1693,7 @@ export function QuotationDocument({
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
-                          className="text-[8px] font-extrabold uppercase tracking-[0.14em]"
+                          className="text-[10pt] font-extrabold uppercase tracking-[0.12em]"
                           style={{ color: DARK_GOLD }}
                         >
                           Accepted By · Client
@@ -1685,7 +1702,7 @@ export function QuotationDocument({
                         <p
                           lang="ar"
                           dir="rtl"
-                          className="text-[9px] font-bold leading-none"
+                          className="text-[10pt] font-bold leading-none"
                           style={{ color: DARK_GOLD }}
                         >
                           موافقة العميل
@@ -1700,17 +1717,17 @@ export function QuotationDocument({
                               plan.roomyTier === 2 ? '13mm' : plan.roomyTier === 1 ? '9mm' : '6mm',
                           }}
                           />
-                          <p className="text-[8px] text-neutral-700">
-                            <span className="font-semibold" style={{ color: MUTED }}>Name: </span>
+                          <p className="text-[10pt] text-[#1D2433]">
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>Name: </span>
                             _____________________
                           </p>
-                          <p className="text-[8px] text-neutral-700">
-                            <span className="font-semibold" style={{ color: MUTED }}>Date: </span>
+                          <p className="text-[10pt] text-[#1D2433]">
+                            <span className="font-semibold" style={{ color: INK_SOFT }}>Date: </span>
                             ____ / ____ / ________
                           </p>
                         </div>
                         <div
-                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[6px] font-bold uppercase leading-tight tracking-wide`}
+                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[8pt] font-bold uppercase leading-tight tracking-wide`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
                           Client
@@ -1721,7 +1738,7 @@ export function QuotationDocument({
                     </div>
                   </section>
 
-                  <p className="mt-[1.2mm] text-center text-[7px]" style={{ color: MUTED }}>
+                  <p className="mt-[1.2mm] text-center text-[8pt]" style={{ color: INK_SOFT }}>
                     This is a computer-generated quotation from {companyName} ·{' '}
                     <span lang="ar" dir="rtl">
                       عرض سعر مُنشأ آلياً من {settings.companyNameAr || companyName}
@@ -1733,8 +1750,8 @@ export function QuotationDocument({
 
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div
-              className="pointer-events-none absolute inset-x-[8mm] flex items-center justify-between gap-2 border-t pt-[1mm] text-[7px]"
-              style={{ bottom: `${geo.bottomMm + 1}mm`, borderColor: BORDER, color: MUTED }}
+              className="pointer-events-none absolute inset-x-[14mm] flex items-center justify-between gap-2 border-t pt-[1.5mm] text-[8pt]"
+              style={{ bottom: `${geo.bottomMm + 1}mm`, borderColor: BORDER, color: INK_SOFT }}
             >
               <span className="truncate">
                 {companyName} · {q.quoteNumber}
@@ -1742,7 +1759,7 @@ export function QuotationDocument({
               </span>
               <span className="shrink-0 tabular-nums">
                 Page {pageIdx + 1} of {plans.length}{' '}
-                <span className="mx-0.5 text-neutral-300">|</span>{' '}
+                <span className="mx-0.5" style={{ color: MUTED }}>|</span>{' '}
                 <span lang="ar" dir="rtl">
                   صفحة {pageIdx + 1} من {plans.length}
                 </span>

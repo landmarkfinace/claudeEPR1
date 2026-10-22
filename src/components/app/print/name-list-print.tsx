@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { NameListEntryRow } from '@/lib/types'
 
@@ -89,7 +89,7 @@ export function NameListPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button onClick={() => window.print()}>
+            <Button onClick={(e) => printPrintArea(e.currentTarget)}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
             </Button>
@@ -109,25 +109,25 @@ export function NameListPrintDialog({
                 />
                 <div className="min-w-0">
                   <p className="text-xl font-bold tracking-tight">{settings.companyName}</p>
-                  <p className="mt-1 max-w-[420px] text-[11px] leading-relaxed text-neutral-600">
+                  <p className="mt-1 max-w-[420px] text-[11pt] leading-relaxed text-[#1D2433]">
                     {settings.address}
                   </p>
                 </div>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm font-bold uppercase tracking-widest">Name List</p>
-                <p className="mt-1 text-[11px] text-neutral-600">Filter: {filterLabel}</p>
-                <p className="text-[11px] text-neutral-600">
+                <p className="mt-1 text-[11pt] text-[#1D2433]">Filter: {filterLabel}</p>
+                <p className="text-[11pt] text-[#1D2433]">
                   Generated: {formatDate(new Date())}
                 </p>
               </div>
             </div>
 
             {/* ---- Directory table ---- */}
-            <h3 className="mt-5 text-[13px] font-bold uppercase tracking-wider">
+            <h3 className="mt-5 text-[12pt] font-bold uppercase tracking-wider">
               Company Directory
             </h3>
-            <table className="mt-2 w-full border-collapse text-[11px]">
+            <table className="mt-2 w-full border-collapse text-[11pt]">
               <thead>
                 <tr>
                   <th className={th}>#</th>
@@ -151,7 +151,7 @@ export function NameListPrintDialog({
                 ) : (
                   entries.map((e, i) => (
                     <tr key={e.id} className="break-inside-avoid">
-                      <td className={`${td} text-center tabular-nums text-neutral-600`}>{i + 1}</td>
+                      <td className={`${td} text-center tabular-nums text-[#1D2433]`}>{i + 1}</td>
                       <td className={`${td} font-semibold`}>{e.name}</td>
                       <td className={td}>{typeLabel(e.type)}</td>
                       <td className={td}>{e.contactPerson ?? '—'}</td>
@@ -173,10 +173,10 @@ export function NameListPrintDialog({
             </table>
 
             {/* ---- Counts by type ---- */}
-            <h3 className="mt-6 text-[13px] font-bold uppercase tracking-wider">
+            <h3 className="mt-6 text-[12pt] font-bold uppercase tracking-wider">
               Counts by Type
             </h3>
-            <table className="mt-2 w-full border-collapse text-[11px]">
+            <table className="mt-2 w-full border-collapse text-[11pt]">
               <tbody>
                 <tr className="bg-neutral-100 font-bold">
                   <td className={td}>Clients</td>
@@ -203,19 +203,19 @@ export function NameListPrintDialog({
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
                   Prepared By
                 </p>
-                <p className="text-[10px] text-neutral-600">Administration</p>
+                <p className="text-[10pt] text-[#1D2433]">Administration</p>
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex h-12 items-end">
                   <div className="w-full border-t border-neutral-800" />
                 </div>
-                <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">
+                <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">
                   {settings.signatoryTitle || 'Authorized Signatory'}
                 </p>
-                <p className="text-[10px] text-neutral-600">
+                <p className="text-[10pt] text-[#1D2433]">
                   {settings.authorizedSignatory || settings.companyName}
                 </p>
               </div>

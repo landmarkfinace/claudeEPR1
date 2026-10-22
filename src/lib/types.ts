@@ -1037,6 +1037,10 @@ export type DocItemRow = {
   ratePerHour?: number | null
   /** Quotation template: hours/month basis (Hours / Month column). */
   hoursPerMonth?: number | null
+  /** Quotation template: hours/day basis (e.g. 10). days × hours/day = hours/month. */
+  hoursPerDay?: number | null
+  /** Quotation template: working days/month basis (e.g. 26). */
+  daysPerMonth?: number | null
 }
 
 /** Signature / stamp artwork of a quotation (anchored into the Approved By box in print). */

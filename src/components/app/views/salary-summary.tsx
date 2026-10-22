@@ -18,10 +18,9 @@ import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
 import { FilterBar, FilterSelect } from '@/components/app/shared/filter-select'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
-import { printWithPageRule } from '@/components/app/print/print-page-rule'
 import { api, qs } from '@/lib/api-client'
 import { formatMoney, formatNumber, monthName, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import { MONTHS } from '@/lib/types'
 import type { Paginated, ProjectRow } from '@/lib/types'
@@ -154,7 +153,7 @@ export function SalarySummaryView() {
       >
         <Button
           className="print-hidden"
-          onClick={() => printWithPageRule('size: A4 landscape; margin: 8mm;')}
+          onClick={(e) => printPrintArea(e.currentTarget)}
           disabled={!data || rows.length === 0}
         >
           <Printer className="h-4 w-4" />
@@ -419,7 +418,7 @@ export function SalarySummaryView() {
         </SectionCard>
 
         {/* Print footer note */}
-        <p className="hidden text-center text-[9px] text-neutral-400 print:block">
+        <p className="hidden text-center text-[8pt] text-[#6B7488] print:block">
           Computer-generated summary — {settings.companyName} Workforce, Payroll &amp; Accounts
           System
         </p>

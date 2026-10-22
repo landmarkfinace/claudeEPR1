@@ -71,3 +71,6 @@ server.pid
 
 # sandbox gateway config (environment-specific, not part of the app)
 Caddyfile
+
+# print render daemon runtime log
+print-daemon.log

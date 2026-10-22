@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, monthName, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import {
   advanceRef,
   lastInstallmentMonth,
@@ -57,7 +57,7 @@ function amountInWords(amount: number, currency: string): string {
 /**
  * Full-screen dialog rendering an A4-style advance payment receipt.
  * The receipt itself is wrapped in `.print-area` (globals.css) so that
- * window.print() outputs ONLY the receipt, always white/black for fidelity.
+ * the server PDF pipeline renders it; print button prints that PDF.
  */
 export function AdvanceReceiptDialog({
   advance,
@@ -113,7 +113,7 @@ export function AdvanceReceiptDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button size="sm" onClick={() => window.print()} disabled={!advance}>
+            <Button size="sm" onClick={(e) => printPrintArea(e.currentTarget)} disabled={!advance}>
               <Printer className="h-4 w-4" />
               Print / Save as PDF
             </Button>
@@ -125,7 +125,7 @@ export function AdvanceReceiptDialog({
           {advance ? (
             <AdvanceReceiptDocument advance={advance} settings={settings} />
           ) : (
-            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
+            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
               No advance selected.
             </div>
           )}
@@ -138,7 +138,7 @@ export function AdvanceReceiptDialog({
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
+      <p className="text-[10pt] font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
       <p className="truncate text-sm font-medium text-neutral-900" title={value}>
         {value}
       </p>
@@ -167,8 +167,8 @@ function SignatureBlock({
         <div className="w-full border-t border-neutral-800" />
       </div>
       <p
-        className={`mt-1.5 text-[11px] font-bold uppercase tracking-widest ${
-          emphasize ? 'text-neutral-900' : 'text-neutral-600'
+        className={`mt-1.5 text-[11pt] font-bold uppercase tracking-widest ${
+          emphasize ? 'text-neutral-900' : 'text-[#1D2433]'
         }`}
       >
         {label}
@@ -178,7 +178,7 @@ function SignatureBlock({
           {name}
         </p>
       ) : (
-        <p className="text-sm italic text-neutral-400">Signature &amp; name</p>
+        <p className="text-sm italic text-[#6B7488]">Signature &amp; name</p>
       )}
       {sub ? (
         <p className="truncate text-xs text-neutral-500" title={sub}>
@@ -254,7 +254,7 @@ function AdvanceReceiptDocument({ advance, settings }: { advance: AdvanceRow; se
           <span className="rounded-md border-l-4 border-[#D4AF37] bg-[#0F1F3D] px-3 py-1.5 text-xs font-bold tracking-widest text-white">
             ADVANCE RECEIPT
           </span>
-          <span className="text-xs font-medium text-neutral-600">
+          <span className="text-xs font-medium text-[#1D2433]">
             Receipt No: <span className="font-mono font-semibold">{advanceRef(a.id)}</span>
           </span>
           <span className="text-xs text-neutral-500">Issued: {formatDate(new Date())}</span>
@@ -267,7 +267,7 @@ function AdvanceReceiptDocument({ advance, settings }: { advance: AdvanceRow; se
               Partially Recovered
             </span>
           ) : (
-            <span className="mt-2 inline-block -rotate-6 rounded-md border-[3px] border-neutral-500 px-2.5 py-0.5 text-xs font-black uppercase tracking-[0.2em] text-neutral-600 shadow-[inset_0_0_0_1.5px_rgba(115,115,115,0.3)]">
+            <span className="mt-2 inline-block -rotate-6 rounded-md border-[3px] border-neutral-500 px-2.5 py-0.5 text-xs font-black uppercase tracking-[0.2em] text-[#1D2433] shadow-[inset_0_0_0_1.5px_rgba(115,115,115,0.3)]">
               Pending Recovery
             </span>
           )}
@@ -289,12 +289,12 @@ function AdvanceReceiptDocument({ advance, settings }: { advance: AdvanceRow; se
       {/* AMOUNT BAR */}
       <div className="mt-4 flex flex-col items-center gap-1 bg-[#0F1F3D] px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm font-bold tracking-wide">TOTAL ADVANCE PAID</span>
-        <span className="text-xs text-neutral-300">
+        <span className="text-xs text-[#6B7488]">
           {paymentLabel} · {formatDate(a.givenDate)}
         </span>
         <span className="text-2xl font-bold tabular-nums">{formatMoney(a.amount, currency)}</span>
       </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-neutral-600">
+      <p className="mt-1.5 text-xs leading-relaxed text-[#1D2433]">
         <span className="font-semibold uppercase tracking-wide">Amount in words:</span>{' '}
         {amountInWords(a.amount, currency)}
       </p>
@@ -330,7 +330,7 @@ function AdvanceReceiptDocument({ advance, settings }: { advance: AdvanceRow; se
         <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">
           Worker Acknowledgment
         </h3>
-        <p className="mt-1.5 text-xs leading-relaxed text-neutral-700">
+        <p className="mt-1.5 text-xs leading-relaxed text-[#1D2433]">
           I, <span className="font-semibold">{a.staff.fullName}</span> (Iqama No.{' '}
           <span className="font-semibold tabular-nums">{a.staff.iqamaId}</span>), hereby acknowledge
           that I have received an advance payment of{' '}
@@ -366,7 +366,7 @@ function AdvanceReceiptDocument({ advance, settings }: { advance: AdvanceRow; se
         </div>
       </section>
 
-      <p className="mt-3 text-center text-[10px] text-neutral-400">
+      <p className="mt-3 text-center text-[10pt] text-[#6B7488]">
         This is a computer-generated advance payment receipt.
       </p>
     </div>

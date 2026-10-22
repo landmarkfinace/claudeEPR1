@@ -109,7 +109,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
     const headerRowIndex = aoa.length
     if (hasRateBasis) {
-      aoa.push(['Sr', 'Trade', 'Per Hours', 'Rate (SAR)'])
+      aoa.push(['Sr', 'Trade', 'Hours / Month', 'Rate (SAR)'])
     } else {
       aoa.push(['Sr', 'Description', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Line Total'])
     }
@@ -199,7 +199,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       ? [
           { wch: 5 }, // Sr
           { wch: 52 }, // Trade
-          { wch: 12 }, // Per Hours
+          { wch: 12 }, // Hours / Month
           { wch: 14 }, // Rate (SAR)
         ]
       : [

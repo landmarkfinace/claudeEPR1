@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDateTime, formatMoney, monthName } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { ExpenseStatement } from '@/lib/types'
 
@@ -52,8 +52,8 @@ function SignatureCell({ label, title }: { label: string; title: string }) {
       <div className="flex h-12 items-end">
         <div className="w-full border-t border-neutral-800" />
       </div>
-      <p className="mt-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-900">{label}</p>
-      <p className="text-[10px] text-neutral-600">{title}</p>
+      <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-widest text-neutral-900">{label}</p>
+      <p className="text-[10pt] text-[#1D2433]">{title}</p>
     </div>
   )
 }
@@ -132,7 +132,7 @@ export function ExpenseStatementPrintDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button onClick={() => window.print()}>
+            <Button onClick={(e) => printPrintArea(e.currentTarget)}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
             </Button>
@@ -161,25 +161,25 @@ export function ExpenseStatementPrintDialog({
                     Worker Expense Statement
                   </p>
                   {settings.address ? (
-                    <p className="text-[10px] text-neutral-500">{settings.address}</p>
+                    <p className="text-[10pt] text-neutral-500">{settings.address}</p>
                   ) : null}
-                  <p className="text-[10px] text-neutral-500">
+                  <p className="text-[10pt] text-neutral-500">
                     {[settings.phone, settings.email].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
                   Statement Year
                 </p>
                 <p className="text-base font-bold text-[#0F1F3D]">{statement.year}</p>
-                <p className="mt-2 text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+                <p className="mt-2 text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
                   {isSingle ? 'Worker Total' : 'Grand Total'}
                 </p>
                 <p className="text-xl font-bold tabular-nums">
                   {money(isSingle ? (single?.total ?? 0) : statement.grandTotal)}
                 </p>
-                <p className="mt-1 text-[9px] text-neutral-400">
+                <p className="mt-1 text-[9pt] text-[#6B7488]">
                   Generated: {formatDateTime(new Date())}
                 </p>
               </div>
@@ -191,13 +191,13 @@ export function ExpenseStatementPrintDialog({
                 {/* Worker identity block */}
                 <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+                    <p className="text-[10pt] font-semibold uppercase tracking-widest text-neutral-500">
                       Worker
                     </p>
                     <p className="mt-0.5 text-base font-bold text-[#0F1F3D]">
                       {single.spender.fullName}
                     </p>
-                    <p className="text-[11px] text-neutral-600">
+                    <p className="text-[11pt] text-[#1D2433]">
                       {[
                         `IQAMA: ${single.spender.iqamaId}`,
                         single.spender.position,
@@ -206,7 +206,7 @@ export function ExpenseStatementPrintDialog({
                         .join(' · ')}
                     </p>
                   </div>
-                  <div className="text-right text-[11px] text-neutral-600">
+                  <div className="text-right text-[11pt] text-[#1D2433]">
                     <p>
                       <span className="font-semibold text-neutral-800">Entries:</span>{' '}
                       {single.totalCount}
@@ -223,7 +223,7 @@ export function ExpenseStatementPrintDialog({
                 </div>
 
                 {/* Month-by-month table */}
-                <table className="mt-4 w-full border-collapse text-[11px]">
+                <table className="mt-4 w-full border-collapse text-[11pt]">
                   <thead>
                     <tr>
                       <th className={`${th} text-center`}>SN</th>
@@ -256,10 +256,10 @@ export function ExpenseStatementPrintDialog({
                   </tbody>
                 </table>
 
-                <p className="mt-3 text-[10px] italic text-neutral-600">
+                <p className="mt-3 text-[10pt] italic text-[#1D2433]">
                   Amount in words: {amountInWords(single.total, settings.currency)}
                 </p>
-                <p className="mt-1 text-[9px] text-neutral-400">
+                <p className="mt-1 text-[9pt] text-[#6B7488]">
                   Bill receipts for each entry are attached to the expense records and available on request.
                 </p>
 
@@ -272,13 +272,13 @@ export function ExpenseStatementPrintDialog({
             ) : (
               <>
                 {/* All workers — year matrix */}
-                <p className="mt-4 text-[11px] leading-relaxed text-neutral-600">
+                <p className="mt-4 text-[11pt] leading-relaxed text-[#1D2433]">
                   Monthly totals per worker for {statement.year}. The &ldquo;Company / No Worker&rdquo;
                   row collects expenses that are not attributed to any worker.
                 </p>
 
                 <div className="mt-3 overflow-x-auto">
-                  <table className="w-full min-w-[760px] border-collapse text-[10px]">
+                  <table className="w-full min-w-[760px] border-collapse text-[10pt]">
                     <thead>
                       <tr>
                         <th className={`${th} text-center`}>SN</th>
@@ -300,7 +300,7 @@ export function ExpenseStatementPrintDialog({
                             <td className={`${td} text-center tabular-nums`}>{i + 1}</td>
                             <td className={td}>
                               <span className="font-semibold">{s.spender.fullName}</span>
-                              <span className="block text-[9px] text-neutral-500">
+                              <span className="block text-[9pt] text-neutral-500">
                                 IQAMA: {s.spender.iqamaId}
                               </span>
                             </td>
@@ -309,7 +309,7 @@ export function ExpenseStatementPrintDialog({
                               const v = byMonth.get(mi + 1)
                               return (
                                 <td key={mi} className={`${tdR} text-right`}>
-                                  {v ? money(v) : <span className="text-neutral-300">—</span>}
+                                  {v ? money(v) : <span className="text-[#6B7488]">—</span>}
                                 </td>
                               )
                             })}
@@ -326,7 +326,7 @@ export function ExpenseStatementPrintDialog({
                             const v = statement.unassigned.months.find((m) => m.month === mi + 1)
                             return (
                               <td key={mi} className={`${tdR} text-right`}>
-                                {v ? money(v.total) : <span className="text-neutral-300">—</span>}
+                                {v ? money(v.total) : <span className="text-[#6B7488]">—</span>}
                               </td>
                             )
                           })}
@@ -348,7 +348,7 @@ export function ExpenseStatementPrintDialog({
                             (statement.unassigned.months.find((m) => m.month === mi + 1)?.total ?? 0)
                           return (
                             <td key={mi} className={`${tdR} font-bold`}>
-                              {v ? money(v) : <span className="text-neutral-300">—</span>}
+                              {v ? money(v) : <span className="text-[#6B7488]">—</span>}
                             </td>
                           )
                         })}
@@ -358,7 +358,7 @@ export function ExpenseStatementPrintDialog({
                   </table>
                 </div>
 
-                <p className="mt-3 text-[10px] italic text-neutral-600">
+                <p className="mt-3 text-[10pt] italic text-[#1D2433]">
                   Amount in words: {amountInWords(statement.grandTotal, settings.currency)}
                 </p>
 

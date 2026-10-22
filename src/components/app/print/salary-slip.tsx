@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatDate, formatMoney, monthName, round2 } from '@/lib/format'
-import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import { PAY_TYPE_LABELS, type AppSettings, type PayrollRow } from '@/lib/types'
 
@@ -19,7 +19,7 @@ export type SlipPayroll = PayrollRow & { otherDeductionAmount?: number }
 /**
  * Full-screen dialog rendering an A4-style salary pay slip.
  * The slip itself is wrapped in `.print-area` (globals.css) so that
- * window.print() outputs ONLY the slip, always on white/black for fidelity.
+ * the server PDF pipeline renders it; print button prints that PDF.
  * The document ends with an Approval & Acknowledgment block: Approved By
  * (authorized signatory) and Received By (the staff member who collects the
  * money) each get a signature line + date, so the printed / saved-as-PDF
@@ -76,7 +76,7 @@ export function SalarySlipDialog({
               <FileDown className="h-4 w-4" />
               Download PDF
             </Button>
-            <Button size="sm" onClick={() => window.print()} disabled={!payroll}>
+            <Button size="sm" onClick={(e) => printPrintArea(e.currentTarget)} disabled={!payroll}>
               <Printer className="h-4 w-4" />
               Print / Save as PDF
             </Button>
@@ -88,7 +88,7 @@ export function SalarySlipDialog({
           {payroll ? (
             <SalarySlipDocument payroll={payroll} settings={settings} />
           ) : (
-            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
+            <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
               No payroll selected.
             </div>
           )}
@@ -101,7 +101,7 @@ export function SalarySlipDialog({
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
+      <p className="text-[10pt] font-semibold uppercase tracking-wider text-neutral-500">{label}</p>
       <p className="truncate text-sm font-medium text-neutral-900" title={value}>
         {value}
       </p>
@@ -131,8 +131,8 @@ function SignatureBlock({
         <div className="w-full border-t border-neutral-800" />
       </div>
       <p
-        className={`mt-1.5 text-[11px] font-bold uppercase tracking-widest ${
-          emphasize ? 'text-neutral-900' : 'text-neutral-600'
+        className={`mt-1.5 text-[11pt] font-bold uppercase tracking-widest ${
+          emphasize ? 'text-neutral-900' : 'text-[#1D2433]'
         }`}
       >
         {label}
@@ -142,7 +142,7 @@ function SignatureBlock({
           {name}
         </p>
       ) : (
-        <p className="text-sm italic text-neutral-400">Signature &amp; name</p>
+        <p className="text-sm italic text-[#6B7488]">Signature &amp; name</p>
       )}
       {sub ? (
         <p className="truncate text-xs text-neutral-500" title={sub}>
@@ -203,7 +203,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
               Paid
             </span>
           ) : (
-            <span className="mt-3 inline-block rounded border-2 border-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-600">
+            <span className="mt-3 inline-block rounded border-2 border-amber-500 px-2 py-0.5 text-[10pt] font-bold uppercase tracking-[0.2em] text-amber-600">
               Pending
             </span>
           )}
@@ -247,7 +247,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
                 <td className="border border-neutral-300 px-2.5 py-1.5">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                     <span className="font-medium">Regular Work Hours</span>
-                    <span className="text-[11px] tabular-nums text-neutral-500">
+                    <span className="text-[11pt] tabular-nums text-neutral-500">
                       {p.totalHours.toFixed(1)} hrs @ {formatMoney(p.hourlyRateSnapshot, currency)}/hr
                     </span>
                   </div>
@@ -260,7 +260,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
                 <td className="border border-neutral-300 px-2.5 py-1.5">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                     <span className="font-medium">Overtime Hours</span>
-                    <span className="text-[11px] tabular-nums text-neutral-500">
+                    <span className="text-[11pt] tabular-nums text-neutral-500">
                       {p.overtimeHours.toFixed(1)} hrs @ {formatMoney(p.overtimeRateSnapshot, currency)}
                       /hr
                     </span>
@@ -356,7 +356,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
       {/* NET PAYABLE BAR */}
       <div className="mt-4 flex flex-col items-center gap-1 bg-neutral-900 px-4 py-2.5 text-white sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm font-bold tracking-wide">NET SALARY PAYABLE</span>
-        <span className="text-xs text-neutral-300">
+        <span className="text-xs text-[#6B7488]">
           Disbursement for {monthName(p.month)} {p.year}
         </span>
         <span className="text-xl font-bold tabular-nums">{formatMoney(p.netPay, currency)}</span>
@@ -368,7 +368,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
         <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500">
           Approval &amp; Acknowledgment
         </h3>
-        <p className="mt-1.5 text-xs leading-relaxed text-neutral-700">
+        <p className="mt-1.5 text-xs leading-relaxed text-[#1D2433]">
           I hereby acknowledge that I have received my full and final net salary of{' '}
           <span className="font-semibold tabular-nums">{formatMoney(p.netPay, currency)}</span> for{' '}
           {monthName(p.month)} {p.year} by {PAY_TYPE_LABELS[p.payType] ?? p.payType}
@@ -393,7 +393,7 @@ function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; setti
         </div>
       </section>
 
-      <p className="mt-3 text-center text-[10px] text-neutral-400">
+      <p className="mt-3 text-center text-[10pt] text-[#6B7488]">
         This is a computer-generated pay slip.
       </p>
     </div>

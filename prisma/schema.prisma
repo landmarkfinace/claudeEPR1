@@ -477,8 +477,8 @@ model CompanyLetterhead {
   footerImage        String? // data URL — repeats at the bottom of every page
   fullPageImage      String? // data URL — full A4 background on every page
   showCompanyDetails Boolean  @default(true) // textual company block on/off
-  headerHeightMm     Float    @default(30) // reserved top band (mm) on A4
-  footerHeightMm     Float    @default(18) // reserved bottom band (mm) on A4
+  headerHeightMm     Float    @default(45) // reserved top band (mm) on A4
+  footerHeightMm     Float    @default(25) // reserved bottom band (mm) on A4
   updatedAt          DateTime @updatedAt
 }
 
@@ -503,7 +503,9 @@ model QuotationItem {
   // ---- Quotation template columns ----
   subText      String?  // gray detail line under the category name (e.g. "Licensed, SCE-classified")
   ratePerHour  Float?   // SAR/hour basis (Rate / Hour column)
-  hoursPerMonth Float?  // hours/month basis (Hours / Month column); rate x hours = unitPrice
+  hoursPerMonth Float?  // hours/month basis; rate × hours = unitPrice (per worker-month)
+  hoursPerDay  Float?   // hours/day basis (e.g. 10) — days × hours/day = hoursPerMonth
+  daysPerMonth Float?   // working days/month basis (e.g. 26) — days × hours/day = hoursPerMonth
 
   @@index([quotationId])
 }

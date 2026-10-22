@@ -49,6 +49,8 @@ export type QuotationItemRecord = {
   subText?: string | null
   ratePerHour?: number | null
   hoursPerMonth?: number | null
+  hoursPerDay?: number | null
+  daysPerMonth?: number | null
 }
 
 export type QuotationAssetRecord = {
@@ -75,6 +77,8 @@ function mapItems(items: QuotationItemRecord[]): DocItemRow[] {
     subText: it.subText ?? null,
     ratePerHour: it.ratePerHour != null ? round2(it.ratePerHour) : null,
     hoursPerMonth: it.hoursPerMonth != null ? round2(it.hoursPerMonth) : null,
+    hoursPerDay: it.hoursPerDay != null ? round2(it.hoursPerDay) : null,
+    daysPerMonth: it.daysPerMonth != null ? round2(it.daysPerMonth) : null,
   }))
 }
 
@@ -163,6 +167,8 @@ export const itemSchema = z.object({
   subText: z.string().max(300, 'Sub-text is too long').nullable().optional(),
   ratePerHour: z.coerce.number().min(0).max(100_000, 'Rate per hour is too large').nullable().optional(),
   hoursPerMonth: z.coerce.number().min(0).max(1_000, 'Hours per month is too large').nullable().optional(),
+  hoursPerDay: z.coerce.number().min(0).max(24, 'Hours per day is too large').nullable().optional(),
+  daysPerMonth: z.coerce.number().min(0).max(31, 'Days per month is too large').nullable().optional(),
 })
 
 export const assetSchema = z.object({
@@ -218,14 +224,20 @@ export type NormalizedQuotationItem = {
   subText: string | null
   ratePerHour: number | null
   hoursPerMonth: number | null
+  hoursPerDay: number | null
+  daysPerMonth: number | null
 }
 
 export type NormalizedQuotationAsset = QuotationAssetRow
 
 /**
- * Normalize line items: recompute every lineTotal server-side
- * (qty × unitPrice − per-line discount). Returns { error } when a line
- * discount exceeds the gross amount.
+ * Normalize line items: recompute every lineTotal SERVER-SIDE
+ * (qty × unitPrice − per-line discount). For hourly lines the unit price is
+ * also recomputed server-side from the working-hours basis, so the printed
+ * Amount is ALWAYS No. of Workers × Hourly Rate × Hours per Month:
+ *   hours/month = hours/day × days/month (e.g. 10 × 26 = 260)
+ *   unitPrice   = rate/hour × hours/month
+ * Returns { error } when a line discount exceeds the gross amount.
  */
 export function normalizeItems(
   raw: ItemInput[]
@@ -233,8 +245,33 @@ export function normalizeItems(
   const out: NormalizedQuotationItem[] = []
   for (let i = 0; i < raw.length; i++) {
     const it = raw[i]
+    const rate = it.ratePerHour != null ? round2(it.ratePerHour) : null
+    const hoursPerDay = it.hoursPerDay != null ? round2(it.hoursPerDay) : null
+    const daysPerMonth = it.daysPerMonth != null ? round2(it.daysPerMonth) : null
+
+    // hours/month: prefer the day-basis pair; fall back to a directly sent
+    // value (legacy payloads); else keep null.
+    let hoursPerMonth: number | null =
+      hoursPerDay != null && daysPerMonth != null && hoursPerDay > 0 && daysPerMonth > 0
+        ? round2(hoursPerDay * daysPerMonth)
+        : it.hoursPerMonth != null
+          ? round2(it.hoursPerMonth)
+          : null
+
+    // Hourly basis: the server owns the unit price — rate × hours/month.
+    // (hours default to 1 only for legacy lines that carry a bare rate.)
+    let unitPrice = round2(it.unitPrice)
+    if (rate != null && rate > 0) {
+      if (hoursPerMonth != null && hoursPerMonth > 0) {
+        unitPrice = round2(rate * hoursPerMonth)
+        hoursPerMonth = round2(hoursPerMonth)
+      } else {
+        unitPrice = round2(rate * 1)
+        hoursPerMonth = hoursPerMonth ?? 1
+      }
+    }
+
     const quantity = round2(it.quantity)
-    const unitPrice = round2(it.unitPrice)
     const discount = round2(it.discount ?? 0)
     const gross = round2(quantity * unitPrice)
     if (discount > gross) {
@@ -249,8 +286,10 @@ export function normalizeItems(
       discount,
       lineTotal: round2(gross - discount),
       subText: it.subText?.trim() || null,
-      ratePerHour: it.ratePerHour != null ? round2(it.ratePerHour) : null,
-      hoursPerMonth: it.hoursPerMonth != null ? round2(it.hoursPerMonth) : null,
+      ratePerHour: rate,
+      hoursPerMonth,
+      hoursPerDay,
+      daysPerMonth,
     })
   }
   return { items: out }

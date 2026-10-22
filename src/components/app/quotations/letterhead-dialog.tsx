@@ -52,8 +52,8 @@ const DEFAULT_CONFIG: LetterheadConfig = {
   footerImage: null,
   fullPageImage: null,
   showCompanyDetails: true,
-  headerHeightMm: 30,
-  footerHeightMm: 18,
+  headerHeightMm: 45,
+  footerHeightMm: 25,
 }
 
 export function LetterheadDialog({

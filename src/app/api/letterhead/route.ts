@@ -99,8 +99,8 @@ export async function PUT(req: NextRequest) {
     const data: Record<string, unknown> = {
       mode: body.mode,
       showCompanyDetails: body.showCompanyDetails ?? true,
-      headerHeightMm: body.headerHeightMm ?? 30,
-      footerHeightMm: body.footerHeightMm ?? 18,
+      headerHeightMm: body.headerHeightMm ?? 45,
+      footerHeightMm: body.footerHeightMm ?? 25,
     }
     for (const [key, value] of imageSlots) {
       if (value === null || value === undefined) {
