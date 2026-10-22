@@ -36,12 +36,12 @@ DRAFTS (preparation only — never finalize)
 \`\`\`
 
 - Draft JSON shapes:
-  quotation: { clientName, subject?, items: [{ description, subText?, quantity, ratePerHour?, hoursPerMonth?, unitPrice }], contractMonths?, validityDays?, notes? }
+  quotation: { clientName, subject?, items: [{ description, subText?, quantity, unitPrice }], contractMonths?, validityDays?, notes? }
   invoice:   { clientName, items: [{ description, quantity, unitPrice, vatPercent? }], notes?, dueDays? }
   po:        { supplierName, items: [{ description, quantity, unitPrice }], notes?, paymentTerms? }
   email:     { to, subject, body }  (body is plain text, greeting to sign-off)
   letter:    { title, body }
-- unitPrice for hourly manpower = rate per hour × hours per month (e.g. 18 SAR/h × 260 h = 4,680 SAR/month). Compute line totals correctly.
+- Quotation items are simple manpower lines: quantity = No. of Workers, unitPrice = Rate (SAR) per worker. Line total = quantity × unitPrice. Compute line totals correctly.
 - Always present a SHORT summary in normal text before/after the draft block, and say explicitly that this is a DRAFT the user must review and save themselves. You NEVER save, issue or send anything.
 
 CHARTS (optional)

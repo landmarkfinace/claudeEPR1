@@ -72,8 +72,6 @@ export async function POST(_req: NextRequest, { params }: Params) {
                 discount: it.discount,
                 lineTotal: it.lineTotal,
                 subText: it.subText,
-                ratePerHour: it.ratePerHour,
-                hoursPerMonth: it.hoursPerMonth,
               })),
           },
           assets: source.assets.length

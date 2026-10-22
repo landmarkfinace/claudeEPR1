@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { db } from '@/lib/db'
 import { amountInWords } from '@/lib/amount-words'
+import { parseTerms } from '@/lib/quotation-terms'
 import { formatDate, round2 } from '@/lib/format'
 import { serverError, notFound, requirePermission, isResponse } from '@/lib/api-helpers'
 
@@ -105,44 +106,28 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
     aoa.push([null])
 
-    // Items table — hourly manpower columns when the rate basis is present
-    const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
+    // Items table — one simple manpower layout for every quotation:
+    // Sr | Trade | No. of Workers | Rate (SAR) | Amount (SAR)
+    // Amount = No. of Workers × Rate (SAR). No hourly/monthly basis.
     const headerRowIndex = aoa.length
-    if (hasRateBasis) {
-      aoa.push(['Sr', 'Trade', 'Hours / Month', 'Rate (SAR)'])
-    } else {
-      aoa.push(['Sr', 'Description', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Line Total'])
-    }
+    aoa.push(['Sr', 'Trade', 'No. of Workers', 'Rate (SAR)', 'Amount (SAR)'])
     for (const it of items) {
-      aoa.push(
-        hasRateBasis
-          ? [
-              it.sr,
-              it.subText ? `${it.description} (${it.subText})` : it.description,
-              it.hoursPerMonth != null ? round2(it.hoursPerMonth) : '',
-              it.ratePerHour != null ? round2(it.ratePerHour) : '',
-            ]
-          : [
-              it.sr,
-              it.description,
-              it.unit ?? '',
-              round2(it.quantity),
-              round2(it.unitPrice),
-              round2(it.discount ?? 0),
-              round2(it.lineTotal),
-            ]
-      )
+      aoa.push([
+        it.sr,
+        it.subText ? `${it.description} (${it.subText})` : it.description,
+        round2(it.quantity),
+        round2(it.unitPrice),
+        round2(it.lineTotal),
+      ])
     }
-    if (hasRateBasis) {
-      const totalHours = round2(items.reduce((s, it) => s + (it.hoursPerMonth ?? 0), 0))
-      aoa.push(['', 'Total Hours', totalHours, ''])
-    }
+    const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
+    aoa.push(['', 'Total', totalWorkers, '', round2(quotation.subtotal)])
     aoa.push([null])
 
     // Totals — label/value columns follow the item table width
     const totalStart = aoa.length
-    const labelCol = hasRateBasis ? 2 : 4
-    const valCol = hasRateBasis ? 3 : 6
+    const labelCol = 2
+    const valCol = 4
     const totalRow = (label: string, value: number): Array<string | number> => {
       const row: Array<string | number> = []
       for (let c = 0; c < valCol; c++) row.push(c === labelCol ? label : '')
@@ -168,7 +153,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
     if (quotation.terms) {
       aoa.push(['TERMS & CONDITIONS'])
-      for (const line of quotation.terms.split('\n')) aoa.push([line])
+      const termItems = parseTerms(quotation.terms)
+      if (termItems.length > 0) {
+        for (const t of termItems) aoa.push([t.title ? `${t.title}: ${t.text}` : t.text])
+      } else {
+        for (const line of quotation.terms.split('\n')) aoa.push([line])
+      }
       aoa.push([null])
     }
     if (quotation.inclusions || quotation.exclusions) {
@@ -195,26 +185,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
       { s: { r: totalStart + 5, c: 0 }, e: { r: totalStart + 5, c: 6 } },
     ]
     sheet['!merges'] = merges
-    sheet['!cols'] = hasRateBasis
-      ? [
-          { wch: 5 }, // Sr
-          { wch: 52 }, // Trade
-          { wch: 12 }, // Hours / Month
-          { wch: 14 }, // Rate (SAR)
-        ]
-      : [
-          { wch: 5 }, // Sr
-          { wch: 52 }, // Description
-          { wch: 10 }, // Unit
-          { wch: 8 }, // Qty
-          { wch: 14 }, // Unit Price
-          { wch: 12 }, // Discount
-          { wch: 16 }, // Line Total
-        ]
+    sheet['!cols'] = [
+      { wch: 5 }, // Sr
+      { wch: 52 }, // Trade
+      { wch: 14 }, // No. of Workers
+      { wch: 16 }, // Rate (SAR)
+      { wch: 16 }, // Amount (SAR)
+    ]
 
     // Number formatting for money/qty columns on item rows
-    const numFrom = hasRateBasis ? 2 : 3
-    const numTo = hasRateBasis ? 3 : 6
+    const numFrom = 2
+    const numTo = 4
     for (let r = headerRowIndex + 1; r < headerRowIndex + 1 + items.length; r++) {
       for (let c = numFrom; c <= numTo; c++) {
         const cell = sheet[XLSX.utils.encode_cell({ r, c })]

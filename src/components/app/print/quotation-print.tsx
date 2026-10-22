@@ -13,11 +13,11 @@
 //     already carries our company block): left column = client name (bold),
 //     Attention, Contact; right column = Address, VAT/C.R. Tight rows, no
 //     dashed separators.
-//   • Centred title line, then the items table — 6 columns for hourly
-//     manpower quotes (# · Trade/Category with inline Arabic trade name ·
-//     No. of Workers · Hourly Rate · Hours/Month · Amount), rows only as
-//     tall as the text (~2mm padding), the workers/amount TOTAL row and the
-//     "Amount = Workers × Rate × Hours per Month" footnote.
+//   • Centred title line, then the items table — 5 simple manpower columns
+//     (# · Trade/Category with inline Arabic trade name · No. of Workers ·
+//     Rate (SAR) · Amount (SAR)), rows only as tall as the text (~2mm
+//     padding), the workers/amount TOTAL row. Amount = Workers × Rate —
+//     no hourly/monthly basis anywhere.
 //   • AMOUNT IN WORDS box (left) beside the totals box (right).
 //   • TERMS & CONDITIONS ◆ الشروط والأحكام — full width, 2 columns, 7.5pt,
 //     bold item titles (replaces the old Scope & Terms card).
@@ -278,7 +278,6 @@ function page1FixedMm(toMm: number): number {
   return 12.2 + 15.2 + toMm + 5.6 + 1.5 + 8.6
 }
 const TOTAL_ROW_MM = 6.5
-const FOOTNOTE_MM = 4.2
 // words+totals row incl. its 2mm top margin
 const WORDS_TOTALS_MM = 34.5
 // signature boxes + ≥3mm gap + note line
@@ -328,7 +327,7 @@ function planPages(
   // 2) + 3) flow the tail onto the last items page
   const cap = chunks.length === 1 ? availFirst : availRest
   const lastRows = chunks[chunks.length - 1].reduce((s, it) => s + rowHeightMm(it), 0)
-  let tailUsed = lastRows + (chunks[chunks.length - 1].length > 0 ? TOTAL_ROW_MM + FOOTNOTE_MM : 0)
+  let tailUsed = lastRows + (chunks[chunks.length - 1].length > 0 ? TOTAL_ROW_MM : 0)
 
   const blocks: TailBlock[] = []
   const deferred: TailBlock[] = []
@@ -551,10 +550,9 @@ export function QuotationDocument({
   const money = (n: number) => formatNumber(n) // plain numbers — SAR lives in headers only
   const geo = geometryFor(letterhead)
 
-  // Hourly manpower quotes get the 6-column table, others go generic
-  const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
-  const showDiscountCol = items.some((it) => (it.discount ?? 0) > 0) || q.discount > 0
-  const totalWorkers = round2(items.reduce((s, it) => s + (hasRateBasis ? it.quantity : 0), 0))
+  // Simple manpower basis: Rate (SAR) = unit price per worker,
+  // Amount = No. of Workers × Rate (SAR). No hourly/monthly basis.
+  const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
   const terms = parseTerms(q.terms)
   const contractMonths = q.contractMonths && q.contractMonths > 0 ? q.contractMonths : null
   const contractValue = contractMonths ? round2(q.total * contractMonths) : null
@@ -566,32 +564,6 @@ export function QuotationDocument({
   const currencyAr = CURRENCY_AR[currency] ?? ''
   const printedAt = new Date()
 
-  // uniform working-hours basis across hourly lines → drives the
-  // "(10 hrs × 26 days = 260 hrs)" note under the items table.
-  const hoursVals = items
-    .map((it) => it.hoursPerMonth)
-    .filter((h): h is number => h != null && h > 0)
-  const uniformHours =
-    hoursVals.length > 0 && hoursVals.every((h) => h === hoursVals[0]) ? hoursVals[0] : null
-  const hpdVals = items
-    .map((it) => it.hoursPerDay)
-    .filter((h): h is number => h != null && h > 0)
-  const uniformHpd =
-    hpdVals.length > 0 && hpdVals.every((h) => h === hpdVals[0]) ? hpdVals[0] : null
-  const dpmVals = items
-    .map((it) => it.daysPerMonth)
-    .filter((d): d is number => d != null && d > 0)
-  const uniformDpm =
-    dpmVals.length > 0 && dpmVals.every((d) => d === dpmVals[0]) ? dpmVals[0] : null
-  const dayBasis =
-    uniformHpd != null && uniformDpm != null ? round2(uniformHpd * uniformDpm) : null
-  const footnoteBasis =
-    dayBasis != null
-      ? ` (${uniformHpd} hrs × ${uniformDpm} days = ${dayBasis} hrs)`
-      : uniformHours != null
-        ? ` (${uniformHours} hrs / month)`
-        : ''
-
   // TO box field values (client snapshot + registered-client record)
   const toAddress = [client?.address, client?.city].filter(Boolean).join(', ')
   const toContact =
@@ -602,8 +574,8 @@ export function QuotationDocument({
   const termsMm = termsHeightMm(terms)
   const toMm = toHeightMm(q)
   const plans = planPages(items, geo.topMm, geo.bottomMm, termsMm, toMm)
-  // The last page that actually carries items — the table's TOTAL row + the
-  // calculation footnote go there.
+  // The last page that actually carries items — the table's TOTAL row
+  // goes there.
   const lastItemsPageIdx = plans.reduce((acc, p, i) => (p.items.length > 0 ? i : acc), 0)
 
   // letterhead artwork layers (per the configured mode)
@@ -991,9 +963,7 @@ export function QuotationDocument({
                   {/* 5 ─ centred quotation title line */}
                   <div className="mt-[1.2mm] text-center">
                     <p className="text-[11pt] font-extrabold leading-tight" style={{ color: NAVY }}>
-                      {hasRateBasis
-                        ? 'Quotation for Supply of Skilled & Unskilled Manpower'
-                        : 'Quotation Details'}
+                      Quotation for Supply of Skilled &amp; Unskilled Manpower
                     </p>
                   </div>
                 </>
@@ -1022,115 +992,50 @@ export function QuotationDocument({
                   style={{ borderColor: BORDER, background: 'white' }}
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
-                    {hasRateBasis ? (
-                      <colgroup>
-                        <col style={{ width: '5%' }} />
-                        <col style={{ width: '34%' }} />
-                        <col style={{ width: '13%' }} />
-                        <col style={{ width: '16%' }} />
-                        <col style={{ width: '15%' }} />
-                        <col style={{ width: '17%' }} />
-                      </colgroup>
-                    ) : (
-                      <colgroup>
-                        <col style={{ width: '5%' }} />
-                        <col style={{ width: showDiscountCol ? '37%' : '41%' }} />
-                        <col style={{ width: '9%' }} />
-                        <col style={{ width: '10%' }} />
-                        <col style={{ width: '13%' }} />
-                        {showDiscountCol ? <col style={{ width: '9%' }} /> : null}
-                        <col style={{ width: showDiscountCol ? '17%' : '22%' }} />
-                      </colgroup>
-                    )}
+                    <colgroup>
+                      <col style={{ width: '6%' }} />
+                      <col style={{ width: '38%' }} />
+                      <col style={{ width: '16%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '20%' }} />
+                    </colgroup>
                     <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
-                      {hasRateBasis ? (
-                        <tr>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">#</p>
-                          </th>
-                          <th className={`${th} text-left`}>
-                            <p className="text-[8pt] font-bold text-white">Trade / Category</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              المهنة / الفئة
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">No. of Workers</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              عدد العمال
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Hourly Rate (SAR)</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              السعر بالساعة
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Hours / Month</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              ساعات الشهر
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Amount (SAR)</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              المبلغ
-                            </p>
-                          </th>
-                        </tr>
-                      ) : (
-                        <tr>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">#</p>
-                          </th>
-                          <th className={`${th} text-left`}>
-                            <p className="text-[8pt] font-bold text-white">Description</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              الوصف
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Qty</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              الكمية
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Unit</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              الوحدة
-                            </p>
-                          </th>
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Unit Price</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              سعر الوحدة
-                            </p>
-                          </th>
-                          {showDiscountCol ? (
-                            <th className={th}>
-                              <p className="text-[8pt] font-bold text-white">Disc.</p>
-                              <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                                الخصم
-                              </p>
-                            </th>
-                          ) : null}
-                          <th className={th}>
-                            <p className="text-[8pt] font-bold text-white">Line Total</p>
-                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                              الإجمالي
-                            </p>
-                          </th>
-                        </tr>
-                      )}
+                      <tr>
+                        <th className={th}>
+                          <p className="text-[8pt] font-bold text-white">#</p>
+                        </th>
+                        <th className={`${th} text-left`}>
+                          <p className="text-[8pt] font-bold text-white">Trade / Category</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            المهنة / الفئة
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[8pt] font-bold text-white">No. of Workers</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            عدد العمال
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[8pt] font-bold text-white">Rate (SAR)</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            السعر
+                          </p>
+                        </th>
+                        <th className={th}>
+                          <p className="text-[8pt] font-bold text-white">Amount (SAR)</p>
+                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
+                            المبلغ
+                          </p>
+                        </th>
+                      </tr>
                     </thead>
                     <tbody>
                       {chunk.length === 0 ? (
                         <tr>
                           <td
                             className={`${td} border-b py-2 text-center text-[#4A5468]`}
-                            colSpan={hasRateBasis ? 6 : showDiscountCol ? 7 : 6}
+                            colSpan={5}
                             style={{ borderColor: ROW_SEP }}
                           >
                             No line items yet
@@ -1177,105 +1082,51 @@ export function QuotationDocument({
                                   </p>
                                 ) : null}
                               </td>
-                              {hasRateBasis ? (
-                                <>
-                                  <td className={`${td} text-center font-semibold tabular-nums`}>
-                                    {it.quantity.toLocaleString('en-US')}
-                                  </td>
-                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                    {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
-                                  </td>
-                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                    {it.hoursPerMonth != null ? money(it.hoursPerMonth) : '—'}
-                                  </td>
-                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                    {money(it.lineTotal)}
-                                  </td>
-                                </>
-                              ) : (
-                                <>
-                                  <td className={`${td} text-center font-semibold tabular-nums`}>
-                                    {it.quantity.toLocaleString('en-US')}
-                                  </td>
-                                  <td className={`${td} text-center`}>{it.unit ?? '—'}</td>
-                                  <td className={tdR}>{money(it.unitPrice)}</td>
-                                  {showDiscountCol ? (
-                                    <td className={tdR}>
-                                      {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
-                                    </td>
-                                  ) : null}
-                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                    {money(it.lineTotal)}
-                                  </td>
-                                </>
-                              )}
+                              <td className={`${td} text-center font-semibold tabular-nums`}>
+                                {it.quantity.toLocaleString('en-US')}
+                              </td>
+                              <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                {money(it.unitPrice)}
+                              </td>
+                              <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                {money(it.lineTotal)}
+                              </td>
                             </tr>
                           )
                         })
                       )}
-                      {/* total row on the last items chunk — hourly quotes
-                          total the workers and amount columns */}
+                      {/* total row on the last items chunk — totals the
+                          workers and amount columns */}
                       {chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
                         <tr
                           className="break-inside-avoid"
                           style={{ background: LIGHT_BG, borderTop: `0.6mm solid ${NAVY}` }}
                         >
-                          {hasRateBasis ? (
-                            <>
-                              <td className={td} />
-                              <td
-                                className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
-                                style={{ color: NAVY }}
-                              >
-                                Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
-                              </td>
-                              <td
-                                className={`${tdT} text-center font-extrabold tabular-nums`}
-                                style={{ color: NAVY }}
-                              >
-                                {totalWorkers.toLocaleString('en-US')}
-                              </td>
-                              <td className={td} />
-                              <td className={td} />
-                              <td
-                                className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
-                                style={{ color: NAVY }}
-                              >
-                                {money(q.subtotal)}
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td className={td} />
-                              <td
-                                className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
-                                style={{ color: NAVY }}
-                              >
-                                Total Amount <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
-                              </td>
-                              <td className={td} />
-                              <td className={td} />
-                              {showDiscountCol ? <td className={td} /> : null}
-                              <td
-                                className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
-                                style={{ color: NAVY }}
-                              >
-                                {money(q.subtotal)}
-                              </td>
-                            </>
-                          )}
+                          <td className={td} />
+                          <td
+                            className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
+                            style={{ color: NAVY }}
+                          >
+                            Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
+                          </td>
+                          <td
+                            className={`${tdT} text-center font-extrabold tabular-nums`}
+                            style={{ color: NAVY }}
+                          >
+                            {totalWorkers.toLocaleString('en-US')}
+                          </td>
+                          <td className={td} />
+                          <td
+                            className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
+                            style={{ color: NAVY }}
+                          >
+                            {money(q.subtotal)}
+                          </td>
                         </tr>
                       ) : null}
                     </tbody>
                   </table>
                 </div>
-              ) : null}
-
-              {/* calculation note under the items table (hourly quotes) */}
-              {hasRateBasis && chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
-                <p className="text-right text-[8pt] italic mt-[0.8mm]" style={{ color: INK_SOFT }}>
-                  * Amount = No. of Workers × Hourly Rate × Hours per Month{footnoteBasis}
-                </p>
               ) : null}
 
               {/* ── tail blocks — flow after the items table, page by page ── */}
@@ -1314,9 +1165,9 @@ export function QuotationDocument({
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
                       <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                        Monthly Subtotal{' '}
+                        Subtotal{' '}
                         <span lang="ar" dir="rtl" className="text-[7.5pt]">
-                          المجموع الشهري
+                          المجموع
                         </span>
                       </span>
                       <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
@@ -1366,16 +1217,16 @@ export function QuotationDocument({
                         {money(q.vatAmount)}
                       </span>
                     </div>
-                    {/* TOTAL / MONTH — navy row, white label, gold amount */}
+                    {/* TOTAL — navy row, white label, gold amount */}
                     <div
                       className="border-b px-[3mm] py-[1mm]"
                       style={{ borderColor: BORDER, background: DARK_NAVY }}
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                         <span className="text-[9.5pt] font-extrabold uppercase leading-[4.4mm] tracking-[0.3pt] text-white">
-                          Total / Month{' '}
+                          Total{' '}
                           <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-                            الإجمالي شهرياً
+                            الإجمالي
                           </span>
                         </span>
                         <span

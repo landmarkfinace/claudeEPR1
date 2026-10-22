@@ -17,7 +17,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowUp,
   BookmarkPlus,
@@ -81,7 +80,6 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 
 import { ConfirmDelete } from '../shared/confirm-delete'
-import { ConfirmDialog } from '../shared/confirm-dialog'
 import { DataTablePagination } from '../shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '../shared/empty-state'
 import { ErrorState } from '../shared/error-state'
@@ -175,10 +173,6 @@ type ItemForm = {
   unitPrice: string
   discount: string
   subText: string
-  ratePerHour: string
-  hoursPerMonth: string
-  hoursPerDay: string
-  daysPerMonth: string
 }
 
 type QuotationForm = {
@@ -216,22 +210,7 @@ function newItemForm(): ItemForm {
     unitPrice: '',
     discount: '',
     subText: '',
-    ratePerHour: '',
-    hoursPerMonth: '',
-    // Working-hours basis: 10 hrs/day × 26 days/month = 260 hrs/month
-    hoursPerDay: '10',
-    daysPerMonth: '26',
   }
-}
-
-/** Hours/month for an item form row: hours/day × days/month (fallback: the
- * directly typed hours/month, legacy). 0 when neither is set. */
-function itemFormHours(it: ItemForm): number {
-  const hpd = parseNum(it.hoursPerDay)
-  const dpm = parseNum(it.daysPerMonth)
-  if (hpd != null && hpd > 0 && dpm != null && dpm > 0) return round2(hpd * dpm)
-  const direct = parseNum(it.hoursPerMonth)
-  return direct != null && direct > 0 ? direct : 0
 }
 
 function emptyForm(vatPercent: number): QuotationForm {
@@ -317,17 +296,6 @@ export function QuotationsView() {
     setTermsItems(items)
     setForm((f) => ({ ...f, terms: serializeTerms(items) }))
   }
-
-  // ---- working-hours sanity: quotations saved with < 100 hrs/month ----
-  type LowHoursQuote = {
-    id: string
-    quoteNumber: string
-    clientName: string
-    status: string
-    items: { sr: number; description: string; hoursPerMonth: number }[]
-  }
-  const [lowHoursQuotes, setLowHoursQuotes] = useState<LowHoursQuote[] | null>(null)
-  const [hoursWarning, setHoursWarning] = useState<{ lines: string[]; lowest: number } | null>(null)
 
   // ---- letterhead manager ----
   const [letterheadOpen, setLetterheadOpen] = useState(false)
@@ -447,20 +415,6 @@ export function QuotationsView() {
     }
   }, [])
 
-  /** Quotations whose hourly items fall below 100 hrs/month — the boss
-   *  fixes them by hand (we never touch saved quotations automatically). */
-  const loadLowHours = useCallback(async () => {
-    try {
-      const res = await api.get<{ quotations: LowHoursQuote[] }>('/api/quotations?lowHours=1')
-      setLowHoursQuotes(res.quotations ?? [])
-    } catch {
-      setLowHoursQuotes([])
-    }
-  }, [])
-  useEffect(() => {
-    void loadLowHours()
-  }, [loadLowHours])
-
   /** Predict the number a NEW quotation will receive (server generator). */
   const fetchNextNumber = useCallback(async (prefix: string, year: number): Promise<string> => {
     const key = `${prefix}-${year}`
@@ -540,22 +494,6 @@ export function QuotationsView() {
             unitPrice: String(it.unitPrice),
             discount: it.discount ? String(it.discount) : '',
             subText: it.subText ?? '',
-            ratePerHour: it.ratePerHour != null ? String(it.ratePerHour) : '',
-            hoursPerMonth: it.hoursPerMonth != null ? String(it.hoursPerMonth) : '',
-            // Day-basis fields: keep the saved values; derive a sensible pair
-            // for legacy rows that only stored hours/month (26-day month).
-            hoursPerDay:
-              it.hoursPerDay != null
-                ? String(it.hoursPerDay)
-                : it.hoursPerMonth != null && it.ratePerHour != null
-                  ? String(round2(it.hoursPerMonth / 26))
-                  : '',
-            daysPerMonth:
-              it.daysPerMonth != null
-                ? String(it.daysPerMonth)
-                : it.hoursPerMonth != null && it.ratePerHour != null
-                  ? '26'
-                  : '',
           }
         }),
         assets: full.assets ?? [],
@@ -576,21 +514,7 @@ export function QuotationsView() {
   function setItemField(key: string, field: keyof ItemForm, value: string) {
     setForm((f) => ({
       ...f,
-      items: f.items.map((it) => {
-        if (it.key !== key) return it
-        const next = { ...it, [field]: value }
-        // Hourly workflow: the line price is ALWAYS Rate × Hours/month, where
-        // Hours/month = hours/day × days/month (defaults 10 × 26 = 260).
-        if (field === 'ratePerHour' || field === 'hoursPerMonth' || field === 'hoursPerDay' || field === 'daysPerMonth') {
-          const rate = parseNum(field === 'ratePerHour' ? value : next.ratePerHour)
-          if (rate !== null && rate > 0) {
-            const hpm = itemFormHours(next)
-            next.unitPrice = hpm > 0 ? String(Math.round(rate * hpm * 100) / 100) : ''
-            if (hpm > 0) next.hoursPerMonth = String(hpm)
-          }
-        }
-        return next
-      }),
+      items: f.items.map((it) => (it.key === key ? { ...it, [field]: value } : it)),
     }))
   }
 
@@ -670,10 +594,6 @@ export function QuotationsView() {
         discount: round2(lineDiscount),
         lineTotal: round2(quantity * unitPrice - lineDiscount),
         subText: it.subText.trim() || null,
-        ratePerHour: parseNum(it.ratePerHour),
-        hoursPerMonth: parseNum(it.hoursPerMonth),
-        hoursPerDay: parseNum(it.hoursPerDay),
-        daysPerMonth: parseNum(it.daysPerMonth),
         index: i + 1,
       }
     })
@@ -694,38 +614,10 @@ export function QuotationsView() {
       return
     }
 
-    // working-hours basis: hours/day 1–24, days/month 1–31
-    for (const it of form.items) {
-      const hpd = parseNum(it.hoursPerDay)
-      if (hpd != null && (hpd < 1 || hpd > 24)) {
-        toast.error('Hours per day must be between 1 and 24')
-        return
-      }
-      const dpm = parseNum(it.daysPerMonth)
-      if (dpm != null && (dpm < 1 || dpm > 31)) {
-        toast.error('Days per month must be between 1 and 31')
-        return
-      }
-    }
-
-    // hours per month below 100 → confirm before saving
-    const low = form.items
-      .map((it) => ({ it, hpm: itemFormHours(it) }))
-      .filter((x) => x.hpm > 0 && x.hpm < 100)
-    if (low.length > 0) {
-      setHoursWarning({
-        lines: low.map(
-          (x) => `${x.it.description.trim() || 'Item'}: ${formatNumber(x.hpm)} hrs/month`
-        ),
-        lowest: Math.min(...low.map((x) => x.hpm)),
-      })
-      return
-    }
-
     await doSubmit(items, clientName, rawDiscount)
   }
 
-  /** Actual POST/PUT — validations (incl. the hours warning) already ran. */
+  /** Actual POST/PUT — validations already ran. */
   async function doSubmit(
     items: {
       description: string
@@ -735,10 +627,6 @@ export function QuotationsView() {
       discount: number
       lineTotal: number
       subText: string | null
-      ratePerHour: number | null
-      hoursPerMonth: number | null
-      hoursPerDay: number | null
-      daysPerMonth: number | null
       index: number
     }[],
     clientName: string,
@@ -763,17 +651,13 @@ export function QuotationsView() {
       mobilization: form.mobilization.trim() || null,
       inclusions: form.inclusions.trim() || null,
       exclusions: form.exclusions.trim() || null,
-      items: items.map(({ description, unit, quantity, unitPrice, discount, subText, ratePerHour, hoursPerMonth, hoursPerDay, daysPerMonth }) => ({
+      items: items.map(({ description, unit, quantity, unitPrice, discount, subText }) => ({
         description,
         unit,
         quantity,
         unitPrice,
         discount,
         subText,
-        ratePerHour,
-        hoursPerMonth,
-        hoursPerDay,
-        daysPerMonth,
       })),
       assets: form.assets.map((a) => ({
         type: a.type,
@@ -799,7 +683,6 @@ export function QuotationsView() {
       setDialogOpen(false)
       nextNumberCache.current.clear() // predictions are stale after a create
       void load()
-      void loadLowHours()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the quotation')
     } finally {
@@ -899,10 +782,6 @@ export function QuotationsView() {
         discount: Math.max(0, parseNum(it.discount) ?? 0),
         lineTotal: calc.items[i]?.lineTotal ?? 0,
         subText: it.subText.trim() || null,
-        ratePerHour: parseNum(it.ratePerHour),
-        hoursPerMonth: parseNum(it.hoursPerMonth),
-        hoursPerDay: parseNum(it.hoursPerDay),
-        daysPerMonth: parseNum(it.daysPerMonth),
       })),
       assets: form.assets,
       client: selected
@@ -1054,60 +933,6 @@ export function QuotationsView() {
           </Button>
         ) : null}
       </PageHeader>
-
-      {/* ---- working-hours sanity banner (quotations < 100 hrs/month) ---- */}
-      {lowHoursQuotes && lowHoursQuotes.length > 0 ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
-          <p className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            Working hours below 100 hrs/month
-          </p>
-          <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
-            These quotations have hourly items with less than 100 hours per month, so the printed
-            amounts are probably wrong. The standard basis is 10 hrs/day × 26 days/month = 260 hrs.
-            Open each one and fix the working hours.
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {lowHoursQuotes.map((q) => (
-              <li
-                key={q.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white/70 px-2.5 py-1.5 text-xs dark:border-amber-500/30 dark:bg-transparent"
-              >
-                <span className="min-w-0">
-                  <span className="font-mono font-semibold">{q.quoteNumber}</span>
-                  <span className="mx-1.5 text-amber-700/60 dark:text-amber-300/50">·</span>
-                  <span className="text-muted-foreground">{q.clientName}</span>
-                  <span className="mx-1.5 text-amber-700/60 dark:text-amber-300/50">·</span>
-                  {q.items.map((it) => (
-                    <span key={it.sr} className="tabular-nums">
-                      {it.description}: {formatNumber(it.hoursPerMonth)} hrs/mo
-                      {q.items.indexOf(it) < q.items.length - 1 ? ' · ' : ''}
-                    </span>
-                  ))}
-                </span>
-                {canEdit ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 border-amber-300 text-amber-900 hover:bg-amber-100 dark:text-amber-200"
-                    onClick={() =>
-                      void openEdit({
-                        id: q.id,
-                        quoteNumber: q.quoteNumber,
-                        clientName: q.clientName,
-                        status: q.status,
-                      } as unknown as QuotationRow)
-                    }
-                  >
-                    <Pencil className="mr-1 h-3 w-3" />
-                    Fix
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {canCreate ? <MobileFab label="Add Quotation" onClick={() => void openAdd()} icon={Plus} /> : null}
 
@@ -1764,37 +1589,19 @@ export function QuotationsView() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  {/* Hourly rate card — working-hours basis + rate + live line
-                      total. Hours/month = hours/day × days/month (10 × 26 = 260
-                      by default) and the line price is ALWAYS
-                      Rate × Hours/month, so Amount = Workers × Rate × Hours. */}
-                  <div className="mt-2 grid grid-cols-4 gap-2 pl-8">
+                  {/* Rate card — Amount = No. of Workers × Rate (SAR), live. */}
+                  <div className="mt-2 grid grid-cols-3 gap-2 pl-8">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Hours / Day</Label>
+                      <Label className="text-[11px] text-muted-foreground">No. of Workers</Label>
                       <Input
                         type="number"
                         min={1}
-                        max={24}
-                        step="any"
-                        value={it.hoursPerDay}
-                        onChange={(e) => setItemField(it.key, 'hoursPerDay', e.target.value)}
-                        placeholder="10"
+                        step="1"
+                        value={it.quantity}
+                        onChange={(e) => setItemField(it.key, 'quantity', e.target.value)}
+                        placeholder="1"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} hours per day`}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Days / Month</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={31}
-                        step="any"
-                        value={it.daysPerMonth}
-                        onChange={(e) => setItemField(it.key, 'daysPerMonth', e.target.value)}
-                        placeholder="26"
-                        className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} working days per month`}
+                        aria-label={`Item ${i + 1} number of workers`}
                       />
                     </div>
                     <div className="space-y-1">
@@ -1803,48 +1610,20 @@ export function QuotationsView() {
                         type="number"
                         min={0}
                         step="0.01"
-                        value={it.ratePerHour}
-                        onChange={(e) => setItemField(it.key, 'ratePerHour', e.target.value)}
+                        value={it.unitPrice}
+                        onChange={(e) => setItemField(it.key, 'unitPrice', e.target.value)}
                         placeholder="0.00"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} rate per hour in SAR`}
+                        aria-label={`Item ${i + 1} rate in SAR`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Line Total</Label>
+                      <Label className="text-[11px] text-muted-foreground">Amount (SAR)</Label>
                       <p className="flex h-9 items-center rounded-md border bg-background px-2.5 text-sm font-semibold tabular-nums">
                         {formatNumber(calc.items[i]?.lineTotal ?? 0)}
                       </p>
                     </div>
                   </div>
-                  {(() => {
-                    const hpd = parseNum(it.hoursPerDay)
-                    const dpm = parseNum(it.daysPerMonth)
-                    const hpm = itemFormHours(it)
-                    const rate = parseNum(it.ratePerHour)
-                    if (hpm > 0) {
-                      return (
-                        <p className="mt-1 pl-8 text-[11px] text-muted-foreground">
-                          <span className="tabular-nums">
-                            {hpd != null && hpd > 0 && dpm != null && dpm > 0
-                              ? `${formatNumber(hpd)} hrs × ${formatNumber(dpm)} days`
-                              : `${formatNumber(hpm)} hrs`}
-                          </span>{' '}
-                          ={' '}
-                          <span className="font-semibold tabular-nums">
-                            {formatNumber(hpm)} hrs / month
-                          </span>
-                          {rate != null && rate > 0 ? (
-                            <span className="tabular-nums">
-                              {' '}· rate {formatNumber(rate)} × {formatNumber(hpm)} ={' '}
-                              <span className="font-semibold">{formatNumber(calc.items[i]?.lineTotal ?? 0)} SAR / month</span>
-                            </span>
-                          ) : null}
-                        </p>
-                      )
-                    }
-                    return null
-                  })()}
                 </div>
               ))}
             </div>
@@ -1853,9 +1632,9 @@ export function QuotationsView() {
             <div className="rounded-lg border bg-muted/40 p-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Total Hours</p>
+                  <p className="text-[11px] font-medium text-muted-foreground">Total Workers</p>
                   <p className="text-sm font-semibold tabular-nums">
-                    {formatNumber(form.items.reduce((s, it) => s + itemFormHours(it), 0))}
+                    {formatNumber(form.items.reduce((s, it) => s + (parseNum(it.quantity) ?? 0), 0))}
                   </p>
                 </div>
                 <div>
@@ -2099,48 +1878,6 @@ export function QuotationsView() {
           letterheadLoaded.current = true
           setLetterhead(cfg)
         }}
-      />
-
-      {/* ---- hours per month below 100 — confirm before saving ---- */}
-      <ConfirmDialog
-        open={hoursWarning != null}
-        onOpenChange={(o) => {
-          if (!o) setHoursWarning(null)
-        }}
-        onConfirm={async () => {
-          setHoursWarning(null)
-          await doSubmit(
-            form.items.map((it, i) => {
-              const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
-              const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
-              const lineDiscount = Math.max(0, parseNum(it.discount) ?? 0)
-              return {
-                description: it.description.trim(),
-                unit: it.unit.trim() || null,
-                quantity,
-                unitPrice,
-                discount: round2(lineDiscount),
-                lineTotal: round2(quantity * unitPrice - lineDiscount),
-                subText: it.subText.trim() || null,
-                ratePerHour: parseNum(it.ratePerHour),
-                hoursPerMonth: parseNum(it.hoursPerMonth),
-                hoursPerDay: parseNum(it.hoursPerDay),
-                daysPerMonth: parseNum(it.daysPerMonth),
-                index: i + 1,
-              }
-            }),
-            form.clientName.trim(),
-            Math.max(0, parseNum(form.discount) ?? 0)
-          )
-        }}
-        title="Hours per month is very low"
-        item={hoursWarning?.lines.join(' · ')}
-        description={
-          hoursWarning
-            ? `Hours per month is only ${formatNumber(hoursWarning.lowest)}. Is this correct? Confirm to save anyway, or Cancel to go back and fix the working hours (10 hrs × 26 days = 260 hrs is the standard basis).`
-            : undefined
-        }
-        confirmLabel="Save anyway"
       />
 
       {/* ---- Print / preview dialog (saved documents + live drafts) ---- */}

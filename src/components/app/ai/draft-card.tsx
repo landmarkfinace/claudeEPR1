@@ -222,17 +222,12 @@ function computeSummary(draft: AiDraft): DraftSummary {
   const items = Array.isArray(d.items) ? (d.items as Record<string, unknown>[]) : []
   const rows = items.map((it) => {
     const qty = num(it.quantity) || 1
-    const ratePerHour = num(it.ratePerHour)
-    const hoursPerMonth = num(it.hoursPerMonth) || (ratePerHour ? 260 : 0)
-    // unitPrice (monthly amount per worker) — explicit, else rate × hours
-    const unitPrice =
-      num(it.unitPrice) || (ratePerHour ? Math.round(ratePerHour * hoursPerMonth * 100) / 100 : 0)
+    // Rate (SAR) per worker — line total = No. of Workers × Rate
+    const unitPrice = num(it.unitPrice)
     const line = num(it.lineTotal) || Math.round(qty * unitPrice * 100) / 100
     return {
       description: String(it.description ?? '—'),
-      qty: ratePerHour
-        ? `${qty} × ${hoursPerMonth}h @ ${ratePerHour}/h`
-        : String(it.quantity ?? 1),
+      qty: String(it.quantity ?? 1),
       unitPrice,
       lineTotal: line,
     }

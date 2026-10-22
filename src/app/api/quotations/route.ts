@@ -87,32 +87,6 @@ export async function GET(req: NextRequest) {
 
     const sp = req.nextUrl.searchParams
 
-    // Working-hours review: quotations whose HOURLY items fall below
-    // 100 hrs/month. Never changes them — the boss fixes them by hand.
-    if (sp.get('lowHours') === '1') {
-      const rows = await db.quotation.findMany({
-        include: { items: { orderBy: { sr: 'asc' } } },
-        orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
-      })
-      const quotations = rows
-        .map((q) => ({
-          id: q.id,
-          quoteNumber: q.quoteNumber,
-          clientName: q.clientName,
-          status: q.status,
-          items: q.items
-            .filter((it) => it.ratePerHour != null && it.hoursPerMonth != null)
-            .filter((it) => (it.hoursPerMonth ?? 0) > 0 && (it.hoursPerMonth ?? 0) < 100)
-            .map((it) => ({
-              sr: it.sr,
-              description: it.description,
-              hoursPerMonth: round2(it.hoursPerMonth ?? 0),
-            })),
-        }))
-        .filter((q) => q.items.length > 0)
-      return ok({ quotations })
-    }
-
     const p = parsePagination(sp)
     const where: Prisma.QuotationWhereInput = {}
 
