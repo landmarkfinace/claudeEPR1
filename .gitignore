@@ -63,6 +63,11 @@ skills/
 
 # local QA artifacts (screenshots from automated browser testing)
 download/
+qa/
+
+# local runtime artifacts
+server.pid
+*.pid
 
 # sandbox gateway config (environment-specific, not part of the app)
 Caddyfile
