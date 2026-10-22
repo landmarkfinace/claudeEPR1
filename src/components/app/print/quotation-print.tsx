@@ -36,10 +36,12 @@
 // signatures) flows block-by-block onto the last items page while it fits
 // and continues on a fresh page from the TOP (signatures are never stranded
 // alone), and each page's leftover room is handed back to its item rows so
-// short documents fill the A4 nicely. Uploaded signature/stamp artwork is
-// anchored INTO the "Approved By" box on the last page: the signature sits
-// exactly on its line and the stamp inside the dashed circle — they flow with
-// the letter content (always below it).
+// short documents fill the A4 nicely. The APPROVED BY | ACCEPTED BY boxes
+// are ALWAYS pinned to the very bottom of their page (mt-auto) — any
+// leftover space lands between the content and the boxes, so the boxes sit
+// at the foot of the letter on every page. Uploaded signature/stamp artwork
+// is anchored INTO the "Approved By" box: the signature sits exactly on its
+// line and the stamp inside the dashed circle.
 import { Printer, FileSpreadsheet, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -1562,18 +1564,12 @@ export function QuotationDocument({
               ) : null}
 
               {/* SIGNATURES — APPROVED BY | ACCEPTED BY boxes with dashed gold
-                  stamp circles. On a well-filled items page they pin to the
-                  foot (mt-auto); a sparse/roomy final page flows them right
-                  after the content so the leftover space lands at the bottom
-                  (natural document ending, no middle void). */}
+                  stamp circles. ALWAYS pinned to the very bottom of the page
+                  (mt-auto): any leftover room lands between the content and
+                  the boxes, so both boxes sit at the foot of the letter on
+                  every page — matching the asset-placer preview exactly. */}
               {plan.blocks.includes('signatures') ? (
-                <div
-                  className={chunk.length > 0 && plan.roomyTier === 0 ? 'mt-auto' : ''}
-                  style={{
-                    paddingTop:
-                      plan.roomyTier === 2 ? '12mm' : plan.roomyTier === 1 ? '5mm' : '2mm',
-                  }}
-                >
+                <div className="mt-auto" style={{ paddingTop: '2mm' }}>
                   <section className="grid grid-cols-2 gap-[5mm]">
                     {/* APPROVED BY — the company */}
                     <div

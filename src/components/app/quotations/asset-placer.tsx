@@ -249,8 +249,9 @@ export function AssetPlacer({
           <span>
             <span className="font-medium text-foreground">No manual positioning needed.</span>{' '}
             The signature snaps onto its line and the stamp into the circle of the{' '}
-            <span className="font-medium">Approved By</span> box — always at the end of
-            the letter, exactly as previewed. The preview is exactly what prints.
+            <span className="font-medium">Approved By</span> box — both boxes are pinned to
+            the very bottom of the letter, exactly as previewed. The preview is exactly
+            what prints.
           </span>
         </div>
 
