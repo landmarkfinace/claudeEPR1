@@ -222,7 +222,8 @@ function computeSummary(draft: AiDraft): DraftSummary {
   const items = Array.isArray(d.items) ? (d.items as Record<string, unknown>[]) : []
   const rows = items.map((it) => {
     const qty = num(it.quantity) || 1
-    // Rate (SAR) per worker — line total = No. of Workers × Rate
+    // Hourly Rate (SAR) — quotations are rate cards (Hours × rate); the
+    // line total is only computed for the invoice / PO preview totals.
     const unitPrice = num(it.unitPrice)
     const line = num(it.lineTotal) || Math.round(qty * unitPrice * 100) / 100
     return {
@@ -260,6 +261,10 @@ function computeSummary(draft: AiDraft): DraftSummary {
 }
 
 function DocumentPreview({ draft, summary }: { draft: AiDraft; summary: DraftSummary }) {
+  // Quotations are pure rate cards (the boss's rule): Trade / Category ·
+  // Hours · Hourly Rate (SAR) — no line-total column and no
+  // subtotal / VAT / total block.
+  const isQuote = draft.type === 'quotation'
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 pb-3">
@@ -282,9 +287,13 @@ function DocumentPreview({ draft, summary }: { draft: AiDraft; summary: DraftSum
             <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-1.5 text-left font-semibold">Description</th>
-                <th className="px-3 py-1.5 text-right font-semibold">Qty</th>
-                <th className="px-3 py-1.5 text-right font-semibold">Unit Price</th>
-                <th className="px-3 py-1.5 text-right font-semibold">Line Total</th>
+                <th className="px-3 py-1.5 text-right font-semibold">{isQuote ? 'Hours' : 'Qty'}</th>
+                <th className="px-3 py-1.5 text-right font-semibold">
+                  {isQuote ? 'Hourly Rate (SAR)' : 'Unit Price'}
+                </th>
+                {isQuote ? null : (
+                  <th className="px-3 py-1.5 text-right font-semibold">Line Total</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -293,7 +302,9 @@ function DocumentPreview({ draft, summary }: { draft: AiDraft; summary: DraftSum
                   <td className="px-3 py-1.5">{r.description}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{r.qty}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(r.unitPrice)}</td>
-                  <td className="px-3 py-1.5 text-right font-medium tabular-nums">{fmtMoney(r.lineTotal)}</td>
+                  {isQuote ? null : (
+                    <td className="px-3 py-1.5 text-right font-medium tabular-nums">{fmtMoney(r.lineTotal)}</td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -302,12 +313,14 @@ function DocumentPreview({ draft, summary }: { draft: AiDraft; summary: DraftSum
       ) : (
         <p className="text-xs text-muted-foreground">No line items in this draft.</p>
       )}
-      <div className="ml-auto w-full max-w-64 space-y-1 text-[13px]">
-        <Row label="Subtotal (excl. VAT)" value={fmtMoney(summary.subtotal)} />
-        <Row label="VAT 15%" value={fmtMoney(summary.vat)} />
-        <div className="my-1 border-t border-gold/50" />
-        <Row label="Total" value={fmtMoney(summary.total)} bold />
-      </div>
+      {isQuote ? null : (
+        <div className="ml-auto w-full max-w-64 space-y-1 text-[13px]">
+          <Row label="Subtotal (excl. VAT)" value={fmtMoney(summary.subtotal)} />
+          <Row label="VAT 15%" value={fmtMoney(summary.vat)} />
+          <div className="my-1 border-t border-gold/50" />
+          <Row label="Total" value={fmtMoney(summary.total)} bold />
+        </div>
+      )}
       {summary.extra.length > 0 ? (
         <div className="space-y-1 rounded-lg bg-muted/40 p-2.5 text-xs">
           {summary.extra.map((e) => (
@@ -341,18 +354,25 @@ export function draftToText(draft: AiDraft): string {
     return `${head}\n\n${String(d.body ?? '')}`
   }
   const s = computeSummary(draft)
+  const isQuote = draft.type === 'quotation'
   const lines: string[] = []
   lines.push(`${s.partyLabel}: ${s.party}`)
   if (d.subject) lines.push(`Subject: ${String(d.subject)}`)
   lines.push('')
-  lines.push('Description\tQty\tUnit Price\tLine Total')
+  lines.push(isQuote ? 'Description\tHours\tHourly Rate (SAR)' : 'Description\tQty\tUnit Price\tLine Total')
   for (const r of s.rows) {
-    lines.push(`${r.description}\t${r.qty}\t${r.unitPrice.toFixed(2)}\t${r.lineTotal.toFixed(2)}`)
+    lines.push(
+      isQuote
+        ? `${r.description}\t${r.qty}\t${r.unitPrice.toFixed(2)}`
+        : `${r.description}\t${r.qty}\t${r.unitPrice.toFixed(2)}\t${r.lineTotal.toFixed(2)}`
+    )
   }
-  lines.push('')
-  lines.push(`Subtotal: ${s.subtotal.toFixed(2)}`)
-  lines.push(`VAT: ${s.vat.toFixed(2)}`)
-  lines.push(`Total: ${s.total.toFixed(2)}`)
+  if (!isQuote) {
+    lines.push('')
+    lines.push(`Subtotal: ${s.subtotal.toFixed(2)}`)
+    lines.push(`VAT: ${s.vat.toFixed(2)}`)
+    lines.push(`Total: ${s.total.toFixed(2)}`)
+  }
   for (const e of s.extra) lines.push(`${e.label}: ${e.value}`)
   return lines.join('\n')
 }
@@ -364,19 +384,28 @@ export function draftToMarkdown(draft: AiDraft): string {
     return `${head}\n\n${String(d.body ?? '')}`
   }
   const s = computeSummary(draft)
+  const isQuote = draft.type === 'quotation'
   const lines: string[] = [`**${s.partyLabel}:** ${s.party}`]
   if (d.subject) lines.push(`**Subject:** ${String(d.subject)}`)
   lines.push('')
   if (s.rows.length) {
-    lines.push('| Description | Qty | Unit Price | Line Total |')
-    lines.push('|---|---:|---:|---:|')
-    for (const r of s.rows) {
-      lines.push(`| ${r.description} | ${r.qty} | ${r.unitPrice.toFixed(2)} | ${r.lineTotal.toFixed(2)} |`)
+    if (isQuote) {
+      lines.push('| Description | Hours | Hourly Rate (SAR) |')
+      lines.push('|---|---:|---:|')
+      for (const r of s.rows) {
+        lines.push(`| ${r.description} | ${r.qty} | ${r.unitPrice.toFixed(2)} |`)
+      }
+    } else {
+      lines.push('| Description | Qty | Unit Price | Line Total |')
+      lines.push('|---|---:|---:|---:|')
+      for (const r of s.rows) {
+        lines.push(`| ${r.description} | ${r.qty} | ${r.unitPrice.toFixed(2)} | ${r.lineTotal.toFixed(2)} |`)
+      }
+      lines.push('')
+      lines.push(`**Subtotal:** SAR ${s.subtotal.toFixed(2)}  `)
+      lines.push(`**VAT:** SAR ${s.vat.toFixed(2)}  `)
+      lines.push(`**Total:** SAR ${s.total.toFixed(2)}`)
     }
-    lines.push('')
-    lines.push(`**Subtotal:** SAR ${s.subtotal.toFixed(2)}  `)
-    lines.push(`**VAT:** SAR ${s.vat.toFixed(2)}  `)
-    lines.push(`**Total:** SAR ${s.total.toFixed(2)}`)
   }
   for (const e of s.extra) lines.push(`\n**${e.label}:** ${e.value}`)
   return lines.join('\n')

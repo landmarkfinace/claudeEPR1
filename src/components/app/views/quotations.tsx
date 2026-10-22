@@ -40,7 +40,6 @@ import {
 
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
-import { amountInWords } from '@/lib/amount-words'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
 import type { ClientRow, LetterheadConfig, Paginated, QuotationAssetRow, QuotationRow } from '@/lib/types'
@@ -77,7 +76,6 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
 
 import { ConfirmDelete } from '../shared/confirm-delete'
 import { DataTablePagination } from '../shared/data-table-pagination'
@@ -560,7 +558,6 @@ export function QuotationsView() {
   }, [form, defaultVatPercent])
 
   const money = (n: number) => formatMoney(n, currency)
-  const vatPercentLabel = Math.round(calc.vatRate * 100)
 
   async function handleSubmit() {
     // Friendly client-side validation before hitting the API
@@ -909,7 +906,7 @@ export function QuotationsView() {
     <div className="flex flex-col gap-4 sm:gap-6">
       <PageHeader
         title="Quotations"
-        description={`Prepare price quotations for clients — items, ${vatPercentLabel}% VAT and totals are computed automatically.`}
+        description="Prepare manpower rate quotations — Trade / Category, Hours and Hourly Rate (SAR) per line."
       >
         {canEdit ? (
           <Button variant="outline" size="sm" onClick={() => setLetterheadOpen(true)}>
@@ -1301,7 +1298,7 @@ export function QuotationsView() {
             <DialogTitle>{editing ? `Edit Quotation ${editing.quoteNumber}` : 'New Quotation'}</DialogTitle>
             <DialogDescription>
               {editing
-                ? 'Update the quotation details and line items. Totals are recomputed on save.'
+                ? 'Update the quotation details, hours and hourly rates.'
                 : 'Fill in the client, dates and line items — the quote number is generated automatically.'}
             </DialogDescription>
           </DialogHeader>
@@ -1401,19 +1398,6 @@ export function QuotationsView() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-2">
-                <Label htmlFor="quote-contract-months">Contract Months</Label>
-                <Input
-                  id="quote-contract-months"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={form.contractMonths}
-                  onChange={(e) => setField('contractMonths', e.target.value)}
-                  placeholder="12"
-                  className="tabular-nums"
-                />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="quote-mobilization">Mobilization</Label>
                 <Input
                   id="quote-mobilization"
@@ -1423,11 +1407,6 @@ export function QuotationsView() {
                 />
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground sm:col-span-2">
-              {form.contractMonths.trim() && parseInt(form.contractMonths, 10) > 0
-                ? `Contract value row: ${money(calc.total)} × ${parseInt(form.contractMonths, 10)} months = ${money(round2(calc.total * parseInt(form.contractMonths, 10)))}`
-                : 'Contract Months drives the “Contract Value (N Months) incl. VAT” row in the totals box.'}
-            </p>
             <div className="space-y-2">
               <Label htmlFor="quote-issue-date">
                 Issue Date <span className="text-destructive">*</span>
@@ -1492,45 +1471,6 @@ export function QuotationsView() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="quote-vat" className="flex items-center justify-between">
-                  VAT %
-                  <span className="flex items-center gap-1.5">
-                    <Switch
-                      checked={vatPercentLabel > 0}
-                      onCheckedChange={(v) => setField('vatPercent', v ? String(defaultVatPercent) : '0')}
-                      aria-label="Apply VAT"
-                      className="scale-90"
-                    />
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      {vatPercentLabel > 0 ? 'VAT' : 'No VAT'}
-                    </span>
-                  </span>
-                </Label>
-                <Input
-                  id="quote-vat"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.5"
-                  value={form.vatPercent}
-                  onChange={(e) => setField('vatPercent', e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="quote-discount">Discount (overall)</Label>
-                <Input
-                  id="quote-discount"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={form.discount}
-                  onChange={(e) => setField('discount', e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
           </div>
 
           {/* ---- Line items editor ---- */}
@@ -1539,7 +1479,7 @@ export function QuotationsView() {
               <div>
                 <Label className="text-sm">Line Items</Label>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Line totals, VAT and the grand total update live as you type.
+                  Trade / Category · Hours · Hourly Rate (SAR) — printed exactly as entered, no totals.
                 </p>
               </div>
               <Button
@@ -1589,23 +1529,24 @@ export function QuotationsView() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  {/* Rate card — Amount = No. of Workers × Rate (SAR), live. */}
-                  <div className="mt-2 grid grid-cols-3 gap-2 pl-8">
+                  {/* Rate line — Hours · Hourly Rate (SAR), exactly the two
+                      numeric columns the printed table shows. */}
+                  <div className="mt-2 grid grid-cols-2 gap-2 pl-8">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">No. of Workers</Label>
+                      <Label className="text-[11px] text-muted-foreground">Hours</Label>
                       <Input
                         type="number"
                         min={1}
                         step="1"
                         value={it.quantity}
                         onChange={(e) => setItemField(it.key, 'quantity', e.target.value)}
-                        placeholder="1"
+                        placeholder="e.g. 260"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} number of workers`}
+                        aria-label={`Item ${i + 1} hours`}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Rate (SAR)</Label>
+                      <Label className="text-[11px] text-muted-foreground">Hourly Rate (SAR)</Label>
                       <Input
                         type="number"
                         min={0}
@@ -1614,55 +1555,12 @@ export function QuotationsView() {
                         onChange={(e) => setItemField(it.key, 'unitPrice', e.target.value)}
                         placeholder="0.00"
                         className="h-9 tabular-nums"
-                        aria-label={`Item ${i + 1} rate in SAR`}
+                        aria-label={`Item ${i + 1} hourly rate in SAR`}
                       />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Amount (SAR)</Label>
-                      <p className="flex h-9 items-center rounded-md border bg-background px-2.5 text-sm font-semibold tabular-nums">
-                        {formatNumber(calc.items[i]?.lineTotal ?? 0)}
-                      </p>
                     </div>
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* ---- Live totals footer ---- */}
-            <div className="rounded-lg border bg-muted/40 p-3">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Total Workers</p>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {formatNumber(form.items.reduce((s, it) => s + (parseNum(it.quantity) ?? 0), 0))}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Subtotal</p>
-                  <p className="text-sm font-semibold tabular-nums">{money(calc.subtotal)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Discount</p>
-                  <p className="text-sm font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                    -{money(calc.discount)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">VAT ({vatPercentLabel}%)</p>
-                  <p className="text-sm font-semibold tabular-nums">{money(calc.vatAmount)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium text-muted-foreground">Total</p>
-                  <p className="text-base font-bold tabular-nums">{money(calc.total)}</p>
-                </div>
-              </div>
-              <p className="mt-2 border-t pt-2 text-[11px] italic text-muted-foreground">
-                <span className="font-semibold not-italic">Amount in words:</span>{' '}
-                {amountInWords(calc.total, currency)}
-                {form.contractMonths.trim() && parseInt(form.contractMonths, 10) > 0
-                  ? ` · Contract value (${parseInt(form.contractMonths, 10)} months): ${money(round2(calc.total * parseInt(form.contractMonths, 10)))}`
-                  : ''}
-              </p>
             </div>
           </div>
 

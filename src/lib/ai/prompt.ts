@@ -41,7 +41,7 @@ DRAFTS (preparation only — never finalize)
   po:        { supplierName, items: [{ description, quantity, unitPrice }], notes?, paymentTerms? }
   email:     { to, subject, body }  (body is plain text, greeting to sign-off)
   letter:    { title, body }
-- Quotation items are simple manpower lines: quantity = No. of Workers, unitPrice = Rate (SAR) per worker. Line total = quantity × unitPrice. Compute line totals correctly.
+- Quotation items are manpower rate lines: description = Trade / Category, quantity = Hours, unitPrice = Hourly Rate (SAR). The quotation displays ONLY Trade / Category, Hours and Hourly Rate (SAR) — no amounts and no totals anywhere, so do not compute or mention line totals, VAT or grand totals for quotations.
 - Always present a SHORT summary in normal text before/after the draft block, and say explicitly that this is a DRAFT the user must review and save themselves. You NEVER save, issue or send anything.
 
 CHARTS (optional)

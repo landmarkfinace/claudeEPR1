@@ -1,15 +1,16 @@
 // Excel export — GET /api/quotations/[id]/excel.
-// Streams a professionally laid-out .xlsx of the full quotation document
-// (company header, quote meta, client block, items with per-line discounts,
-// totals + VAT, amount in words, notes & terms) built with SheetJS.
-// Requires quotations.view. Money cells are real numbers with
+// Streams a professionally laid-out .xlsx of the quotation document
+// (company header, quote meta, client block, rate-card items, notes &
+// terms) built with SheetJS. Mirrors the printed quotation: only
+// Trade / Category · Hours · Hourly Rate (SAR) — NO amount column and NO
+// totals / VAT / amount-in-words anywhere (the boss's rule).
+// Requires quotations.view. Rate cells are real numbers with
 // #,##0.00 formatting so Excel can compute on them.
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { db } from '@/lib/db'
-import { amountInWords } from '@/lib/amount-words'
 import { parseTerms } from '@/lib/quotation-terms'
-import { formatDate, round2 } from '@/lib/format'
+import { formatDate } from '@/lib/format'
 import { serverError, notFound, requirePermission, isResponse } from '@/lib/api-helpers'
 
 type Params = { params: Promise<{ id: string }> }
@@ -44,12 +45,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const settingRows = await db.setting.findMany()
     const settings: Record<string, string> = {}
     for (const r of settingRows) settings[r.key] = r.value
-    const currency = settings.currency || 'SAR'
     const companyName = settings.companyName || 'Landmark Inter Gulf'
 
     const items = [...quotation.items].sort((a, b) => a.sr - b.sr)
-    const netTotal = round2(quotation.subtotal - quotation.discount)
-    const vatPercent = Math.round(quotation.vatRate * 100)
 
     // ── Build the sheet as an array-of-arrays, then merge title cells ──
     const aoa: (string | number | null)[][] = []
@@ -106,43 +104,18 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
     aoa.push([null])
 
-    // Items table — one simple manpower layout for every quotation:
-    // Sr | Trade | No. of Workers | Rate (SAR) | Amount (SAR)
-    // Amount = No. of Workers × Rate (SAR). No hourly/monthly basis.
+    // Items table — the same rate card the printed quotation shows:
+    // Trade / Category | Hours | Hourly Rate (SAR). No amount column,
+    // no total row — no monetary totals anywhere on the export.
     const headerRowIndex = aoa.length
-    aoa.push(['Sr', 'Trade', 'No. of Workers', 'Rate (SAR)', 'Amount (SAR)'])
+    aoa.push(['Trade / Category', 'Hours', 'Hourly Rate (SAR)'])
     for (const it of items) {
       aoa.push([
-        it.sr,
         it.subText ? `${it.description} (${it.subText})` : it.description,
-        round2(it.quantity),
-        round2(it.unitPrice),
-        round2(it.lineTotal),
+        it.quantity,
+        it.unitPrice,
       ])
     }
-    const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
-    aoa.push(['', 'Total', totalWorkers, '', round2(quotation.subtotal)])
-    aoa.push([null])
-
-    // Totals — label/value columns follow the item table width
-    const totalStart = aoa.length
-    const labelCol = 2
-    const valCol = 4
-    const totalRow = (label: string, value: number): Array<string | number> => {
-      const row: Array<string | number> = []
-      for (let c = 0; c < valCol; c++) row.push(c === labelCol ? label : '')
-      row.push(value)
-      return row
-    }
-    aoa.push(totalRow('Subtotal', quotation.subtotal))
-    if (quotation.discount > 0) aoa.push(totalRow('Discount', -quotation.discount))
-    aoa.push(totalRow('Net Amount', netTotal))
-    aoa.push(totalRow(`VAT (${vatPercent}%)`, quotation.vatAmount))
-    aoa.push(totalRow('TOTAL', quotation.total))
-    if (quotation.contractMonths && quotation.contractMonths > 0) {
-      aoa.push(totalRow(`Contract Value (${quotation.contractMonths} Months) incl. VAT`, round2(quotation.total * quotation.contractMonths)))
-    }
-    aoa.push([`Amount in words: ${amountInWords(quotation.total, currency)}`])
     aoa.push([null])
 
     // Notes & terms
@@ -179,32 +152,25 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     const sheet = XLSX.utils.aoa_to_sheet(aoa)
     const merges: XLSX.Range[] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
-      { s: { r: 5, c: 0 }, e: { r: 5, c: 6 } },
-      { s: { r: totalStart + 5, c: 0 }, e: { r: totalStart + 5, c: 6 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+      { s: { r: 5, c: 0 }, e: { r: 5, c: 2 } },
     ]
     sheet['!merges'] = merges
     sheet['!cols'] = [
-      { wch: 5 }, // Sr
-      { wch: 52 }, // Trade
-      { wch: 14 }, // No. of Workers
-      { wch: 16 }, // Rate (SAR)
-      { wch: 16 }, // Amount (SAR)
+      { wch: 52 }, // Trade / Category
+      { wch: 14 }, // Hours
+      { wch: 18 }, // Hourly Rate (SAR)
     ]
 
-    // Number formatting for money/qty columns on item rows
-    const numFrom = 2
-    const numTo = 4
+    // Number formatting for the Hours / Rate columns on item rows
+    const numFrom = 1
+    const numTo = 2
     for (let r = headerRowIndex + 1; r < headerRowIndex + 1 + items.length; r++) {
       for (let c = numFrom; c <= numTo; c++) {
         const cell = sheet[XLSX.utils.encode_cell({ r, c })]
         if (cell && cell.t === 'n') cell.z = '#,##0.00'
       }
-    }
-    for (const r of [totalStart, totalStart + 1, totalStart + 2, totalStart + 3, totalStart + 4]) {
-      const cell = sheet[XLSX.utils.encode_cell({ r, c: valCol })]
-      if (cell && cell.t === 'n') cell.z = '#,##0.00'
     }
 
     const wb = XLSX.utils.book_new()

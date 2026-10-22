@@ -13,12 +13,12 @@
 //     already carries our company block): left column = client name (bold),
 //     Attention, Contact; right column = Address, VAT/C.R. Tight rows, no
 //     dashed separators.
-//   • Centred title line, then the items table — 5 simple manpower columns
-//     (# · Trade/Category with inline Arabic trade name · No. of Workers ·
-//     Rate (SAR) · Amount (SAR)), rows only as tall as the text (~2mm
-//     padding), the workers/amount TOTAL row. Amount = Workers × Rate —
-//     no hourly/monthly basis anywhere.
-//   • AMOUNT IN WORDS box (left) beside the totals box (right).
+//   • Centred title line, then the items table — 3 simple manpower columns
+//     (Trade/Category with inline Arabic trade name · Hours · Hourly Rate
+//     (SAR)), rows only as tall as the text (~2mm padding). NO amount
+//     column, NO total row, NO totals box and NO amount-in-words anywhere —
+//     the quotation is a pure rate card (the boss's rule: remove every
+//     monetary total / summary section).
 //   • TERMS & CONDITIONS ◆ الشروط والأحكام — full width, 2 columns, 7.5pt,
 //     bold item titles (replaces the old Scope & Terms card).
 //   • APPROVED BY | ACCEPTED BY signature boxes — the approved-by name and
@@ -28,11 +28,11 @@
 //     with ≥3mm clear above and below.
 //
 // Pagination: EXPLICIT A4 pages (210 × 296.5mm), a conservative estimator
-// chunks items across pages, the tail flows block-by-block — words+totals
-// after the table, then TERMS & CONDITIONS + signatures placed TOGETHER
-// (they move to a fresh page as a pair; a single T&C item is never split
-// and the signatures are never stranded alone). Item rows are NEVER
-// stretched — each row is exactly as tall as its text.
+// chunks items across pages, the tail flows block-by-block — TERMS &
+// CONDITIONS + signatures placed TOGETHER (they move to a fresh page as a
+// pair; a single T&C item is never split and the signatures are never
+// stranded alone). Item rows are NEVER stretched — each row is exactly as
+// tall as its text.
 import { useEffect, useState } from 'react'
 import { Printer, FileDown, FileSpreadsheet, X } from 'lucide-react'
 
@@ -44,8 +44,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
-import { amountInWordsBoth } from '@/lib/arabic-words'
-import { formatMoney, formatNumber, round2 } from '@/lib/format'
+import { formatNumber } from '@/lib/format'
 import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { api } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
@@ -94,10 +93,9 @@ const DARK_NAVY = '#0C1D33'
 const GOLD = '#C0934C'
 const LIGHT_GOLD = '#E1B169'
 const DARK_GOLD = '#8E6420'
-const LIGHT_BG = '#F2F5FA'
+const MUTED = '#6B7488'
 const BORDER = '#DDE3EC'
 const ROW_SEP = '#E8ECF2'
-const MUTED = '#6B7488'
 // print-spec ink: field values / table body
 const INK = '#1D2433'
 // print-spec soft ink: field labels, notes, footnotes
@@ -261,7 +259,7 @@ function StatusStamp({ status }: { status: string }) {
 // ── Flow-fill pagination ────────────────────────────────────────────────────
 
 /** Tail sections that flow after the items table, in document order. */
-type TailBlock = 'wordsTotals' | 'terms' | 'signatures'
+type TailBlock = 'terms' | 'signatures'
 
 /** One explicit A4 page: its item chunk and the tail blocks rendered on it. */
 type PagePlan = {
@@ -277,9 +275,6 @@ function page1FixedMm(toMm: number): number {
   // table mt 1.5 · thead 8.6 — calibrated against real Chrome A4 renders
   return 12.2 + 15.2 + toMm + 5.6 + 1.5 + 8.6
 }
-const TOTAL_ROW_MM = 6.5
-// words+totals row incl. its 2mm top margin
-const WORDS_TOTALS_MM = 34.5
 // signature boxes + ≥3mm gap + note line
 const SIG_NOTE_MM = 29
 // the T&C + signature pair may ride into the 4mm foot reserve — the note
@@ -290,10 +285,9 @@ const PAIR_TOLERANCE_MM = 4 // small placement headroom (wrap variance)
  * Flow-fill pagination:
  *   1. chunk items across pages (conservative row estimates → safe breaks;
  *      the thead repeats on every page);
- *   2. place the words+totals row after the last items chunk while it fits;
- *   3. place TERMS & CONDITIONS + the signature boxes TOGETHER — both fit on
- *      the current page, or both move to a fresh page (a T&C item is never
- *      split across pages; the signatures are never stranded alone).
+ *   2. place TERMS & CONDITIONS + the signature boxes TOGETHER — both fit
+ *      on the current page, or both move to a fresh page (a T&C item is
+ *      never split across pages; the signatures are never stranded alone).
  */
 function planPages(
   items: DocItemRow[],
@@ -324,43 +318,24 @@ function planPages(
   }
   chunks.push(cur)
 
-  // 2) + 3) flow the tail onto the last items page
+  // 2) flow the tail onto the last items page — the T&C + signature pair
+  // (both heights include their own margins).
   const cap = chunks.length === 1 ? availFirst : availRest
   const lastRows = chunks[chunks.length - 1].reduce((s, it) => s + rowHeightMm(it), 0)
-  let tailUsed = lastRows + (chunks[chunks.length - 1].length > 0 ? TOTAL_ROW_MM : 0)
 
   const blocks: TailBlock[] = []
   const deferred: TailBlock[] = []
-  // When the table itself continues past page 1, the boss's rule is "keep
-  // totals + signatures together on the last page" — so the words+totals row
-  // travels WITH the T&C + signature pair. On a single-chunk table it may
-  // stay on the items page while the pair flows on.
-  const singleChunk = chunks.length === 1
-  if (singleChunk && tailUsed + WORDS_TOTALS_MM <= cap) {
-    blocks.push('wordsTotals')
-    tailUsed += WORDS_TOTALS_MM
-  } else if (!singleChunk) {
-    // handled together with the pair below
-  } else {
-    deferred.push('wordsTotals')
-  }
-  // TERMS & CONDITIONS + signatures move together as a pair (both heights
-  // include their own margins). On multi-chunk tables the words+totals row
-  // is placed with them — all three, or none.
-  const wordsCost = singleChunk ? 0 : WORDS_TOTALS_MM
-  if (tailUsed + wordsCost + termsMm + SIG_NOTE_MM <= cap + PAIR_TOLERANCE_MM) {
-    if (wordsCost) blocks.push('wordsTotals')
+  if (lastRows + termsMm + SIG_NOTE_MM <= cap + PAIR_TOLERANCE_MM) {
     blocks.push('terms', 'signatures')
   } else {
-    if (!singleChunk) deferred.push('wordsTotals')
     deferred.push('terms', 'signatures')
   }
 
   const pages: PagePlan[] = chunks.map((c) => ({ items: c, blocks: [] as TailBlock[] }))
   pages[pages.length - 1].blocks = blocks
   if (deferred.length > 0) {
-    // a fresh page starting at the TOP: words+totals (when deferred), then
-    // the T&C box, then the signatures — never split, never stranded.
+    // a fresh page starting at the TOP: the T&C box, then the signatures —
+    // never split, never stranded.
     pages.push({ items: [], blocks: deferred })
   }
   return pages
@@ -446,7 +421,7 @@ export function QuotationPrintDialog({
       >
         <DialogTitle className="sr-only">Quotation print preview</DialogTitle>
         <DialogDescription className="sr-only">
-          Printable A4 quotation with letterhead zones, header row, info bar, TO box, line items, amount in words, totals, terms and conditions, and signature boxes.
+          Printable A4 quotation with letterhead zones, header row, info bar, TO box, line items, terms and conditions, and signature boxes.
         </DialogDescription>
 
         {/* Top button bar — hidden when printing */}
@@ -462,9 +437,7 @@ export function QuotationPrintDialog({
             </p>
             <p className="truncate text-xs text-muted-foreground">
               A4 · Compact one-page layout · EN/AR labels
-              {quotation
-                ? ` · ${quotation.clientName} · ${formatMoney(quotation.total, settings.currency || 'SAR')}`
-                : ''}
+              {quotation ? ` · ${quotation.clientName}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -539,28 +512,22 @@ export function QuotationDocument({
   const q = quotation
   const companyName = settings.companyName || 'Landmark Inter Gulf'
   const client = q.client
-  const vatPercent = Math.round(q.vatRate * 100)
   const items = q.items ?? []
   // Visible signature/stamp artwork — anchored INTO the "Approved By" box
   // (signature sits exactly on its line, stamp beside the name/date block).
   const assets = (q.assets ?? []).filter((a) => a.visible)
   const signatureAsset = assets.find((a) => a.type === 'signature') ?? null
   const stampAsset = assets.find((a) => a.type === 'stamp') ?? null
-  const netTotal = round2(q.subtotal - q.discount)
   const money = (n: number) => formatNumber(n) // plain numbers — SAR lives in headers only
   const geo = geometryFor(letterhead)
 
-  // Simple manpower basis: Rate (SAR) = unit price per worker,
-  // Amount = No. of Workers × Rate (SAR). No hourly/monthly basis.
-  const totalWorkers = round2(items.reduce((s, it) => s + it.quantity, 0))
+  // Pure rate card: Trade / Category · Hours · Hourly Rate (SAR) — NO
+  // amounts, NO totals, NO amount-in-words anywhere on the document.
   const terms = parseTerms(q.terms)
-  const contractMonths = q.contractMonths && q.contractMonths > 0 ? q.contractMonths : null
-  const contractValue = contractMonths ? round2(q.total * contractMonths) : null
   const subjectLine = (q.subject || 'Manpower Supply Proposal').toUpperCase()
   // one-line signature-box title — the company's first name word keeps the
   // "APPROVED BY · …" header on a single line even with long company names
   const approverLabel = companyName.split(/\s+/)[0] || companyName
-  const words = amountInWordsBoth(q.total, currency)
   const currencyAr = CURRENCY_AR[currency] ?? ''
   const printedAt = new Date()
 
@@ -574,9 +541,6 @@ export function QuotationDocument({
   const termsMm = termsHeightMm(terms)
   const toMm = toHeightMm(q)
   const plans = planPages(items, geo.topMm, geo.bottomMm, termsMm, toMm)
-  // The last page that actually carries items — the table's TOTAL row
-  // goes there.
-  const lastItemsPageIdx = plans.reduce((acc, p, i) => (p.items.length > 0 ? i : acc), 0)
 
   // letterhead artwork layers (per the configured mode)
   const hasFullArt = letterhead.mode === 'full' && letterhead.fullPageImage
@@ -591,8 +555,6 @@ export function QuotationDocument({
   const th = 'px-1 py-[2px] text-center align-middle leading-[3.6mm]'
   const td = 'px-1 py-[1.4mm] align-top text-[9pt] leading-[4.1mm] text-[#1D2433]'
   const tdR = `${td} text-right tabular-nums`
-  // TOTAL row cells — 1mm vertical padding keeps the row at ~6.5mm
-  const tdT = 'px-1 py-[1mm] align-middle text-[9.5pt] leading-[4.4mm] text-[#1D2433]'
 
   /** The bottom note line — computer-generated note + Page X of Y in ONE
    *  line, ≥3mm clear of the signature boxes above and the letterhead
@@ -993,17 +955,12 @@ export function QuotationDocument({
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
                     <colgroup>
-                      <col style={{ width: '6%' }} />
-                      <col style={{ width: '38%' }} />
-                      <col style={{ width: '16%' }} />
-                      <col style={{ width: '20%' }} />
-                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '56%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '26%' }} />
                     </colgroup>
                     <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
                       <tr>
-                        <th className={th}>
-                          <p className="text-[8pt] font-bold text-white">#</p>
-                        </th>
                         <th className={`${th} text-left`}>
                           <p className="text-[8pt] font-bold text-white">Trade / Category</p>
                           <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
@@ -1011,21 +968,15 @@ export function QuotationDocument({
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[8pt] font-bold text-white">No. of Workers</p>
+                          <p className="text-[8pt] font-bold text-white">Hours</p>
                           <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                            عدد العمال
+                            الساعات
                           </p>
                         </th>
                         <th className={th}>
-                          <p className="text-[8pt] font-bold text-white">Rate (SAR)</p>
+                          <p className="text-[8pt] font-bold text-white">Hourly Rate (SAR)</p>
                           <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                            السعر
-                          </p>
-                        </th>
-                        <th className={th}>
-                          <p className="text-[8pt] font-bold text-white">Amount (SAR)</p>
-                          <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                            المبلغ
+                            السعر بالساعة
                           </p>
                         </th>
                       </tr>
@@ -1035,7 +986,7 @@ export function QuotationDocument({
                         <tr>
                           <td
                             className={`${td} border-b py-2 text-center text-[#4A5468]`}
-                            colSpan={5}
+                            colSpan={3}
                             style={{ borderColor: ROW_SEP }}
                           >
                             No line items yet
@@ -1050,15 +1001,6 @@ export function QuotationDocument({
                               className="break-inside-avoid"
                               style={{ borderBottom: `0.3mm solid ${ROW_SEP}` }}
                             >
-                              <td className={`${td} text-center`}>
-                                {/* index inside a thin gold ring — the template's touch */}
-                                <span
-                                  className="inline-flex h-[17px] w-[17px] items-center justify-center rounded-full border-[1.5px] text-[8pt] font-bold tabular-nums"
-                                  style={{ borderColor: GOLD, color: NAVY }}
-                                >
-                                  {it.sr}
-                                </span>
-                              </td>
                               <td className={td}>
                                 <p className="break-words text-[9pt] font-bold leading-[1.15]" style={{ color: INK }}>
                                   {it.description}
@@ -1088,182 +1030,17 @@ export function QuotationDocument({
                               <td className={`${tdR} font-bold`} style={{ color: INK }}>
                                 {money(it.unitPrice)}
                               </td>
-                              <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                {money(it.lineTotal)}
-                              </td>
                             </tr>
                           )
                         })
                       )}
-                      {/* total row on the last items chunk — totals the
-                          workers and amount columns */}
-                      {chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
-                        <tr
-                          className="break-inside-avoid"
-                          style={{ background: LIGHT_BG, borderTop: `0.6mm solid ${NAVY}` }}
-                        >
-                          <td className={td} />
-                          <td
-                            className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
-                            style={{ color: NAVY }}
-                          >
-                            Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
-                          </td>
-                          <td
-                            className={`${tdT} text-center font-extrabold tabular-nums`}
-                            style={{ color: NAVY }}
-                          >
-                            {totalWorkers.toLocaleString('en-US')}
-                          </td>
-                          <td className={td} />
-                          <td
-                            className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
-                            style={{ color: NAVY }}
-                          >
-                            {money(q.subtotal)}
-                          </td>
-                        </tr>
-                      ) : null}
                     </tbody>
                   </table>
                 </div>
               ) : null}
 
               {/* ── tail blocks — flow after the items table, page by page ── */}
-              {plan.blocks.includes('wordsTotals') ? (
-                /* AMOUNT IN WORDS (left) beside the totals box (right) */
-                <section className="mt-[1.5mm] grid grid-cols-[1fr_76mm] items-start gap-[2.5mm]">
-                  <div
-                    className="rounded-lg border px-[3mm] py-[2mm]"
-                    style={{ borderColor: BORDER, background: 'white' }}
-                  >
-                    <p
-                      className="text-[7.5pt] font-bold uppercase leading-[3.8mm] tracking-[0.3pt]"
-                      style={{ color: DARK_GOLD }}
-                    >
-                      Amount in Words{' '}
-                      <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-                        المبلغ كتابةً
-                      </span>
-                      :
-                    </p>
-                    <p className="mt-[0.8mm] break-words text-[9pt] font-semibold leading-[4mm]" style={{ color: INK }}>
-                      {words.en}
-                    </p>
-                    <p lang="ar" dir="rtl" className="mt-[0.5mm] break-words text-[9pt] leading-[4.2mm]" style={{ color: INK }}>
-                      {words.ar}
-                    </p>
-                  </div>
 
-                  {/* totals box (right) */}
-                  <div
-                    className="rounded-lg border"
-                    style={{ borderColor: BORDER, background: 'white' }}
-                  >
-                    <div
-                      className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-t-[7px] border-b px-[3mm] py-[1mm]"
-                      style={{ borderColor: BORDER, background: LIGHT_BG }}
-                    >
-                      <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                        Subtotal{' '}
-                        <span lang="ar" dir="rtl" className="text-[7.5pt]">
-                          المجموع
-                        </span>
-                      </span>
-                      <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
-                        {money(q.subtotal)}
-                      </span>
-                    </div>
-                    <p className="px-[3mm] py-[0.2mm] text-right text-[7pt] leading-[3.2mm]" style={{ color: INK_SOFT }}>
-                      excl. VAT · {currency}
-                    </p>
-                    {q.discount > 0 ? (
-                      <>
-                        <div
-                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1.5mm]"
-                          style={{ borderColor: BORDER, background: 'white' }}
-                        >
-                          <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                            Discount <span lang="ar" dir="rtl" className="text-[7.5pt]">الخصم</span>
-                          </span>
-                          <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.4mm] text-rose-700">
-                            -{money(q.discount)}
-                          </span>
-                        </div>
-                        <div
-                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1.5mm]"
-                          style={{ borderColor: BORDER, background: 'white' }}
-                        >
-                          <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                            Net Amount <span lang="ar" dir="rtl" className="text-[7.5pt]">الصافي</span>
-                          </span>
-                          <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
-                            {money(netTotal)}
-                          </span>
-                        </div>
-                      </>
-                    ) : null}
-                    <div
-                      className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1mm]"
-                      style={{ borderColor: BORDER, background: LIGHT_BG }}
-                    >
-                      <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                        VAT ({vatPercent}%){' '}
-                        <span lang="ar" dir="rtl" className="text-[7.5pt]">
-                          ضريبة القيمة المضافة
-                        </span>
-                      </span>
-                      <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
-                        {money(q.vatAmount)}
-                      </span>
-                    </div>
-                    {/* TOTAL — navy row, white label, gold amount */}
-                    <div
-                      className="border-b px-[3mm] py-[1mm]"
-                      style={{ borderColor: BORDER, background: DARK_NAVY }}
-                    >
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                        <span className="text-[9.5pt] font-extrabold uppercase leading-[4.4mm] tracking-[0.3pt] text-white">
-                          Total{' '}
-                          <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-                            الإجمالي
-                          </span>
-                        </span>
-                        <span
-                          className="text-[13pt] font-extrabold tabular-nums leading-[4.6mm]"
-                          style={{ color: LIGHT_GOLD }}
-                        >
-                          {money(q.total)}
-                        </span>
-                      </div>
-                      <p className="text-right text-[7.5pt] font-semibold leading-[3.2mm] text-white">
-                        incl. VAT · {currency}
-                      </p>
-                    </div>
-                    {contractMonths && contractValue != null ? (
-                      <div
-                        className="flex flex-wrap items-baseline justify-between gap-x-2 px-[3mm] py-[1.5mm]"
-                        style={{ background: LIGHT_BG }}
-                      >
-                        <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
-                          Contract Value{' '}
-                          <span lang="ar" dir="rtl" className="text-[7.5pt]">
-                            قيمة العقد
-                          </span>
-                        </span>
-                        <span className="text-[9.5pt] font-extrabold tabular-nums leading-[4.4mm]" style={{ color: NAVY }}>
-                          {money(contractValue)}
-                        </span>
-                      </div>
-                    ) : null}
-                    {contractMonths && contractValue != null ? (
-                      <p className="px-[3mm] pb-[1.5mm] text-right text-[7.5pt] leading-[3.4mm]" style={{ color: INK_SOFT }}>
-                        {contractMonths} months · incl. VAT · {currency}
-                      </p>
-                    ) : null}
-                  </div>
-                </section>
-              ) : null}
               {/* TERMS & CONDITIONS — full width, 2 columns, 7.5pt, bold
                   item titles. Replaces the old Scope & Terms card. */}
               {plan.blocks.includes('terms') ? (
