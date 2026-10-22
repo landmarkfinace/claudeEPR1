@@ -79,7 +79,6 @@ model Client {
 
   projects    Project[]
   quotations  Quotation[]
-  agreements  Agreement[]
   eInvoices   EInvoice[] @relation("EInvoiceClient")
   nameLists   NameList[] @relation("NameListClient")
   salaryWorkers ClientSalaryWorker[]
@@ -692,70 +691,106 @@ model SupplierPoItem {
   @@index([poId])
 }
 
+// ═══════════ AGREEMENT MODULE (bilingual, template-driven) ═══════════
+// The printed document is the EXACT uploaded bilingual template:
+// English left column (LTR) | Arabic right column (RTL), one table row per
+// section, contract price words EN+AR, signature/stamp blocks per party.
+
 model Agreement {
-  id           String   @id @default(cuid())
-  refNumber    String   @unique // e.g. AGR-2026-0001
-  title        String
-  partyA       String   @default("Landmark Inter Gulf LLC")
-  clientId     String?
-  client       Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  clientName   String // party B
-  type         String   @default("labor_supply") // labor_supply | service | subcontract
-  layoutStyle  String   @default("detailed") // detailed | simple (price-as-per-PO)
-  startDate    DateTime
-  endDate      DateTime?
-  status       String   @default("draft") // draft | final | signed | expired
-  value        Float    @default(0)
-  currency     String   @default("SAR")
-  notes        String?
+  id            String   @id @default(cuid())
+  agreementNo   String   @unique // AGR-2026-0001 — auto, editable
+  date          DateTime // agreement date (printed Date row + numbering year)
+  titleEn       String
+  titleAr       String   @default("")
+  // Which party is OUR company. Both parties are stored as full template-shape
+  // JSON snapshots (name EN/AR, CR, address EN/AR, tel, fax, signatory
+  // name/title EN/AR, signature + stamp data-URLs) so every PDF stays
+  // reproducible exactly as saved.
+  ourCompanyIs  String   @default("first") // first | second
+  firstPartyJson  String @default("{}")
+  secondPartyJson String @default("{}")
+  // Denormalized other-party identity for the list, search and PDF file name
+  otherPartyId     String?
+  otherPartyNameEn String @default("")
+  otherPartyNameAr String @default("")
+  introEn       String   @default("")
+  introAr       String   @default("")
+  periodFrom    DateTime
+  periodTo      DateTime
+  priceMode     String   @default("po") // po | amount
+  priceAmount   Float? // amount mode: SAR figure (words auto-written EN+AR)
+  priceEn       String   @default("As per the PO")
+  priceAr       String   @default("حسب أمر الشراء")
+  showLetterheadSpace Boolean @default(true)
+  status        String   @default("draft") // draft | signed (expired = derived: signed && periodTo passed)
+  lastEditedBy  String?
+  lastEditedAt  DateTime?
   createdByName String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  items       AgreementItem[]
-  installments AgreementInstallment[]
-  clauses     AgreementClause[]
+  clauses AgreementClause[]
 
-  @@index([startDate])
+  @@index([date])
   @@index([status])
-}
-
-model AgreementItem {
-  id          String    @id @default(cuid())
-  agreementId String
-  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  sr          Int       @default(1)
-  description String
-  unit        String?
-  quantity    Float     @default(1)
-  unitPrice   Float     @default(0)
-  lineTotal   Float     @default(0)
-
-  @@index([agreementId])
-}
-
-model AgreementInstallment {
-  id          String    @id @default(cuid())
-  agreementId String
-  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  sr          Int       @default(1)
-  label       String
-  dueDate     DateTime?
-  amount      Float     @default(0)
-  paid        Boolean   @default(false)
-
-  @@index([agreementId])
+  @@index([otherPartyNameEn])
 }
 
 model AgreementClause {
   id          String    @id @default(cuid())
   agreementId String
   agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  sr          Int       @default(1)
-  title       String?
-  body        String
+  order       Int       @default(1)
+  textEn      String
+  textAr      String    @default("")
 
   @@index([agreementId])
+}
+
+// Saved other-party records — "Save this party for future agreements"
+model AgreementParty {
+  id                String   @id @default(cuid())
+  nameEn            String
+  nameAr            String   @default("")
+  crNo              String?
+  addressEn         String?
+  addressAr         String?
+  tel               String?
+  fax               String?
+  signatoryNameEn   String?
+  signatoryNameAr   String?
+  signatoryTitleEn  String?
+  signatoryTitleAr  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([nameEn])
+}
+
+// Agreement templates — a named title + intro + clause set
+// (e.g. "Sub-Contract Agreement", "Manpower Supply", "Equipment Rental")
+model AgreementTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  titleEn   String
+  titleAr   String   @default("")
+  introEn   String   @default("")
+  introAr   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clauses AgreementTemplateClause[]
+}
+
+model AgreementTemplateClause {
+  id         String           @id @default(cuid())
+  templateId String
+  template   AgreementTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  order      Int              @default(1)
+  textEn     String
+  textAr     String           @default("")
+
+  @@index([templateId])
 }
 
 // ═══════════ E-INVOICE MODULE (bilingual ZATCA-style) ═══════════

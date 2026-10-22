@@ -1,6 +1,8 @@
 // Shared TypeScript types for Landmark Inter Gulf system
 // Used by both API routes and frontend components
 
+import type { TemplateParty } from './agreement-template'
+
 export type Role = {
   id: string
   name: string
@@ -561,12 +563,22 @@ export type AppSettings = {
   address: string
   addressAr: string
   phone: string
+  /** Fax number — printed in the agreement party blocks */
+  fax: string
   email: string
   logo: string | null
   currency: string
   defaultPayType: PayType
   authorizedSignatory: string
+  /** Arabic signatory name — auto-fills the agreement First/Second Party block */
+  authorizedSignatoryAr: string
   signatoryTitle: string
+  /** Arabic signatory title — bilingual agreement signature block */
+  signatoryTitleAr: string
+  /** Company signature image (data URL) for agreements; "" = none */
+  companySignature: string
+  /** Company stamp image (data URL) for agreements; "" = dashed stamp box */
+  companyStamp: string
   /** Seller VAT registration number — QR tag 2 / UBL PartyTaxScheme CompanyID */
   vatNumber: string
   /** Seller commercial registration (CR) number — UBL PartyIdentification */
@@ -1161,48 +1173,76 @@ export type SupplierPoRow = {
   items?: DocItemRow[]
 }
 
-export type AgreementInstallmentRow = {
-  id?: string
-  sr: number
-  label: string
-  dueDate: string | null
-  amount: number
-  paid: boolean
-}
+// ═══════════ AGREEMENT MODULE (bilingual, template-driven) ═══════════
+// The print/PDF document is the EXACT uploaded bilingual template
+// (see src/lib/agreement-template.ts). Parties are full template-shape JSON
+// snapshots stored on the row, so every PDF stays reproducible as saved.
 
 export type AgreementClauseRow = {
   id?: string
-  sr: number
-  title: string | null
-  body: string
+  order: number
+  textEn: string
+  textAr: string
 }
 
 export type AgreementRow = {
   id: string
-  refNumber: string
-  title: string
-  partyA: string
-  clientId: string | null
-  clientName: string
-  type: string
-  layoutStyle: string
-  startDate: string
-  endDate: string | null
-  status: string
-  value: number
-  currency: string
-  notes: string | null
+  agreementNo: string
+  date: string // ISO date (yyyy-mm-dd)
+  titleEn: string
+  titleAr: string
+  ourCompanyIs: 'first' | 'second'
+  firstParty: TemplateParty
+  secondParty: TemplateParty
+  otherPartyId: string | null
+  otherPartyNameEn: string
+  otherPartyNameAr: string
+  introEn: string
+  introAr: string
+  periodFrom: string
+  periodTo: string
+  priceMode: 'po' | 'amount'
+  priceAmount: number | null
+  priceEn: string
+  priceAr: string
+  showLetterheadSpace: boolean
+  /** Effective status: draft | signed; 'expired' is DERIVED (signed + periodTo passed) */
+  status: 'draft' | 'signed' | 'expired'
+  lastEditedBy: string | null
+  lastEditedAt: string | null
   createdByName: string | null
   createdAt: string
-  items?: DocItemRow[]
-  installments?: AgreementInstallmentRow[]
   clauses?: AgreementClauseRow[]
+}
+
+export type AgreementPartyRow = {
+  id: string
+  nameEn: string
+  nameAr: string
+  crNo: string | null
+  addressEn: string | null
+  addressAr: string | null
+  tel: string | null
+  fax: string | null
+  signatoryNameEn: string | null
+  signatoryNameAr: string | null
+  signatoryTitleEn: string | null
+  signatoryTitleAr: string | null
+}
+
+export type AgreementTemplateRow = {
+  id: string
+  name: string
+  titleEn: string
+  titleAr: string
+  introEn: string
+  introAr: string
+  clauses: { order: number; textEn: string; textAr: string }[]
 }
 
 export const QUOTATION_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'expired'] as const
 export const SUPPLIER_PO_STATUSES = ['draft', 'ordered', 'received', 'cancelled'] as const
-export const AGREEMENT_STATUSES = ['draft', 'final', 'signed', 'expired'] as const
-export const AGREEMENT_TYPES = ['labor_supply', 'service', 'subcontract'] as const
+export const AGREEMENT_STATUSES = ['draft', 'signed'] as const // 'expired' is derived, never stored
 export const NAME_LIST_TYPES = ['client', 'supplier', 'subcontractor', 'other'] as const
 
 // ═══════════ E-INVOICE MODULE (bilingual ZATCA-style) ═══════════

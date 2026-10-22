@@ -12,6 +12,7 @@ import {
   isResponse,
   logActivity,
 } from '@/lib/api-helpers'
+import { validateImageDataUrl } from '@/lib/image-data-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,12 +25,18 @@ function buildSettings(map: Record<string, string>) {
       'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
     addressAr: map.addressAr ?? 'مركز السويدي التجاري، مكتب 103، الدور الأول، ص.ب. 35712، مبنى 5526، الشارع الرابع، حي الوها، الجبيل، المملكة العربية السعودية',
     phone: map.phone ?? '+966 13 847 2200',
+    fax: map.fax ?? '',
     email: map.email ?? 'info@landmarkintergulf.com',
     logo: map.logo ?? '/logo-mark.png', // default brand ML monogram
     currency: map.currency ?? 'SAR',
     defaultPayType: (map.defaultPayType ?? 'bank_transfer') as PayType,
     authorizedSignatory: map.authorizedSignatory ?? '',
+    authorizedSignatoryAr: map.authorizedSignatoryAr ?? '',
     signatoryTitle: map.signatoryTitle ?? 'Authorized Signatory',
+    signatoryTitleAr: map.signatoryTitleAr ?? '',
+    // Agreement print assets (signature + stamp images, data URLs)
+    companySignature: map.companySignature ?? '',
+    companyStamp: map.companyStamp ?? '',
     // ZATCA seller identity — QR tag 2 / UBL PartyTaxScheme CompanyID
     vatNumber: map.vatNumber ?? '',
     crNumber: map.crNumber ?? '',
@@ -60,7 +67,9 @@ async function readSettingsMap(): Promise<Record<string, string>> {
 
 const settingsSchema = z.object({
   companyName: z.string().min(1, 'Company name is required').optional(),
+  companyNameAr: z.string().max(240).optional(),
   address: z.string().optional(),
+  addressAr: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().optional(),
   logo: z.string().nullable().optional(), // data URL or null (clear)
@@ -68,6 +77,13 @@ const settingsSchema = z.object({
   defaultPayType: z.enum(['bank_transfer', 'cash', 'cheque']).optional(),
   authorizedSignatory: z.string().max(120).optional(),
   signatoryTitle: z.string().max(120).optional(),
+  // Arabic signatory variants + fax (bilingual agreement auto-fill)
+  authorizedSignatoryAr: z.string().max(160).optional(),
+  signatoryTitleAr: z.string().max(160).optional(),
+  fax: z.string().max(60).optional(),
+  // Agreement print assets — PNG/JPEG data URLs (null clears)
+  companySignature: z.string().nullable().optional(),
+  companyStamp: z.string().nullable().optional(),
   // ZATCA seller identity (15-digit Saudi VAT number, e.g. 3xxxxxxxxxxxxx3)
   vatNumber: z.string().max(15, 'VAT number cannot exceed 15 digits').optional(),
   crNumber: z.string().max(20).optional(),
@@ -110,7 +126,9 @@ export async function PUT(req: NextRequest) {
 
     const entries: [string, string][] = []
     if (body.companyName !== undefined) entries.push(['companyName', body.companyName])
+    if (body.companyNameAr !== undefined) entries.push(['companyNameAr', body.companyNameAr])
     if (body.address !== undefined) entries.push(['address', body.address])
+    if (body.addressAr !== undefined) entries.push(['addressAr', body.addressAr])
     if (body.phone !== undefined) entries.push(['phone', body.phone])
     if (body.email !== undefined) entries.push(['email', body.email])
     if (body.logo !== undefined && body.logo !== null) entries.push(['logo', body.logo])
@@ -123,6 +141,29 @@ export async function PUT(req: NextRequest) {
     }
     if (body.signatoryTitle !== undefined) {
       entries.push(['signatoryTitle', body.signatoryTitle])
+    }
+    if (body.authorizedSignatoryAr !== undefined) {
+      entries.push(['authorizedSignatoryAr', body.authorizedSignatoryAr])
+    }
+    if (body.signatoryTitleAr !== undefined) {
+      entries.push(['signatoryTitleAr', body.signatoryTitleAr])
+    }
+    if (body.fax !== undefined) {
+      entries.push(['fax', body.fax])
+    }
+    // Agreement print assets: validated like the letterhead images, null clears
+    for (const [key, value] of [
+      ['companySignature', body.companySignature],
+      ['companyStamp', body.companyStamp],
+    ] as const) {
+      if (value === undefined) continue
+      if (value !== null) {
+        const valid = validateImageDataUrl(value)
+        if (!valid) {
+          return badRequest(`${key}: image must be a PNG or JPEG data URL of at most 2 MB`)
+        }
+        entries.push([key, valid.dataUrl])
+      }
     }
     if (body.vatNumber !== undefined) entries.push(['vatNumber', body.vatNumber])
     if (body.crNumber !== undefined) entries.push(['crNumber', body.crNumber])
@@ -154,6 +195,13 @@ export async function PUT(req: NextRequest) {
     // logo: null explicitly clears the stored logo
     if (body.logo === null) {
       await db.setting.deleteMany({ where: { key: 'logo' } })
+    }
+    // signature / stamp: null explicitly clears the stored image
+    if (body.companySignature === null) {
+      await db.setting.deleteMany({ where: { key: 'companySignature' } })
+    }
+    if (body.companyStamp === null) {
+      await db.setting.deleteMany({ where: { key: 'companyStamp' } })
     }
 
     await logActivity({

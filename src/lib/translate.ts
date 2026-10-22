@@ -143,7 +143,8 @@ function extractJsonArray(raw: string): unknown {
 /** One batched builtin (z-ai sdk) call for all remaining entries. */
 async function translateWithBuiltin(
   entries: { key: string; text: string; context?: string }[],
-  glossary: GlossaryPair[]
+  glossary: GlossaryPair[],
+  domainHint?: string
 ): Promise<Map<string, string>> {
   const zai = await ZAI.create()
   const glossaryBlock = glossary.length
@@ -153,7 +154,11 @@ async function translateWithBuiltin(
         .join('\n')}`
     : ''
 
-  const system = `You are an expert English→Arabic translator for official Saudi tax invoices of a construction manpower supply company. Translate into formal business Arabic (فصحى) using construction/manpower industry terminology. Keep numbers, codes and references as-is. Some input texts may already contain Arabic glossary translations — keep those exactly as they are and translate only the remaining English around them.${glossaryBlock}`
+  const domain = domainHint
+    ? `official ${domainHint} of a construction manpower supply company`
+    : 'official Saudi tax invoices of a construction manpower supply company'
+
+  const system = `You are an expert English→Arabic translator for ${domain}. Translate into formal business Arabic (فصحى) using construction/manpower industry terminology. Keep numbers, codes and references as-is. Some input texts may already contain Arabic glossary translations — keep those exactly as they are and translate only the remaining English around them.${glossaryBlock}`
 
   const user = `Translate the "text" of every object in this JSON array from English to Arabic. Return a STRICT JSON array — nothing else, no markdown, no commentary — of objects exactly like [{"key":"<same key>","ar":"<Arabic translation>"}]:\n${JSON.stringify(
     entries.map((e) => ({ key: e.key, text: e.text, context: e.context ?? 'generic' }))
@@ -282,8 +287,14 @@ async function memorySave(sourceText: string, translatedText: string, context: s
 /**
  * Translate a batch of English entries to Arabic. NEVER throws — provider
  * failures come back as source:'failed' plus a single providerError string.
+ * `opts.domainHint` (optional) tunes the builtin prompt for a calling module
+ * (e.g. "legal contracts and sub-contract agreements"); when omitted the
+ * original e-invoice prompt is used byte-for-byte.
  */
-export async function translateEntries(entries: TranslateEntry[]): Promise<{
+export async function translateEntries(
+  entries: TranslateEntry[],
+  opts: { domainHint?: string } = {}
+): Promise<{
   results: TranslateResult[]
   providerError?: string
 }> {
@@ -343,7 +354,7 @@ export async function translateEntries(entries: TranslateEntry[]): Promise<{
         if (!cfg.apiKey) throw new Error('DeepL is selected but no API key is configured (Settings → E-Invoice)')
         translated = await translateWithDeepl(list, cfg.apiKey)
       } else {
-        translated = await translateWithBuiltin(list, glossary)
+        translated = await translateWithBuiltin(list, glossary, opts.domainHint)
       }
 
       const saves: Promise<void>[] = []

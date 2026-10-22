@@ -1,211 +1,268 @@
 // Shared server-side helpers for the Agreements API (zod body schema,
-// child normalization + contract-value computation). Server-only — imported
-// by /api/agreements and /api/agreements/[id].
+// clause normalization, saved-party handling, status derivation, include +
+// row mapping). Server-only — imported by /api/agreements*, the PDF route
+// and the seed scripts (via the same schema through prisma seed helpers).
 import 'server-only'
-import { Agreement, Prisma } from '@prisma/client'
+import { Agreement, Prisma, PrismaClient } from '@prisma/client'
 import { z } from 'zod'
-import { round2 } from '@/lib/format'
 import { parseDate } from '@/lib/api-helpers'
-import type { AgreementRow, DocItemRow } from '@/lib/types'
+import { validateImageDataUrl } from '@/lib/image-data-url'
+import type { AgreementRow, AgreementPartyRow } from '@/lib/types'
+import {
+  emptyParty,
+  type TemplateParty,
+} from './agreement-template'
+
+// ---------------------------------------------------------------------------
+// Body schema
+// ---------------------------------------------------------------------------
+
+const text = (max: number) => z.string().max(max)
+
+/** data-URL image slot: "" or a valid PNG/JPEG data URL (≤ 2 MB decoded). */
+const imgSlot = z
+  .string()
+  .max(3_000_000)
+  .refine((v) => v === '' || validateImageDataUrl(v)?.dataUrl != null, {
+    message: 'Image must be a PNG or JPEG data URL of at most 2 MB',
+  })
+
+const partySchema = z.object({
+  name: z.object({ en: text(240).trim(), ar: text(240).trim() }),
+  crNo: text(40).trim(),
+  address: z.object({ en: text(500).trim(), ar: text(500).trim() }),
+  tel: text(60).trim(),
+  fax: text(60).trim(),
+  signatory: z.object({
+    name: z.object({ en: text(160).trim(), ar: text(160).trim() }),
+    title: z.object({ en: text(160).trim(), ar: text(160).trim() }),
+  }),
+  signatureImg: imgSlot,
+  stampImg: imgSlot,
+})
 
 export const agreementBodySchema = z.object({
-  title: z.string().trim().min(1, 'Agreement title is required'),
-  clientId: z.string().trim().optional().nullable(),
-  clientName: z.string().trim().min(1, 'Client name (Party B) is required'),
-  type: z.enum(['labor_supply', 'service', 'subcontract']).optional(),
-  layoutStyle: z.enum(['detailed', 'simple']).optional(),
-  startDate: z.string().min(1, 'Start date is required'),
-  endDate: z.string().optional().nullable(),
-  status: z.enum(['draft', 'final', 'signed', 'expired']).optional(),
-  notes: z.string().optional().nullable(),
-  /** Only used when layoutStyle = 'simple' (price as per P.O.) */
-  value: z.coerce.number().min(0, 'Contract value cannot be negative').max(1_000_000_000).optional(),
-  items: z
-    .array(
-      z.object({
-        description: z.string().trim().min(1, 'Item description is required'),
-        unit: z.string().trim().optional().nullable(),
-        quantity: z.coerce.number().min(0, 'Quantity cannot be negative').max(1_000_000_000),
-        unitPrice: z.coerce.number().min(0, 'Unit price cannot be negative').max(1_000_000_000),
-      })
-    )
-    .optional(),
-  installments: z
-    .array(
-      z.object({
-        label: z.string().trim().min(1, 'Installment label is required'),
-        dueDate: z.string().optional().nullable(),
-        amount: z.coerce.number().min(0, 'Installment amount cannot be negative').max(1_000_000_000),
-        paid: z.boolean().optional(),
-      })
-    )
-    .optional(),
+  agreementNo: z
+    .string()
+    .trim()
+    .regex(/^AGR-\d{4}-\d{1,4}$/, 'Agreement No must look like AGR-2026-0001'),
+  date: z.string().min(1, 'Agreement date is required'),
+  titleEn: z.string().trim().min(1, 'Title (English) is required').max(300),
+  titleAr: text(300).trim(),
+  ourCompanyIs: z.enum(['first', 'second']),
+  firstParty: partySchema,
+  secondParty: partySchema,
+  /** Saved-party record used for the other party (null = typed in fresh). */
+  otherPartyId: z.string().trim().nullable().optional(),
+  /** "Save this party for future agreements" */
+  saveOtherParty: z.boolean().optional(),
+  introEn: text(4000),
+  introAr: text(4000),
+  periodFrom: z.string().min(1, 'Period From is required'),
+  periodTo: z.string().min(1, 'Period To is required'),
+  priceMode: z.enum(['po', 'amount']),
+  priceAmount: z.coerce.number().min(0).max(1_000_000_000).nullable().optional(),
+  priceEn: z.string().trim().min(1, 'Contract price (English) is required').max(400),
+  priceAr: z.string().trim().min(1, 'Contract price (Arabic) is required').max(400),
+  showLetterheadSpace: z.boolean(),
+  /** draft | signed — 'expired' is always derived, never stored */
+  status: z.enum(['draft', 'signed']),
   clauses: z
     .array(
       z.object({
-        title: z.string().trim().optional().nullable(),
-        body: z.string().trim().min(1, 'Clause text is required'),
+        textEn: text(4000).trim(),
+        textAr: text(4000).trim(),
       })
     )
-    .optional(),
+    .max(60, 'Too many clauses (max 60)'),
 })
 
 export type AgreementBody = z.infer<typeof agreementBodySchema>
 
-/** Normalized children + the computed contract value, shared by POST and PUT. */
-export function normalizeAgreementChildren(body: AgreementBody): {
-  value: number
-  items: {
-    sr: number
-    description: string
-    unit: string | null
-    quantity: number
-    unitPrice: number
-    lineTotal: number
-  }[]
-  installments: { sr: number; label: string; dueDate: Date | null; amount: number; paid: boolean }[]
-  clauses: { sr: number; title: string | null; body: string }[]
-} {
-  const layoutStyle = body.layoutStyle ?? 'detailed'
+// ---------------------------------------------------------------------------
+// Normalization + validation
+// ---------------------------------------------------------------------------
 
-  // Items — only meaningful for the detailed layout; value is always derived
-  const items =
-    layoutStyle === 'detailed'
-      ? (body.items ?? []).map((it, idx) => {
-          const quantity = Number(it.quantity) || 0
-          const unitPrice = round2(Number(it.unitPrice) || 0)
-          return {
-            sr: idx + 1,
-            description: it.description,
-            unit: it.unit?.trim() || null,
-            quantity,
-            unitPrice,
-            lineTotal: round2(quantity * unitPrice),
-          }
-        })
-      : []
-
-  const value =
-    layoutStyle === 'detailed'
-      ? round2(items.reduce((sum, it) => sum + it.lineTotal, 0))
-      : round2(Number(body.value ?? 0) || 0)
-
-  const installments = (body.installments ?? []).map((ins, idx) => ({
-    sr: idx + 1,
-    label: ins.label,
-    dueDate: parseDate(ins.dueDate ?? undefined),
-    amount: round2(Number(ins.amount) || 0),
-    paid: Boolean(ins.paid),
-  }))
-
-  const clauses = (body.clauses ?? []).map((c, idx) => ({
-    sr: idx + 1,
-    title: c.title?.trim() || null,
-    body: c.body,
-  }))
-
-  return { value, items, installments, clauses }
+/** Ordered clauses with deterministic `order` (1-based). */
+export function normalizeClauses(body: AgreementBody): { order: number; textEn: string; textAr: string }[] {
+  return (body.clauses ?? [])
+    .filter((c) => c.textEn.trim() || c.textAr.trim())
+    .map((c, idx) => ({ order: idx + 1, textEn: c.textEn.trim(), textAr: c.textAr.trim() }))
 }
 
 /** Field-level checks that deserve friendly error messages (run post-zod). */
 export function validateAgreementBody(
   body: AgreementBody,
-  startDate: Date,
-  endDate: Date | null
+  periodFrom: Date,
+  periodTo: Date
 ): string | null {
-  if (body.layoutStyle === 'detailed' && (body.items ?? []).length === 0) {
-    return 'Add at least one priced item, or switch the layout to Simple and enter the contract value.'
-  }
-  if (body.layoutStyle === 'simple' && !(Number(body.value ?? 0) > 0)) {
-    return 'Enter the contract value (price as per Purchase Order) for a simple agreement.'
-  }
-  if (endDate && endDate.getTime() < startDate.getTime()) {
-    return 'End date cannot be before the start date.'
+  if (periodTo.getTime() < periodFrom.getTime()) return 'Period To cannot be before Period From.'
+  if (body.priceMode === 'amount' && (body.priceAmount == null || !Number.isFinite(body.priceAmount))) {
+    return 'Enter the contract price amount, or switch the price to "As per PO".'
   }
   return null
 }
 
-/** Next AGR-YYYY-NNNN reference for the given year (call inside the tx). */
-export async function nextRefNumber(
+/** Which party is ours / the other one, per the role toggle. */
+export function splitParties(
+  body: AgreementBody
+): { ourParty: TemplateParty; otherParty: TemplateParty } {
+  return body.ourCompanyIs === 'first'
+    ? { ourParty: body.firstParty, otherParty: body.secondParty }
+    : { ourParty: body.secondParty, otherParty: body.firstParty }
+}
+
+/** Upsert an AgreementParty row from the OTHER party block (saved parties). */
+export async function upsertSavedParty(
+  tx: Prisma.TransactionClient | PrismaClient,
+  party: TemplateParty,
+  existingId: string | null | undefined,
+  now: Date
+): Promise<AgreementPartyRow> {
+  const data = {
+    nameEn: party.name.en.trim(),
+    nameAr: party.name.ar.trim(),
+    crNo: party.crNo.trim() || null,
+    addressEn: party.address.en.trim() || null,
+    addressAr: party.address.ar.trim() || null,
+    tel: party.tel.trim() || null,
+    fax: party.fax.trim() || null,
+    signatoryNameEn: party.signatory.name.en.trim() || null,
+    signatoryNameAr: party.signatory.name.ar.trim() || null,
+    signatoryTitleEn: party.signatory.title.en.trim() || null,
+    signatoryTitleAr: party.signatory.title.ar.trim() || null,
+  }
+  if (existingId) {
+    const updated = await tx.agreementParty
+      .update({ where: { id: existingId }, data })
+      .catch(() => null)
+    if (updated) return updated
+  }
+  const existingByName = await tx.agreementParty.findFirst({
+    where: { nameEn: data.nameEn },
+  })
+  if (existingByName) {
+    return (await tx.agreementParty.update({ where: { id: existingByName.id }, data }))!
+  }
+  return tx.agreementParty.create({
+    data: { ...data, createdAt: now, updatedAt: now } as never,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Numbering
+// ---------------------------------------------------------------------------
+
+/** Next AGR-YYYY-NNNN for the given year (call inside the tx). */
+export async function nextAgreementNo(
   tx: Prisma.TransactionClient,
   year: number
 ): Promise<string> {
   const prefix = `AGR-${year}-`
   const rows = await tx.agreement.findMany({
-    where: { refNumber: { startsWith: prefix } },
-    select: { refNumber: true },
+    where: { agreementNo: { startsWith: prefix } },
+    select: { agreementNo: true },
   })
   let max = 0
   for (const r of rows) {
-    const n = parseInt(r.refNumber.slice(prefix.length), 10)
+    const n = parseInt(r.agreementNo.slice(prefix.length), 10)
     if (Number.isInteger(n) && n > max) max = n
   }
   return `${prefix}${String(max + 1).padStart(4, '0')}`
 }
 
 // ---------------------------------------------------------------------------
-// Include + row mapping (shared by list / detail / create / update endpoints)
+// Status derivation + include + row mapping
 // ---------------------------------------------------------------------------
 
-/** Children eager-load with deterministic sr ordering. */
+/** Effective display status — 'expired' is derived, never stored. */
+export function effectiveStatus(
+  stored: 'draft' | 'signed',
+  periodTo: Date,
+  now = new Date()
+): 'draft' | 'signed' | 'expired' {
+  if (stored !== 'signed') return stored
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return periodTo.getTime() < todayStart.getTime() ? 'expired' : 'signed'
+}
+
+/** Date → 'yyyy-mm-dd' using LOCAL calendar parts (round-trips parseDate). */
+export function isoDateOnly(d: Date | null | undefined): string {
+  if (!d || isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function parseParty(json: string): TemplateParty {
+  if (!json) return emptyParty()
+  try {
+    const v = JSON.parse(json) as Partial<TemplateParty>
+    return {
+      name: { en: v.name?.en ?? '', ar: v.name?.ar ?? '' },
+      crNo: v.crNo ?? '',
+      address: { en: v.address?.en ?? '', ar: v.address?.ar ?? '' },
+      tel: v.tel ?? '',
+      fax: v.fax ?? '',
+      signatory: {
+        name: { en: v.signatory?.name?.en ?? '', ar: v.signatory?.name?.ar ?? '' },
+        title: { en: v.signatory?.title?.en ?? '', ar: v.signatory?.title?.ar ?? '' },
+      },
+      signatureImg: v.signatureImg ?? '',
+      stampImg: v.stampImg ?? '',
+    }
+  } catch {
+    return emptyParty()
+  }
+}
+
+/** Children eager-load with deterministic order. */
 export const agreementFullInclude = {
-  items: { orderBy: { sr: 'asc' as const } },
-  installments: { orderBy: { sr: 'asc' as const } },
-  clauses: { orderBy: { sr: 'asc' as const } },
+  clauses: { orderBy: { order: 'asc' as const } },
 } satisfies Prisma.AgreementInclude
 
 export type AgreementFull = Prisma.AgreementGetPayload<{ include: typeof agreementFullInclude }>
 export type AgreementLean = Agreement
 
-/** Prisma row → API AgreementRow (children included only when eager-loaded). */
+/** Prisma row → API AgreementRow (clauses included when eager-loaded). */
 export function mapAgreement(a: AgreementFull | AgreementLean): AgreementRow {
+  const firstParty = parseParty(a.firstPartyJson)
+  const secondParty = parseParty(a.secondPartyJson)
+  const other = a.ourCompanyIs === 'first' ? secondParty : firstParty
   const base: AgreementRow = {
     id: a.id,
-    refNumber: a.refNumber,
-    title: a.title,
-    partyA: a.partyA,
-    clientId: a.clientId,
-    clientName: a.clientName,
-    type: a.type,
-    layoutStyle: a.layoutStyle,
-    startDate: a.startDate.toISOString(),
-    endDate: a.endDate ? a.endDate.toISOString() : null,
-    status: a.status,
-    value: round2(a.value),
-    currency: a.currency,
-    notes: a.notes,
+    agreementNo: a.agreementNo,
+    date: isoDateOnly(a.date),
+    titleEn: a.titleEn,
+    titleAr: a.titleAr,
+    ourCompanyIs: a.ourCompanyIs === 'second' ? 'second' : 'first',
+    firstParty,
+    secondParty,
+    otherPartyId: a.otherPartyId,
+    otherPartyNameEn: a.otherPartyNameEn || other.name.en,
+    otherPartyNameAr: a.otherPartyNameAr || other.name.ar,
+    introEn: a.introEn,
+    introAr: a.introAr,
+    periodFrom: isoDateOnly(a.periodFrom),
+    periodTo: isoDateOnly(a.periodTo),
+    priceMode: a.priceMode === 'amount' ? 'amount' : 'po',
+    priceAmount: a.priceAmount ?? null,
+    priceEn: a.priceEn,
+    priceAr: a.priceAr,
+    showLetterheadSpace: a.showLetterheadSpace,
+    status: effectiveStatus(a.status === 'signed' ? 'signed' : 'draft', a.periodTo),
+    lastEditedBy: a.lastEditedBy,
+    lastEditedAt: a.lastEditedAt ? a.lastEditedAt.toISOString() : null,
     createdByName: a.createdByName,
     createdAt: a.createdAt.toISOString(),
-  }
-  if ('items' in a && a.items) {
-    base.items = a.items.map(
-      (i): DocItemRow => ({
-        id: i.id,
-        sr: i.sr,
-        description: i.description,
-        unit: i.unit,
-        quantity: i.quantity,
-        unitPrice: round2(i.unitPrice),
-        lineTotal: round2(i.lineTotal),
-      })
-    )
-  }
-  if ('installments' in a && a.installments) {
-    base.installments = a.installments.map((i) => ({
-      id: i.id,
-      sr: i.sr,
-      label: i.label,
-      dueDate: i.dueDate ? i.dueDate.toISOString() : null,
-      amount: round2(i.amount),
-      paid: i.paid,
-    }))
   }
   if ('clauses' in a && a.clauses) {
     base.clauses = a.clauses.map((c) => ({
       id: c.id,
-      sr: c.sr,
-      title: c.title,
-      body: c.body,
+      order: c.order,
+      textEn: c.textEn,
+      textAr: c.textAr,
     }))
   }
   return base

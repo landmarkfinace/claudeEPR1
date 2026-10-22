@@ -5,6 +5,14 @@ import { PrismaClient, Project, Staff, StaffCategory, TransactionCategory, Clien
 import { randomBytes, scrypt as _scrypt } from 'crypto'
 import { promisify } from 'util'
 import { DEFAULT_QUOTATION_TERMS } from './quotation-terms'
+import {
+  SUBCONTRACT_TEMPLATE,
+  buildSampleAgreement,
+  buildQaAgreement,
+  SEED_SAVED_PARTIES,
+  type AgreementSeedRow,
+} from './agreement-seed-data'
+import type { TemplateParty } from './agreement-template'
 
 const scrypt = promisify(_scrypt) as (p: string, s: string, k: number) => Promise<Buffer>
 
@@ -61,6 +69,9 @@ export async function runSeed(db: PrismaClient): Promise<SeedSummary> {
   await db.session.deleteMany()
   await db.user.deleteMany()
   await db.role.deleteMany()
+  await db.agreement.deleteMany()
+  await db.agreementTemplate.deleteMany()
+  await db.agreementParty.deleteMany()
   await db.setting.deleteMany()
 
   // ---------- Roles ----------
@@ -126,11 +137,14 @@ export async function runSeed(db: PrismaClient): Promise<SeedSummary> {
     address:
       'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
     phone: '+966 13 847 2200',
+    fax: '+966 13 847 2201',
     email: 'info@landmarkintergulf.com',
     currency: 'SAR',
     defaultPayType: 'bank_transfer',
     authorizedSignatory: 'Faisal Al-Otaibi',
+    authorizedSignatoryAr: 'فيصل العتيبي',
     signatoryTitle: 'Finance Manager',
+    signatoryTitleAr: 'مدير المالية',
     vatRate: '15',
   }
   for (const [key, value] of Object.entries(settings)) {
@@ -618,6 +632,96 @@ export async function runSeed(db: PrismaClient): Promise<SeedSummary> {
         module: 'user',
         description: `${u.name} signed in`,
         createdAt: new Date(now.getTime() - d * 86_400_000 - randInt(1, 8) * 3_600_000),
+      },
+    })
+  }
+
+  // ---------- Agreements (bilingual, template-driven) ----------
+  // "Sub-Contract Agreement" template (the uploaded sample content), the
+  // EXACT reference agreement AGR-2025-0001 from the template file, one
+  // amount-mode QA agreement (already expired → derived status) and the two
+  // saved parties for the editor dropdown.
+  await db.agreementTemplate.create({
+    data: {
+      name: SUBCONTRACT_TEMPLATE.name,
+      titleEn: SUBCONTRACT_TEMPLATE.titleEn,
+      titleAr: SUBCONTRACT_TEMPLATE.titleAr,
+      introEn: SUBCONTRACT_TEMPLATE.introEn,
+      introAr: SUBCONTRACT_TEMPLATE.introAr,
+      clauses: {
+        create: SUBCONTRACT_TEMPLATE.clauses.map((c, i) => ({
+          order: i + 1,
+          textEn: c.textEn,
+          textAr: c.textAr,
+        })),
+      },
+    },
+  })
+
+  const ourParty: TemplateParty = {
+    name: { en: settings.companyName, ar: 'لاندمارك انتر جلف' },
+    crNo: '1010357489',
+    address: { en: settings.address, ar: 'مركز السويدي التجاري، مكتب 103، الدور الأول، ص.ب. 35712، الجبيل، المملكة العربية السعودية' },
+    tel: settings.phone,
+    fax: settings.fax,
+    signatory: {
+      name: { en: settings.authorizedSignatory, ar: settings.authorizedSignatoryAr },
+      title: { en: settings.signatoryTitle, ar: settings.signatoryTitleAr },
+    },
+    signatureImg: '',
+    stampImg: '',
+  }
+
+  const insertAgreement = async (a: AgreementSeedRow) => {
+    await db.agreement.create({
+      data: {
+        agreementNo: a.agreementNo,
+        date: new Date(`${a.date}T00:00:00`),
+        titleEn: a.titleEn,
+        titleAr: a.titleAr,
+        ourCompanyIs: a.ourCompanyIs,
+        firstPartyJson: JSON.stringify(a.firstParty),
+        secondPartyJson: JSON.stringify(a.secondParty),
+        otherPartyNameEn: a.otherPartyNameEn,
+        otherPartyNameAr: a.otherPartyNameAr,
+        introEn: a.introEn,
+        introAr: a.introAr,
+        periodFrom: new Date(`${a.periodFrom}T00:00:00`),
+        periodTo: new Date(`${a.periodTo}T00:00:00`),
+        priceMode: a.priceMode,
+        priceAmount: a.priceAmount,
+        priceEn: a.priceEn,
+        priceAr: a.priceAr,
+        showLetterheadSpace: a.showLetterheadSpace,
+        status: a.status,
+        lastEditedBy: 'Seed',
+        lastEditedAt: new Date(),
+        createdByName: 'Seed',
+        clauses: {
+          create: a.clauses
+            .filter((c) => c.textEn.trim() || c.textAr.trim())
+            .map((c, i) => ({ order: i + 1, textEn: c.textEn, textAr: c.textAr })),
+        },
+      },
+    })
+  }
+  await insertAgreement(buildSampleAgreement())
+  await insertAgreement(buildQaAgreement(ourParty))
+
+  for (const p of SEED_SAVED_PARTIES) {
+    await db.agreementParty.create({
+      data: {
+        nameEn: p.name.en,
+        nameAr: p.name.ar,
+        crNo: p.crNo,
+        addressEn: p.address.en,
+        addressAr: p.address.ar,
+        tel: p.tel,
+        fax: p.fax,
+        signatoryNameEn: p.signatory.name.en,
+        signatoryNameAr: p.signatory.name.ar,
+        signatoryTitleEn: p.signatory.title.en,
+        signatoryTitleAr: p.signatory.title.ar,
       },
     })
   }

@@ -1,17 +1,14 @@
 // Agreements API — GET (paginated list + totals) / POST (create).
-// A contract/agreement manager with two layout styles:
-//   • detailed — priced line items; the contract value is ALWAYS recomputed
-//     server-side as Σ round2(quantity × unitPrice),
-//   • simple   — a single "price as per Purchase Order" value entered by the
-//     user (items are ignored / stored empty).
-// Children (items, installments, clauses) are created inside one transaction
-// with deterministic `sr` ordering. refNumber is auto-generated AGR-YYYY-NNNN
-// from the agreement's start-date year.
-// Filters: ?search (ref / title / client) ?status ?type ?year (start-date year)
+// Bilingual, template-driven agreements printed as the EXACT uploaded
+// agreement-template.html. Parties are full template-shape JSON snapshots;
+// clauses live in their own table (order, text_en, text_ar). Status is stored
+// draft|signed; 'expired' is DERIVED (signed + Period To passed) and exposed
+// through the ?status= filter exactly like a stored one.
+// Filters: ?search (no / title / other-party name EN+AR) ?status
+// (draft|signed|expired) ?dateFrom ?dateTo (agreement date).
 import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { round2 } from '@/lib/format'
 import {
   ok,
   badRequest,
@@ -28,11 +25,17 @@ import {
   agreementBodySchema,
   agreementFullInclude,
   mapAgreement,
-  normalizeAgreementChildren,
+  normalizeClauses,
   validateAgreementBody,
-  nextRefNumber,
+  splitParties,
+  upsertSavedParty,
+  nextAgreementNo,
   type AgreementFull,
 } from '@/lib/agreement-server'
+
+function startOfToday(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
 
 // ---------------------------------------------------------------------------
 // GET — list with filters + totals
@@ -46,67 +49,73 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams
     const p = parsePagination(sp)
     const where: Prisma.AgreementWhereInput = {}
+    const ands: Prisma.AgreementWhereInput[] = []
 
-    // Free-text search across ref number, title and client (party B)
     const search = sp.get('search')?.trim()
     if (search) {
       where.OR = [
-        { refNumber: { contains: search } },
-        { title: { contains: search } },
-        { clientName: { contains: search } },
+        { agreementNo: { contains: search } },
+        { titleEn: { contains: search } },
+        { titleAr: { contains: search } },
+        { otherPartyNameEn: { contains: search } },
+        { otherPartyNameAr: { contains: search } },
       ]
     }
 
     const status = sp.get('status')?.trim()
-    if (status) where.status = status
-
-    const type = sp.get('type')?.trim()
-    if (type) where.type = type
-
-    // Year filter — the agreement's START date falls within that year
-    const year = toInt(sp.get('year'))
-    if (Number.isInteger(year) && year >= 1900 && year <= 2200) {
-      where.startDate = {
-        gte: new Date(year, 0, 1, 0, 0, 0, 0),
-        lte: new Date(year, 11, 31, 23, 59, 59, 999),
-      }
+    const today = startOfToday()
+    if (status === 'draft') {
+      ands.push({ status: 'draft' })
+    } else if (status === 'signed') {
+      // signed and NOT yet past its Period To (derived-expired excluded)
+      ands.push({ status: 'signed', periodTo: { gte: today } })
+    } else if (status === 'expired') {
+      // signed and the Period To date has passed
+      ands.push({ status: 'signed', periodTo: { lt: today } })
     }
 
-    const now = new Date()
-    // KPI wheres are composed with AND so the base filters (incl. the search
-    // OR) are never clobbered by the spread keys below.
-    const signedWhere: Prisma.AgreementWhereInput = { AND: [where, { status: 'signed' }] }
+    const dateFrom = parseDate(sp.get('dateFrom') ?? undefined)
+    if (dateFrom) ands.push({ date: { gte: dateFrom } })
+    const dateTo = parseDate(sp.get('dateTo') ?? undefined)
+    if (dateTo) {
+      const end = new Date(dateTo)
+      end.setHours(23, 59, 59, 999)
+      ands.push({ date: { lte: end } })
+    }
+    if (ands.length > 0) where.AND = ands
+
+    const signedBase: Prisma.AgreementWhereInput = { AND: [where, { status: 'signed' }] }
     const activeWhere: Prisma.AgreementWhereInput = {
-      AND: [where, { status: 'signed' }, { OR: [{ endDate: null }, { endDate: { gte: now } }] }],
+      AND: [where, { status: 'signed' }, { periodTo: { gte: today } }],
     }
-    const [rows, total, agg, signedAgg, signedCount, activeCount] = await Promise.all([
+    const [rows, total, agg, signedCount, activeCount] = await Promise.all([
       db.agreement.findMany({
         where,
-        orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
         skip: p.skip,
         take: p.take,
+        include: agreementFullInclude,
       }),
       db.agreement.count({ where }),
-      db.agreement.aggregate({ where, _count: { _all: true }, _sum: { value: true } }),
-      db.agreement.aggregate({ where: signedWhere, _sum: { value: true } }),
-      db.agreement.count({ where: signedWhere }),
+      db.agreement.aggregate({ where, _count: { _all: true }, _sum: { priceAmount: true } }),
+      db.agreement.count({ where: signedBase }),
       db.agreement.count({ where: activeWhere }),
     ])
 
     return paginatedResponse(rows.map(mapAgreement), total, p, {
       count: agg._count._all,
-      totalValue: round2(agg._sum.value ?? 0),
-      signedValue: round2(signedAgg._sum.value ?? 0),
+      totalAmount: agg._sum.priceAmount ?? 0,
       signedCount,
       active: activeCount,
     })
-  } catch {
+  } catch (err) {
+    console.error('[api/agreements GET]', err)
     return serverError()
   }
 }
 
 // ---------------------------------------------------------------------------
-// POST — create with children in one transaction
+// POST — create with clauses in one transaction
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
@@ -126,71 +135,82 @@ export async function POST(req: NextRequest) {
     }
     const body = parsed.data
 
-    const startDate = parseDate(body.startDate)
-    if (!startDate) return badRequest('Invalid start date')
-    const endDate = parseDate(body.endDate ?? undefined)
+    const date = parseDate(body.date)
+    if (!date) return badRequest('Invalid agreement date')
+    const periodFrom = parseDate(body.periodFrom)
+    const periodTo = parseDate(body.periodTo)
+    if (!periodFrom || !periodTo) return badRequest('Invalid period dates')
 
-    const validationError = validateAgreementBody(body, startDate, endDate)
+    const validationError = validateAgreementBody(body, periodFrom, periodTo)
     if (validationError) return badRequest(validationError)
 
-    let clientId: string | null = null
-    if (body.clientId) {
-      const client = await db.client.findUnique({
-        where: { id: body.clientId },
-        select: { id: true },
-      })
-      if (!client) return badRequest('Selected client no longer exists')
-      clientId = client.id
-    }
+    const { otherParty } = splitParties(body)
+    const normalized = normalizeClauses(body)
+    const now = new Date()
 
-    const normalized = normalizeAgreementChildren(body)
-
-    // The AGR-YYYY-NNNN sequence is allocated inside the transaction; retry a
-    // couple of times if a concurrent insert wins the same reference (P2002).
     let created: AgreementFull | null = null
-    for (let attempt = 0; attempt < 3 && !created; attempt++) {
-      try {
-        created = await db.$transaction(async (tx) => {
-          const refNumber = await nextRefNumber(tx, startDate.getFullYear())
-          return tx.agreement.create({
-            data: {
-              refNumber,
-              title: body.title.trim(),
-              partyA: 'Landmark Inter Gulf LLC',
-              clientId,
-              clientName: body.clientName.trim(),
-              type: body.type ?? 'labor_supply',
-              layoutStyle: body.layoutStyle ?? 'detailed',
-              startDate,
-              endDate,
-              status: body.status ?? 'draft',
-              value: normalized.value,
-              currency: 'SAR',
-              notes: body.notes?.trim() || null,
-              createdByName: auth.name,
-              items: { create: normalized.items },
-              installments: { create: normalized.installments },
-              clauses: { create: normalized.clauses },
-            },
-            include: agreementFullInclude,
+    try {
+      created = await db.$transaction(async (tx) => {
+        // Saved party ("Save this party for future agreements")
+        let otherPartyId = body.otherPartyId?.trim() || null
+        if (body.saveOtherParty) {
+          const saved = await upsertSavedParty(tx, otherParty, otherPartyId, now)
+          otherPartyId = saved.id
+        } else if (otherPartyId) {
+          const exists = await tx.agreementParty.findUnique({
+            where: { id: otherPartyId },
+            select: { id: true },
           })
+          if (!exists) otherPartyId = null
+        }
+
+        return tx.agreement.create({
+          data: {
+            agreementNo: body.agreementNo,
+            date,
+            titleEn: body.titleEn,
+            titleAr: body.titleAr,
+            ourCompanyIs: body.ourCompanyIs,
+            firstPartyJson: JSON.stringify(body.firstParty),
+            secondPartyJson: JSON.stringify(body.secondParty),
+            otherPartyId,
+            otherPartyNameEn: otherParty.name.en.trim(),
+            otherPartyNameAr: otherParty.name.ar.trim(),
+            introEn: body.introEn,
+            introAr: body.introAr,
+            periodFrom,
+            periodTo,
+            priceMode: body.priceMode,
+            priceAmount: body.priceMode === 'amount' ? body.priceAmount ?? null : null,
+            priceEn: body.priceEn,
+            priceAr: body.priceAr,
+            showLetterheadSpace: body.showLetterheadSpace,
+            status: body.status,
+            lastEditedBy: auth.name,
+            lastEditedAt: now,
+            createdByName: auth.name,
+            clauses: { create: normalized },
+          },
+          include: agreementFullInclude,
         })
-      } catch (e) {
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue
-        throw e
+      })
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return badRequest(`Agreement No ${body.agreementNo} already exists — pick another.`)
       }
+      throw e
     }
-    if (!created) return serverError('Could not allocate an agreement reference — try again')
+    if (!created) return serverError('Could not create the agreement — try again')
 
     await logActivity({
       user: auth,
       action: 'created',
       module: 'agreement',
-      description: `Agreement ${created.refNumber} — ${created.title} (${created.clientName})`,
-      amount: created.value,
+      description: `Agreement ${created.agreementNo} — ${created.titleEn} (${created.otherPartyNameEn})`,
     })
     return ok(mapAgreement(created), 201)
-  } catch {
+  } catch (err) {
+    console.error('[api/agreements POST]', err)
     return serverError()
   }
 }

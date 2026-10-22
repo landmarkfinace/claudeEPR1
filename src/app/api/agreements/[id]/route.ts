@@ -1,10 +1,10 @@
 // Agreement API — GET / PUT / DELETE a single agreement.
-// GET returns the agreement with ALL children (items, installments, clauses)
-// ordered by sr. PUT performs a FULL REPLACE of the children inside one
-// transaction (delete + recreate with fresh sr ordering) and recomputes the
-// contract value server-side for the detailed layout. DELETE cascades to the
-// children (schema-level onDelete: Cascade).
+// GET returns the row with clauses ordered by `order` and both party JSON
+// snapshots parsed. PUT performs a FULL REPLACE of the clauses inside one
+// transaction and stamps lastEditedBy / lastEditedAt. DELETE cascades to the
+// clauses (schema-level onDelete: Cascade).
 import { NextRequest } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import {
   ok,
@@ -20,8 +20,11 @@ import {
   agreementBodySchema,
   agreementFullInclude,
   mapAgreement,
-  normalizeAgreementChildren,
+  normalizeClauses,
   validateAgreementBody,
+  splitParties,
+  upsertSavedParty,
+  type AgreementFull,
 } from '@/lib/agreement-server'
 
 type Params = { params: Promise<{ id: string }> }
@@ -38,7 +41,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     })
     if (!agreement) return notFound('Agreement not found')
     return ok(mapAgreement(agreement))
-  } catch {
+  } catch (err) {
+    console.error('[api/agreements/[id] GET]', err)
     return serverError()
   }
 }
@@ -64,64 +68,83 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
     const body = parsed.data
 
-    const startDate = parseDate(body.startDate)
-    if (!startDate) return badRequest('Invalid start date')
-    const endDate = parseDate(body.endDate ?? undefined)
+    const date = parseDate(body.date)
+    if (!date) return badRequest('Invalid agreement date')
+    const periodFrom = parseDate(body.periodFrom)
+    const periodTo = parseDate(body.periodTo)
+    if (!periodFrom || !periodTo) return badRequest('Invalid period dates')
 
-    const validationError = validateAgreementBody(body, startDate, endDate)
+    const validationError = validateAgreementBody(body, periodFrom, periodTo)
     if (validationError) return badRequest(validationError)
 
-    let clientId: string | null = null
-    if (body.clientId) {
-      const client = await db.client.findUnique({
-        where: { id: body.clientId },
-        select: { id: true },
+    const { otherParty } = splitParties(body)
+    const normalized = normalizeClauses(body)
+    const now = new Date()
+
+    let updated: AgreementFull
+    try {
+      updated = await db.$transaction(async (tx) => {
+        let otherPartyId = body.otherPartyId?.trim() || null
+        if (body.saveOtherParty) {
+          const saved = await upsertSavedParty(tx, otherParty, otherPartyId, now)
+          otherPartyId = saved.id
+        } else if (otherPartyId) {
+          const exists = await tx.agreementParty.findUnique({
+            where: { id: otherPartyId },
+            select: { id: true },
+          })
+          if (!exists) otherPartyId = null
+        }
+
+        // Full replace of the clause set with fresh ordering
+        await tx.agreementClause.deleteMany({ where: { agreementId: id } })
+
+        return tx.agreement.update({
+          where: { id },
+          data: {
+            agreementNo: body.agreementNo,
+            date,
+            titleEn: body.titleEn,
+            titleAr: body.titleAr,
+            ourCompanyIs: body.ourCompanyIs,
+            firstPartyJson: JSON.stringify(body.firstParty),
+            secondPartyJson: JSON.stringify(body.secondParty),
+            otherPartyId,
+            otherPartyNameEn: otherParty.name.en.trim(),
+            otherPartyNameAr: otherParty.name.ar.trim(),
+            introEn: body.introEn,
+            introAr: body.introAr,
+            periodFrom,
+            periodTo,
+            priceMode: body.priceMode,
+            priceAmount: body.priceMode === 'amount' ? body.priceAmount ?? null : null,
+            priceEn: body.priceEn,
+            priceAr: body.priceAr,
+            showLetterheadSpace: body.showLetterheadSpace,
+            status: body.status,
+            lastEditedBy: auth.name,
+            lastEditedAt: now,
+            clauses: { create: normalized },
+          },
+          include: agreementFullInclude,
+        })
       })
-      if (!client) return badRequest('Selected client no longer exists')
-      clientId = client.id
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        return badRequest(`Agreement No ${body.agreementNo} already exists — pick another.`)
+      }
+      throw e
     }
-
-    const normalized = normalizeAgreementChildren(body)
-
-    // Full replace: header fields updated, children deleted + recreated with
-    // deterministic sr ordering — all inside one transaction.
-    const updated = await db.$transaction(async (tx) => {
-      await tx.agreementItem.deleteMany({ where: { agreementId: id } })
-      await tx.agreementInstallment.deleteMany({ where: { agreementId: id } })
-      await tx.agreementClause.deleteMany({ where: { agreementId: id } })
-
-      return tx.agreement.update({
-        where: { id },
-        data: {
-          title: body.title.trim(),
-          partyA: 'Landmark Inter Gulf LLC',
-          clientId,
-          clientName: body.clientName.trim(),
-          type: body.type ?? 'labor_supply',
-          layoutStyle: body.layoutStyle ?? 'detailed',
-          startDate,
-          endDate,
-          status: body.status ?? 'draft',
-          value: normalized.value,
-          currency: 'SAR',
-          notes: body.notes?.trim() || null,
-          items: { create: normalized.items },
-          installments: { create: normalized.installments },
-          clauses: { create: normalized.clauses },
-        },
-        include: agreementFullInclude,
-      })
-    })
 
     await logActivity({
       user: auth,
       action: 'updated',
       module: 'agreement',
-      description: `Agreement ${updated.refNumber} — ${updated.title} (${updated.clientName})`,
-      amount: updated.value,
+      description: `Agreement ${updated.agreementNo} — ${updated.titleEn} (${updated.otherPartyNameEn})`,
     })
     return ok(mapAgreement(updated))
-  } catch {
+  } catch (err) {
+    console.error('[api/agreements/[id] PUT]', err)
     return serverError()
   }
 }
@@ -134,7 +157,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
     const existing = await db.agreement.findUnique({
       where: { id },
-      select: { id: true, refNumber: true, title: true, clientName: true, value: true },
+      select: { id: true, agreementNo: true, titleEn: true, otherPartyNameEn: true },
     })
     if (!existing) return notFound('Agreement not found')
 
@@ -144,11 +167,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
       user: auth,
       action: 'deleted',
       module: 'agreement',
-      description: `Agreement ${existing.refNumber} — ${existing.title} (${existing.clientName})`,
-      amount: existing.value,
+      description: `Agreement ${existing.agreementNo} — ${existing.titleEn} (${existing.otherPartyNameEn})`,
     })
     return ok({ deleted: true })
-  } catch {
+  } catch (err) {
+    console.error('[api/agreements/[id] DELETE]', err)
     return serverError()
   }
 }

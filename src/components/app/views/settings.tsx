@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   Building2,
   DatabaseBackup,
@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Save,
   ShieldCheck,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, getAuthToken } from '@/lib/api-client'
@@ -91,6 +92,8 @@ export function SettingsView() {
   const [nameError, setNameError] = useState<string | null>(null)
   const [backingUp, setBackingUp] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
+  const signatureInputRef = useRef<HTMLInputElement>(null)
+  const stampInputRef = useRef<HTMLInputElement>(null)
 
   /** Download the full-system JSON backup (admin-only endpoint). */
   async function handleBackup() {
@@ -148,6 +151,25 @@ export function SettingsView() {
     }
   }
 
+  /** Shared handler for the agreement signature / stamp uploads (512 px). */
+  async function handleAgreementImageSelected(
+    file: File | undefined,
+    key: 'companySignature' | 'companyStamp',
+    inputRef: RefObject<HTMLInputElement | null>
+  ) {
+    if (!file) return
+    try {
+      setUploading(true)
+      const dataUrl = await fileToDataUrl(file, 512)
+      setField(key, dataUrl)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not process the image')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
   async function handleSave() {
     const companyName = form.companyName.trim()
     if (!companyName) {
@@ -162,12 +184,17 @@ export function SettingsView() {
         address: form.address,
         addressAr: form.addressAr.trim(),
         phone: form.phone,
+        fax: form.fax,
         email: form.email,
         logo: form.logo,
         currency: form.currency.trim() || 'SAR',
         defaultPayType: form.defaultPayType,
         authorizedSignatory: form.authorizedSignatory.trim(),
+        authorizedSignatoryAr: form.authorizedSignatoryAr.trim(),
         signatoryTitle: form.signatoryTitle.trim(),
+        signatoryTitleAr: form.signatoryTitleAr.trim(),
+        companySignature: form.companySignature,
+        companyStamp: form.companyStamp,
         vatNumber: form.vatNumber.trim(),
         crNumber: form.crNumber.trim(),
         bankName: form.bankName.trim(),
@@ -264,7 +291,7 @@ export function SettingsView() {
               />
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="company-phone">Phone</Label>
                 <Input
@@ -274,6 +301,19 @@ export function SettingsView() {
                   placeholder="+966 11 000 0000"
                   disabled={!canEdit}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="company-fax">Fax</Label>
+                <Input
+                  id="company-fax"
+                  value={form.fax}
+                  onChange={(e) => setField('fax', e.target.value)}
+                  placeholder="+966 11 000 0001"
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Printed in the agreement party blocks (Tel / Fax line).
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="company-email">Email</Label>
@@ -348,8 +388,39 @@ export function SettingsView() {
                 />
               </div>
             </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="signatory-name-ar">
+                  Signatory Name — <span lang="ar" dir="rtl">الاسم بالعربية</span>
+                </Label>
+                <Input
+                  id="signatory-name-ar"
+                  lang="ar"
+                  dir="rtl"
+                  value={form.authorizedSignatoryAr}
+                  onChange={(e) => setField('authorizedSignatoryAr', e.target.value)}
+                  placeholder="قاضي نظمول قاضي كمال"
+                  disabled={!canEdit}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="signatory-title-ar">
+                  Signatory Title — <span lang="ar" dir="rtl">المنصب بالعربية</span>
+                </Label>
+                <Input
+                  id="signatory-title-ar"
+                  lang="ar"
+                  dir="rtl"
+                  value={form.signatoryTitleAr}
+                  onChange={(e) => setField('signatoryTitleAr', e.target.value)}
+                  placeholder="الرئيس التنفيذي"
+                  disabled={!canEdit}
+                />
+              </div>
+            </div>
             <p className="-mt-2 text-xs text-muted-foreground">
-              Printed on every salary slip in the “Approved By” signature block.
+              Printed on every salary slip in the “Approved By” signature block and auto-fills our
+              company party in the bilingual Agreements module.
             </p>
 
             <div className="grid gap-5 sm:grid-cols-2">
@@ -428,6 +499,91 @@ export function SettingsView() {
                 Shown in the sidebar and on printed documents. Images are resized to 256 px.
                 Removing a custom logo restores the Landmark Inter Gulf brand mark.
               </p>
+            </div>
+
+            {/* ---- Agreement print assets: signature + stamp ---- */}
+            <div className="space-y-2">
+              <Label>Company Signature &amp; Stamp</Label>
+              <p className="-mt-1 text-xs text-muted-foreground">
+                Optional. Auto-fills OUR party in the bilingual Agreements module — printed in the
+                signature block (max 45&nbsp;mm wide). Images are resized to 512 px.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {(
+                  [
+                    {
+                      key: 'companySignature' as const,
+                      label: 'Signature image',
+                      alt: 'Company signature',
+                      empty: 'No signature uploaded — a blank line is printed',
+                      inputRef: signatureInputRef,
+                    },
+                    {
+                      key: 'companyStamp' as const,
+                      label: 'Company stamp',
+                      alt: 'Company stamp',
+                      empty: 'No stamp uploaded — a dashed stamp box is printed',
+                      inputRef: stampInputRef,
+                    },
+                  ] as const
+                ).map((slot) => (
+                  <div
+                    key={slot.key}
+                    className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/20 p-3"
+                  >
+                    {form[slot.key] ? (
+                      <img
+                        src={form[slot.key]}
+                        alt={slot.alt}
+                        className="h-14 w-32 rounded border bg-white object-contain p-1"
+                      />
+                    ) : (
+                      <div className="flex h-14 w-32 items-center justify-center rounded border border-dashed text-center text-[10px] leading-tight text-muted-foreground">
+                        {slot.empty}
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <input
+                        ref={slot.inputRef}
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(e) =>
+                          void handleAgreementImageSelected(e.target.files?.[0], slot.key, slot.inputRef)
+                        }
+                        aria-label={`Upload ${slot.label}`}
+                        disabled={!canEdit || uploading}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => slot.inputRef.current?.click()}
+                        disabled={!canEdit || uploading}
+                      >
+                        {uploading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ImagePlus className="h-4 w-4" />
+                        )}
+                        Upload
+                      </Button>
+                      {form[slot.key] ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setField(slot.key, '')}
+                          disabled={!canEdit}
+                        >
+                          <X className="h-4 w-4" />
+                          Remove
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
