@@ -1736,8 +1736,9 @@ export function QuotationsView() {
                 <div>
                   <Label className="text-sm">Signature &amp; Company Stamp</Label>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Upload PNG/JPEG (≤ 2 MB), drag to position on the A4 page — the exact placement is
-                    reproduced in the printed document.
+                    Upload PNG/JPEG (≤ 2 MB) — the signature snaps onto its line and the
+                    stamp into the circle of the <span className="font-medium text-foreground">Approved By</span> box,
+                    always at the end of the letter. The preview is exactly what prints.
                   </p>
                 </div>
               </div>

@@ -32,11 +32,11 @@ const PAYROLL_INCLUDE = {
       staffCategory: { select: { id: true, name: true } },
     },
   },
-  project: { select: { id: true, name: true, client: { select: { name: true } } } },
+  project: { select: { id: true, name: true, clientId: true, client: { select: { name: true } } } },
 } satisfies Prisma.PayrollInclude
 
 /** Flatten the nested client relation to `project.clientName` for the client side. */
-function serializePayroll<T extends { project: { id: string; name: string; client: { name: string } | null } | null }>(row: T) {
+function serializePayroll<T extends { project: { id: string; name: string; clientId: string | null; client: { name: string } | null } | null }>(row: T) {
   return {
     ...row,
     project: row.project ? { ...row.project, clientName: row.project.client?.name ?? null } : null,

@@ -1039,17 +1039,29 @@ function PayrollFormDialog({
 
   const [staffOptions, setStaffOptions] = useState<StaffRow[]>([])
   const [projectOptions, setProjectOptions] = useState<ProjectRow[]>([])
+  const [clientOptions, setClientOptions] = useState<ClientRow[]>([])
   const [optionsLoading, setOptionsLoading] = useState(false)
   const [staffOpen, setStaffOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [filling, setFilling] = useState(false)
   const [form, setForm] = useState<FormState>(() => defaultForm(defaultPayType))
 
-  // Client scoping — when the list is filtered by a client, the staff picker
-  // defaults to the workers deployed to that client (toggleable).
-  const activeClientId = clientFilterId ?? ''
+  // Client scoping — selectable IN-FORM so the user always sees which client's
+  // payroll is being created. Defaults to the list's client filter (if any) and
+  // for edits to the payroll's project client.
+  const [selectedClientId, setSelectedClientId] = useState('')
+  const activeClientId = selectedClientId
   const [deployedWorkers, setDeployedWorkers] = useState<DeployedWorker[]>([])
   const [showAllStaff, setShowAllStaff] = useState(false)
+
+  // Display name of the in-form selected client (falls back to the list filter)
+  const activeClientName = useMemo(
+    () =>
+      clientOptions.find((c) => c.id === selectedClientId)?.name ??
+      clientFilterName ??
+      null,
+    [clientOptions, selectedClientId, clientFilterName]
+  )
 
   // Automatic advance deduction preview for the selected staff + period
   const [advancePreview, setAdvancePreview] = useState<AdvancePayrollPreview | null>(null)
@@ -1072,14 +1084,16 @@ function PayrollFormDialog({
     Promise.all([
       fetchAllPages<StaffRow>('/api/staff', { status: 'active' }),
       fetchAllPages<ProjectRow>('/api/projects'),
+      fetchAllPages<ClientRow>('/api/clients'),
     ])
-      .then(([staff, projects]) => {
+      .then(([staff, projects, clients]) => {
         if (cancelled) return
         setStaffOptions(staff)
         setProjectOptions(projects)
+        setClientOptions(clients)
       })
       .catch(() => {
-        if (!cancelled) toast.error('Failed to load staff and projects')
+        if (!cancelled) toast.error('Failed to load staff, projects and clients')
       })
       .finally(() => {
         if (!cancelled) setOptionsLoading(false)
@@ -1107,30 +1121,43 @@ function PayrollFormDialog({
         payType: editing.payType,
         taxCode: editing.taxCode ?? 'N/A',
       })
+      // Edits scope to the client of the payroll's project (when linked)
+      setSelectedClientId(editing.project?.clientId ?? '')
     } else {
       setForm(defaultForm(defaultPayType))
+      // New payroll — default to the client filter active in the list (if any)
+      setSelectedClientId(clientFilterId ?? '')
     }
 
-    // Reset client scoping and fetch this client's deployed workers
+    // Reset the staff-scope toggle
     setShowAllStaff(false)
-    if (clientFilterId) {
-      fetchAllPages<DeployedWorker>('/api/deployments', {
-        clientId: clientFilterId,
-        assignment: 'assigned',
-      })
-        .then((rows) => {
-          if (!cancelled) setDeployedWorkers(rows)
-        })
-        .catch(() => {
-          if (!cancelled) setDeployedWorkers([])
-        })
-    } else {
-      setDeployedWorkers([])
-    }
     return () => {
       cancelled = true
     }
   }, [open, editing, defaultPayType, clientFilterId])
+
+  // Workers deployed to the currently selected client — re-fetched whenever
+  // the in-form client selector changes so the staff picker stays scoped.
+  useEffect(() => {
+    if (!open || !selectedClientId) {
+      setDeployedWorkers([])
+      return
+    }
+    let cancelled = false
+    fetchAllPages<DeployedWorker>('/api/deployments', {
+      clientId: selectedClientId,
+      assignment: 'assigned',
+    })
+      .then((rows) => {
+        if (!cancelled) setDeployedWorkers(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setDeployedWorkers([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, selectedClientId])
 
   const selectedStaff = useMemo(
     () => staffOptions.find((s) => s.id === form.staffId) ?? null,
@@ -1153,12 +1180,17 @@ function PayrollFormDialog({
     return staffOptions.filter((s) => deployed.has(s.id))
   }, [staffOptions, activeClientId, showAllStaff, deployedWorkers])
 
-  // Projects grouped by client company; the active client's group comes first
+  // Projects grouped by client company; the active client's group comes first.
+  // When a specific client is selected in-form, ONLY that client's projects
+  // are listed so the payroll is unambiguously tied to one client.
   const groupedProjects = useMemo(() => {
     type Group = { key: string; label: string; mine: boolean; projects: ProjectRow[] }
     const groups: Group[] = []
     const byKey = new Map<string, Group>()
-    for (const p of projectOptions) {
+    const pool = activeClientId
+      ? projectOptions.filter((p) => p.clientId === activeClientId)
+      : projectOptions
+    for (const p of pool) {
       const key = p.clientId ?? '__none'
       let g = byKey.get(key)
       if (!g) {
@@ -1267,6 +1299,21 @@ function PayrollFormDialog({
     setStaffOpen(false)
   }
 
+  /**
+   * Switch the in-form client scope. The current project is kept only when it
+   * belongs to the newly selected client; otherwise it is cleared so the
+   * payroll can never end up on another client's project by accident.
+   */
+  function handleSelectClient(v: string) {
+    const clientId = v === 'all' ? '' : v
+    setSelectedClientId(clientId)
+    if (!clientId) return
+    const projectStillValid =
+      form.projectId !== 'none' &&
+      projectOptions.some((p) => p.id === form.projectId && p.clientId === clientId)
+    if (!projectStillValid) setField({ projectId: 'none' })
+  }
+
   function handleStatusChange(v: string) {
     const status: PayrollStatus = v === 'paid' ? 'paid' : 'pending'
     setForm((f) => ({
@@ -1365,8 +1412,8 @@ function PayrollFormDialog({
             {editing
               ? `Update the payroll for ${editing.staff.fullName} — ${monthName(editing.month)} ${editing.year}. Gross, deductions and net pay are recalculated on save.`
               : activeClientId
-                ? `Client view — ${clientFilterName}: pick from the workers deployed to this client. Totals are calculated automatically and re-verified by the server.`
-                : 'Fill hours, rates and deductions. Gross, deductions and net pay are calculated automatically and re-verified by the server.'}
+                ? `Payroll for ${activeClientName ?? 'this client'} — pick from the workers deployed to this client. Totals are calculated automatically and re-verified by the server.`
+                : 'Select a client to see which company this payroll belongs to, then fill hours, rates and deductions. Gross, deductions and net pay are calculated automatically and re-verified by the server.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1407,7 +1454,7 @@ function PayrollFormDialog({
                     <CommandList>
                       <CommandEmpty>
                         {activeClientId && !showAllStaff
-                          ? `No workers deployed to ${clientFilterName ?? 'this client'} match this search.`
+                          ? `No workers deployed to ${activeClientName ?? 'this client'} match this search.`
                           : 'No staff found.'}
                       </CommandEmpty>
                       {activeClientId ? (
@@ -1417,7 +1464,7 @@ function PayrollFormDialog({
                             <span className="truncate">
                               {deployedWorkers.length} deployed to{' '}
                               <span className="font-medium text-foreground">
-                                {clientFilterName ?? 'this client'}
+                                {activeClientName ?? 'this client'}
                               </span>
                             </span>
                           </p>
@@ -1477,7 +1524,7 @@ function PayrollFormDialog({
                     <span className="truncate">
                       {showAllStaff
                         ? 'Showing all staff'
-                        : `${visibleStaff.length} worker${visibleStaff.length === 1 ? '' : 's'} deployed to ${clientFilterName ?? 'this client'}`}
+                        : `${visibleStaff.length} worker${visibleStaff.length === 1 ? '' : 's'} deployed to ${activeClientName ?? 'this client'}`}
                     </span>
                   </span>
                 ) : null}
@@ -1490,12 +1537,38 @@ function PayrollFormDialog({
             </div>
 
             <div className="space-y-2">
+              <Label>Client</Label>
+              <Select
+                value={activeClientId || 'all'}
+                onValueChange={handleSelectClient}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clients</SelectItem>
+                  {clientOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Building2 className="h-3 w-3 shrink-0" />
+                {activeClientId
+                  ? `This payroll is for ${activeClientName ?? 'this client'} — workers and projects are scoped to this client.`
+                  : 'Select a client to scope workers and projects to that client.'}
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>Project (optional)</Label>
                 {activeClientId ? (
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                     <Building2 className="h-3 w-3" />
-                    {clientFilterName} projects first
+                    {activeClientName} only
                   </span>
                 ) : null}
               </div>

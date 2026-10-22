@@ -36,8 +36,10 @@
 // signatures) flows block-by-block onto the last items page while it fits
 // and continues on a fresh page from the TOP (signatures are never stranded
 // alone), and each page's leftover room is handed back to its item rows so
-// short documents fill the A4 nicely. Signature/stamp assets placed with the
-// AssetPlacer canvas render on the last page at their saved coordinates.
+// short documents fill the A4 nicely. Uploaded signature/stamp artwork is
+// anchored INTO the "Approved By" box on the last page: the signature sits
+// exactly on its line and the stamp inside the dashed circle — they flow with
+// the letter content (always below it).
 import { Printer, FileSpreadsheet, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -485,7 +487,12 @@ export function QuotationDocument({
   const client = q.client
   const vatPercent = Math.round(q.vatRate * 100)
   const items = q.items ?? []
+  // Visible signature/stamp artwork — anchored INTO the "Approved By" box
+  // (signature sits exactly on its line, stamp inside the dashed circle), so
+  // the artwork always lands at the end of the letter, wherever that box flows.
   const assets = (q.assets ?? []).filter((a) => a.visible)
+  const signatureAsset = assets.find((a) => a.type === 'signature') ?? null
+  const stampAsset = assets.find((a) => a.type === 'stamp') ?? null
   const netTotal = round2(q.subtotal - q.discount)
   const money = (n: number) => formatNumber(n) // template style: plain numbers — SAR lives in headers only
   const geo = geometryFor(letterhead)
@@ -1595,13 +1602,23 @@ export function QuotationDocument({
                       </div>
                       <div className="flex items-end justify-between gap-2 px-2.5 py-[5px]">
                         <div className="min-w-0 flex-1 space-y-[1.1mm]">
+                          {/* Signature line — uploaded signature sits EXACTLY on
+                              it (bottom-anchored, just above the border). */}
                           <div
-                            className="border-b border-neutral-500"
+                            className="relative border-b border-neutral-500"
                             style={{
                             height:
                               plan.roomyTier === 2 ? '13mm' : plan.roomyTier === 1 ? '9mm' : '6mm',
                           }}
-                          />
+                          >
+                            {signatureAsset ? (
+                              <img
+                                src={signatureAsset.dataUrl}
+                                alt="Authorized signature"
+                                className="absolute bottom-[0.7mm] left-0 h-[calc(100%-1.4mm)] max-w-full object-contain object-left-bottom"
+                              />
+                            ) : null}
+                          </div>
                           <p className="text-[8px] text-neutral-700">
                             <span className="font-semibold" style={{ color: MUTED }}>Name: </span>
                             {settings.authorizedSignatory || q.createdByName || preparedBy || '_____________________'}
@@ -1614,18 +1631,31 @@ export function QuotationDocument({
                             ____ / ____ / ________
                           </p>
                         </div>
+                        {/* Stamp circle — uploaded stamp fills it EXACTLY
+                            (dashed frame kept; placeholder text hidden). */}
                         <div
-                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[6px] font-bold uppercase leading-tight tracking-wide`}
+                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[6px] font-bold uppercase leading-tight tracking-wide`}
                           style={{ borderColor: GOLD, color: DARK_GOLD }}
                         >
-                          Company
-                          <br />
-                          Stamp
+                          {stampAsset ? (
+                            <img
+                              src={stampAsset.dataUrl}
+                              alt="Company stamp"
+                              className="absolute inset-[1.7mm] h-[calc(100%-3.4mm)] w-[calc(100%-3.4mm)] rounded-full object-contain"
+                            />
+                          ) : (
+                            <>
+                              Company
+                              <br />
+                              Stamp
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    {/* ACCEPTED BY — the client */}
+                    {/* ACCEPTED BY — the client (stays a physical-signature
+                        placeholder; the client signs on paper) */}
                     <div
                       className="overflow-hidden rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
@@ -1689,26 +1719,6 @@ export function QuotationDocument({
                 </div>
               ) : null}
             </div>
-
-            {/* ── signature / stamp assets (percent-of-page, last page) ── */}
-            {isLast
-              ? assets.map((a, i) => (
-                  <img
-                    key={a.id ?? `${a.type}-${i}`}
-                    src={a.dataUrl}
-                    alt={a.type === 'stamp' ? 'Company stamp' : 'Authorized signature'}
-                    className="pointer-events-none absolute"
-                    style={{
-                      left: `${a.posX}%`,
-                      top: `${a.posY}%`,
-                      width: `${a.width}%`,
-                      transform: `rotate(${a.rotation}deg)`,
-                      transformOrigin: 'center',
-                      zIndex: 20,
-                    }}
-                  />
-                ))
-              : null}
 
             {/* ── page footer strip — sits above the reserved bottom band ── */}
             <div

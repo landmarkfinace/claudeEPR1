@@ -374,7 +374,7 @@ export type PayrollRow = {
   payType: PayType
   taxCode: string | null
   staff: { id: string; fullName: string; iqamaId: string; staffCategory: { id: string; name: string } | null }
-  project: { id: string; name: string; clientName: string | null } | null
+  project: { id: string; name: string; clientId: string | null; clientName: string | null } | null
 }
 
 export type PayrollInput = {
@@ -1039,15 +1039,19 @@ export type DocItemRow = {
   hoursPerMonth?: number | null
 }
 
-/** Signature / stamp image placed on a quotation (percent-of-A4 coordinates). */
+/** Signature / stamp artwork of a quotation (anchored into the Approved By box in print). */
 export type QuotationAssetRow = {
   id?: string
   type: 'signature' | 'stamp'
   dataUrl: string
-  posX: number // % of page width (left edge)
-  posY: number // % of page height (top edge)
-  width: number // % of page width
-  rotation: number // degrees clockwise
+  // LEGACY free placement — kept for API/storage compatibility but IGNORED by
+  // the print renderer: the signature is anchored onto the Approved By box's
+  // signature line and the stamp inside its dashed circle (always below the
+  // letter body), so uploaded artwork always lands in the exact right spot.
+  posX: number // % of page width (left edge) — unused
+  posY: number // % of page height (top edge) — unused
+  width: number // % of page width — unused
+  rotation: number // degrees clockwise — unused
   visible: boolean
 }
 
