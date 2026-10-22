@@ -10,7 +10,7 @@
 // client rate, then to the worker's own pay rate (⚠ flagged). Each client group
 // carries Subtotal + 15% VAT + Grand Total and can be PRINTED / DOWNLOADED
 // separately as its own company summary.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BadgeDollarSign,
   Building2,
@@ -24,6 +24,8 @@ import {
   Lock,
   Pencil,
   Printer,
+  Trash2,
+  UserPlus,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -40,12 +42,29 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
 import { StatusBadge } from '@/components/app/shared/status-badge'
+import { ConfirmDialog } from '@/components/app/shared/confirm-dialog'
 import { printWithPageRule } from '@/components/app/print/print-page-rule'
 import { ClientSummaryPrintDialog } from '@/components/app/print/client-summary-print'
 import { useDebounce } from '@/hooks/use-debounce'
@@ -56,8 +75,11 @@ import { can, useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type {
   ClientBillingLine,
+  ClientRow,
   ClientSalaryGroup,
   ClientSalarySummaryData,
+  Paginated,
+  ProjectRow,
 } from '@/lib/types'
 
 const STAFF_SCOPE_OPTIONS = [
@@ -466,6 +488,430 @@ function BulkRateApply({
 }
 
 // ---------------------------------------------------------------------------
+// Add Client — create the client company inline (then add its workers).
+// ---------------------------------------------------------------------------
+
+const EMPTY_CLIENT_FORM = {
+  name: '',
+  nameAr: '',
+  contactPerson: '',
+  phone: '',
+  city: '',
+  crNumber: '',
+  vatNumber: '',
+}
+
+function AddClientDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onCreated: (client: { id: string; name: string }) => void
+}) {
+  const [form, setForm] = useState(EMPTY_CLIENT_FORM)
+  const [busy, setBusy] = useState(false)
+
+  // Reset every time the dialog opens (draft state lives only while open)
+  useEffect(() => {
+    if (open) setForm(EMPTY_CLIENT_FORM)
+  }, [open])
+
+  const set =
+    (k: keyof typeof EMPTY_CLIENT_FORM) =>
+    (e: ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  async function submit() {
+    const name = form.name.trim()
+    if (!name) {
+      toast.error('Client name is required')
+      return
+    }
+    const vat = form.vatNumber.trim().replace(/[\s-]/g, '')
+    if (vat && !/^\d{15}$/.test(vat)) {
+      toast.error('VAT number must be exactly 15 digits (or leave it empty)')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await api.post<ClientRow>('/api/clients', {
+        name,
+        nameAr: form.nameAr.trim(),
+        contactPerson: form.contactPerson.trim(),
+        phone: form.phone.trim(),
+        city: form.city.trim(),
+        crNumber: form.crNumber.trim(),
+        vatNumber: vat,
+      })
+      toast.success(`${res.name} created — now add its workers`)
+      onOpenChange(false)
+      onCreated({ id: res.id, name: res.name })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create the client')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>Add client company</DialogTitle>
+          <DialogDescription>
+            Create the client company this summary bills. Right after this, add its workers —
+            name, iqama no, project, total hours and rate.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="ac-name">Client name *</Label>
+            <Input
+              id="ac-name"
+              placeholder="e.g. Saudia Marine Services Co."
+              value={form.name}
+              onChange={set('name')}
+              maxLength={120}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="ac-name-ar">Arabic name</Label>
+              <Input id="ac-name-ar" dir="rtl" placeholder="الاسم بالعربية" value={form.nameAr} onChange={set('nameAr')} maxLength={160} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ac-contact">Contact person</Label>
+              <Input id="ac-contact" placeholder="e.g. Eng. Khalid" value={form.contactPerson} onChange={set('contactPerson')} maxLength={80} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ac-phone">Phone</Label>
+              <Input id="ac-phone" placeholder="e.g. 013 341 0000" value={form.phone} onChange={set('phone')} maxLength={40} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ac-city">City</Label>
+              <Input id="ac-city" placeholder="e.g. Jubail" value={form.city} onChange={set('city')} maxLength={60} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ac-cr">CR number</Label>
+              <Input id="ac-cr" placeholder="Commercial registration" value={form.crNumber} onChange={set('crNumber')} maxLength={40} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ac-vat">VAT number</Label>
+              <Input id="ac-vat" placeholder="15 digits (optional)" value={form.vatNumber} onChange={set('vatNumber')} maxLength={30} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => void submit()}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+            Create client
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Add / Edit Worker — a manually added billing row under a client.
+// Fields exactly as the client-signed sheet: worker name, iqama no, the
+// project they worked on, total hours and the rate charged to the client.
+// ---------------------------------------------------------------------------
+
+type ClientOption = { id: string; name: string }
+
+type WorkerForm = {
+  clientId: string
+  projectId: string // '' = none picked · 'none' = explicitly cleared
+  name: string
+  iqamaNo: string
+  totalHours: string
+  rate: string
+}
+
+const EMPTY_WORKER_FORM: WorkerForm = {
+  clientId: '',
+  projectId: '',
+  name: '',
+  iqamaNo: '',
+  totalHours: '',
+  rate: '',
+}
+
+function AddWorkerDialog({
+  open,
+  onOpenChange,
+  fixedClient,
+  editing,
+  month,
+  year,
+  currency,
+  clients,
+  projects,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  /** Client locked for this add/edit (the group's company); null = pick one */
+  fixedClient: ClientOption | null
+  /** Manual row being edited (null = create mode) */
+  editing: ClientBillingLine | null
+  month: number
+  year: number
+  currency: string
+  clients: ClientOption[]
+  projects: ProjectRow[]
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState<WorkerForm>(EMPTY_WORKER_FORM)
+  const [busy, setBusy] = useState(false)
+  const isEdit = editing !== null
+
+  // Initialize on open: edit mode prefills from the row, create mode starts blank
+  useEffect(() => {
+    if (!open) return
+    if (editing) {
+      setForm({
+        clientId: fixedClient?.id ?? '',
+        projectId: editing.projectId === '_unassigned' ? '' : editing.projectId,
+        name: editing.fullName,
+        iqamaNo: editing.iqamaId,
+        totalHours: String(editing.hours),
+        rate: String(editing.manualRate),
+      })
+    } else {
+      setForm({ ...EMPTY_WORKER_FORM, clientId: fixedClient?.id ?? '' })
+    }
+  }, [open, editing, fixedClient])
+
+  // Projects of the locked/selected client first, then the rest
+  const activeClientId = fixedClient?.id ?? form.clientId
+  const sortedProjects = useMemo(() => {
+    const mine: ProjectRow[] = []
+    const rest: ProjectRow[] = []
+    for (const p of projects) {
+      if (activeClientId && p.clientId === activeClientId) mine.push(p)
+      else rest.push(p)
+    }
+    return [...mine, ...rest]
+  }, [projects, activeClientId])
+
+  const hoursNum = form.totalHours.trim() === '' ? 0 : Number(form.totalHours)
+  const rateNum = form.rate.trim() === '' ? 0 : Number(form.rate)
+  const previewOk =
+    Number.isFinite(hoursNum) && Number.isFinite(rateNum) && hoursNum > 0 && rateNum > 0
+
+  const clientLabel = fixedClient?.name ?? 'the selected client'
+
+  async function submit() {
+    const clientId = fixedClient?.id ?? form.clientId
+    const name = form.name.trim()
+    const iqamaNo = form.iqamaNo.trim()
+    if (!clientId) {
+      toast.error('Select the client company')
+      return
+    }
+    if (!name) {
+      toast.error('Worker name is required')
+      return
+    }
+    if (!iqamaNo) {
+      toast.error('Iqama number is required')
+      return
+    }
+    if (!Number.isFinite(hoursNum) || hoursNum <= 0) {
+      toast.error('Total hours must be greater than 0')
+      return
+    }
+    if (!Number.isFinite(rateNum) || rateNum <= 0) {
+      toast.error(`Rate must be greater than 0 ${currency}/h`)
+      return
+    }
+    const projectId = form.projectId === 'none' ? null : form.projectId || null
+    setBusy(true)
+    try {
+      if (editing?.manualId) {
+        await api.patch(`/api/clients/salary-workers/${editing.manualId}`, {
+          name,
+          iqamaNo,
+          projectId,
+          totalHours: hoursNum,
+          rate: rateNum,
+        })
+        toast.success(`${name} updated`)
+      } else {
+        await api.post('/api/clients/salary-workers', {
+          clientId,
+          projectId,
+          month,
+          year,
+          name,
+          iqamaNo,
+          totalHours: hoursNum,
+          rate: rateNum,
+        })
+        toast.success(`${name} added under ${clientLabel}`)
+      }
+      onOpenChange(false)
+      onSaved()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save the worker')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? 'Edit worker' : 'Add worker'}</DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? `Update the manually added row — ${monthName(month)} ${year}.`
+              : `A worker billed under ${clientLabel} for ${monthName(month)} ${year} — name, iqama no, project worked on, total hours and the rate charged to the client.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {fixedClient || isEdit ? (
+            <div className="space-y-2">
+              <Label>Client company</Label>
+              <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                {fixedClient?.name ?? '—'}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="cw-client">Client company *</Label>
+              <Select
+                value={form.clientId}
+                onValueChange={(v) => setForm((f) => ({ ...f, clientId: v }))}
+              >
+                <SelectTrigger id="cw-client" className="h-10 w-full">
+                  <SelectValue placeholder="Select the client company" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clients.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="cw-name">Worker name *</Label>
+              <Input
+                id="cw-name"
+                placeholder="e.g. Md. Rafiq Islam"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                maxLength={120}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cw-iqama">Iqama no *</Label>
+              <Input
+                id="cw-iqama"
+                placeholder="e.g. 2456789012"
+                value={form.iqamaNo}
+                onChange={(e) => setForm((f) => ({ ...f, iqamaNo: e.target.value }))}
+                maxLength={60}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="cw-project">Project worked on</Label>
+            <Select
+              value={form.projectId}
+              onValueChange={(v) => setForm((f) => ({ ...f, projectId: v }))}
+            >
+              <SelectTrigger id="cw-project" className="h-10 w-full">
+                <SelectValue placeholder="Select project (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                {sortedProjects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                    {p.clientName ? ` — ${p.clientName}` : ''}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">— No specific project —</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Which project the worker worked on — used for the project grouping inside the
+              client&apos;s summary.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="cw-hours">Total hours *</Label>
+              <Input
+                id="cw-hours"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.5"
+                placeholder="e.g. 208"
+                value={form.totalHours}
+                onChange={(e) => setForm((f) => ({ ...f, totalHours: e.target.value }))}
+                className="tabular-nums"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cw-rate">Rate / hour ({currency}) *</Label>
+              <Input
+                id="cw-rate"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.25"
+                placeholder="e.g. 18"
+                value={form.rate}
+                onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
+                className="tabular-nums"
+              />
+            </div>
+          </div>
+          {previewOk ? (
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Amount:{' '}
+              <span className="font-semibold text-foreground tabular-nums">
+                {formatNumber(round2(hoursNum * rateNum))} {currency}
+              </span>{' '}
+              = {formatNumber(hoursNum)} h × {formatNumber(rateNum)} {currency}/h (excl. VAT)
+            </p>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => void submit()}>
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isEdit ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <UserPlus className="h-4 w-4" />
+            )}
+            {isEdit ? 'Save changes' : 'Add worker'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
 
@@ -486,6 +932,17 @@ export function ClientSalarySummaryView() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [printGroup, setPrintGroup] = useState<ClientSalaryGroup | null>(null)
   const [rateEdits, setRateEdits] = useState<RateEdits>({})
+
+  // Options for the Add Client / Add Worker dialogs (fetched once)
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([])
+  const [projectOptions, setProjectOptions] = useState<ProjectRow[]>([])
+  const [clientDialogOpen, setClientDialogOpen] = useState(false)
+  const [workerDialog, setWorkerDialog] = useState<{
+    open: boolean
+    client: ClientOption | null
+    editing: ClientBillingLine | null
+  }>({ open: false, client: null, editing: null })
+  const [deleteRow, setDeleteRow] = useState<ClientBillingLine | null>(null)
 
   const money = useCallback((n: number) => formatMoney(n, settings.currency), [settings.currency])
   const vatPercent = data ? Math.round(data.vatRate * 100) : 15
@@ -513,6 +970,18 @@ export function ClientSalarySummaryView() {
   useEffect(() => {
     void loadSummary()
   }, [loadSummary])
+
+  // Dialog dropdown data — active clients + all projects (once, on mount)
+  useEffect(() => {
+    api
+      .get<Paginated<ClientRow>>(`/api/clients${qs({ status: 'active', pageSize: 200 })}`)
+      .then((r) => setClientOptions(r.data.map((c) => ({ id: c.id, name: c.name }))))
+      .catch(() => {})
+    api
+      .get<Paginated<ProjectRow>>(`/api/projects${qs({ pageSize: 100 })}`)
+      .then((r) => setProjectOptions(r.data))
+      .catch(() => {})
+  }, [])
 
   // Live view = server data + in-progress rate edits (amounts update as you type)
   const view = useMemo(
@@ -555,6 +1024,21 @@ export function ClientSalarySummaryView() {
     setExpanded((prev) => (prev === key ? null : key))
   }, [])
 
+  /** Open the Add Worker dialog for a client group (null = pick the client inside) */
+  const openAddWorkerFor = useCallback((g: ClientSalaryGroup | null) => {
+    setWorkerDialog({
+      open: true,
+      client: g?.clientId ? { id: g.clientId, name: g.clientName } : null,
+      editing: null,
+    })
+  }, [])
+
+  /** Open the Edit Worker dialog for a manually added row */
+  const openEditWorker = useCallback((g: ClientSalaryGroup, r: ClientBillingLine) => {
+    if (!g.clientId || !r.manualId) return
+    setWorkerDialog({ open: true, client: { id: g.clientId, name: g.clientName }, editing: r })
+  }, [])
+
   const periodLabel = `${monthName(Number(month))} ${year}`
 
   /** Update the in-progress edit overlay (live recompute, no request) */
@@ -562,13 +1046,15 @@ export function ClientSalarySummaryView() {
     setRateEdits((prev) => ({ ...prev, [payrollId]: { ...prev[payrollId], ...patch } }))
   }, [])
 
-  /** Persist one worker's manual client rate (regular hours) */
-  const commitRate = useCallback(
-    async (payrollId: string, v: number) => {
-      await api.put(`/api/payrolls/${payrollId}/client-rate`, { clientRate: v })
-    },
-    []
-  )
+  /** Persist one worker's manual client rate (regular hours). Manually added
+   *  rows (synthetic `m:<id>` keys) keep their single rate on their own record. */
+  const commitRate = useCallback(async (payrollId: string, v: number) => {
+    if (payrollId.startsWith('m:')) {
+      await api.patch(`/api/clients/salary-workers/${payrollId.slice(2)}`, { rate: v })
+      return
+    }
+    await api.put(`/api/payrolls/${payrollId}/client-rate`, { clientRate: v })
+  }, [])
 
   /** Persist one worker's manual client OT rate */
   const commitOtRate = useCallback(async (payrollId: string, v: number) => {
@@ -766,6 +1252,18 @@ export function ClientSalarySummaryView() {
         title="Client Salary Summary"
         description={`Hours mirror this month's payroll — enter the client rate per worker (client price ≠ worker pay rate) + ${vatPercent}% VAT`}
       >
+        {can(user, 'clients.create') ? (
+          <Button variant="outline" className="print-hidden" onClick={() => setClientDialogOpen(true)}>
+            <Building2 className="h-4 w-4" />
+            Add Client
+          </Button>
+        ) : null}
+        {canEditRate ? (
+          <Button variant="outline" className="print-hidden" onClick={() => openAddWorkerFor(null)}>
+            <UserPlus className="h-4 w-4" />
+            Add Worker
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           className="print-hidden"
@@ -918,6 +1416,16 @@ export function ClientSalarySummaryView() {
                 live; every entry is saved per worker, per month.
               </span>
             </p>
+            <p className="flex items-start gap-2">
+              <UserPlus className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                <span className="font-semibold text-foreground">Workers without a payroll record</span>{' '}
+                can be added by hand — <span className="font-semibold text-foreground">Add Worker</span>{' '}
+                puts them under a client company with their name, iqama no, the project they worked
+                on, total hours and rate. They are billed exactly like the others and included in
+                that company&apos;s totals, print and CSV.
+              </span>
+            </p>
           </div>
         ) : null}
 
@@ -980,11 +1488,11 @@ export function ClientSalarySummaryView() {
           ) : groups.length === 0 ? (
             <EmptyState
               icon={FileBarChart}
-              title={search ? 'No matches for the current search' : `No payroll records for ${periodLabel}`}
+              title={search ? 'No matches for the current search' : `No billing rows for ${periodLabel}`}
               description={
                 search
                   ? 'Try a different client, worker, iqama or project name.'
-                  : 'Client billing mirrors payroll hours — create this month’s payroll in the Payroll module (or Salary Sheet) first, and every worker will appear here automatically with their hours.'
+                  : 'Client billing mirrors payroll hours — create this month’s payroll in the Payroll module (every worker then appears here automatically), or use Add Client / Add Worker above to enter workers by hand (name, iqama no, project, total hours, rate).'
               }
             />
           ) : (
@@ -1086,6 +1594,28 @@ export function ClientSalarySummaryView() {
                                         </div>
                                       ) : null}
                                     </div>
+                                    {canEditRate && r.source === 'manual' ? (
+                                      <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 w-7 p-0"
+                                          aria-label={`Edit ${r.fullName}`}
+                                          onClick={() => openEditWorker(g, r)}
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                                          aria-label={`Remove ${r.fullName} from the summary`}
+                                          onClick={() => setDeleteRow(r)}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    ) : null}
                                     <p className="shrink-0 text-sm font-semibold tabular-nums">
                                       {money(r.amount)}
                                     </p>
@@ -1109,6 +1639,17 @@ export function ClientSalarySummaryView() {
                             </div>
                           </div>
                           <div className="mt-3 flex gap-2">
+                            {canEditRate && g.clientId ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={() => openAddWorkerFor(g)}
+                              >
+                                <UserPlus className="h-3.5 w-3.5" />
+                                Add Worker
+                              </Button>
+                            ) : null}
                             <Button size="sm" variant="outline" className="flex-1" onClick={() => setPrintGroup(g)}>
                               <Printer className="h-3.5 w-3.5" />
                               Print
@@ -1260,6 +1801,12 @@ export function ClientSalarySummaryView() {
                                   </span>
                                 </p>
                                 <div className="print-hidden flex items-center gap-2">
+                                  {canEditRate && g.clientId ? (
+                                    <Button size="sm" variant="secondary" onClick={() => openAddWorkerFor(g)}>
+                                      <UserPlus className="h-3.5 w-3.5" />
+                                      Add Worker
+                                    </Button>
+                                  ) : null}
                                   <Button size="sm" variant="outline" onClick={() => setPrintGroup(g)}>
                                     <Printer className="h-3.5 w-3.5" />
                                     Print Summary
@@ -1338,6 +1885,7 @@ export function ClientSalarySummaryView() {
                                             </span>
                                           </TableHead>
                                           <TableHead className="h-8 px-3 text-right">Amount</TableHead>
+                                          <TableHead className="h-8 w-16 print:hidden" aria-label="Row actions" />
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
@@ -1351,20 +1899,27 @@ export function ClientSalarySummaryView() {
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5">
                                               <p className="font-medium">{r.fullName}</p>
-                                              <p className="text-[10px] text-muted-foreground">IQAMA {r.iqamaId}</p>
+                                              <p className="text-[10px] text-muted-foreground">
+                                                IQAMA {r.iqamaId}
+                                                {r.source === 'manual' ? ' · added by hand' : ''}
+                                              </p>
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5">{r.position ?? '—'}</TableCell>
                                             <TableCell className="px-3 py-1.5 text-muted-foreground">
                                               {r.categoryName ?? '—'}
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5 text-right tabular-nums">
-                                              <span className="inline-flex items-center gap-1">
-                                                {fmtHours(r.hours)}
-                                                <Lock
-                                                  className="h-2.5 w-2.5 text-muted-foreground/60"
-                                                  aria-label="Hours synced from payroll"
-                                                />
-                                              </span>
+                                              {r.source === 'manual' ? (
+                                                fmtHours(r.hours)
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1">
+                                                  {fmtHours(r.hours)}
+                                                  <Lock
+                                                    className="h-2.5 w-2.5 text-muted-foreground/60"
+                                                    aria-label="Hours synced from payroll"
+                                                  />
+                                                </span>
+                                              )}
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5 text-right tabular-nums">
                                               {r.otHours > 0 ? (
@@ -1415,6 +1970,30 @@ export function ClientSalarySummaryView() {
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5 text-right font-semibold tabular-nums">
                                               {money(r.amount)}
+                                            </TableCell>
+                                            <TableCell className="px-3 py-1.5 print:hidden">
+                                              {r.source === 'manual' && canEditRate ? (
+                                                <div className="flex items-center justify-end gap-1">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 p-0"
+                                                    aria-label={`Edit ${r.fullName}`}
+                                                    onClick={() => openEditWorker(g, r)}
+                                                  >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                                                    aria-label={`Remove ${r.fullName} from the summary`}
+                                                    onClick={() => setDeleteRow(r)}
+                                                  >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                  </Button>
+                                                </div>
+                                              ) : null}
                                             </TableCell>
                                           </TableRow>
                                         ))}
@@ -1480,6 +2059,58 @@ export function ClientSalarySummaryView() {
           Computer-generated summary — {settings.companyName} Workforce, Payroll &amp; Accounts System
         </p>
       </div>
+
+      {/* Add client → then add its workers under it */}
+      <AddClientDialog
+        open={clientDialogOpen}
+        onOpenChange={setClientDialogOpen}
+        onCreated={(c) => {
+          setClientOptions((prev) => (prev.some((x) => x.id === c.id) ? prev : [...prev, c]))
+          setWorkerDialog({ open: true, client: c, editing: null })
+        }}
+      />
+
+      {/* Add / edit a manually added worker row */}
+      <AddWorkerDialog
+        open={workerDialog.open}
+        onOpenChange={(o) =>
+          setWorkerDialog((prev) => (o ? prev : { open: false, client: null, editing: null }))
+        }
+        fixedClient={workerDialog.client}
+        editing={workerDialog.editing}
+        month={Number(month)}
+        year={Number(year)}
+        currency={settings.currency}
+        clients={clientOptions}
+        projects={projectOptions}
+        onSaved={() => {
+          void loadSummary()
+        }}
+      />
+
+      {/* Remove a manually added worker row */}
+      <ConfirmDialog
+        open={deleteRow !== null}
+        onOpenChange={(o) => {
+          if (!o) setDeleteRow(null)
+        }}
+        onConfirm={async () => {
+          if (!deleteRow?.manualId) return
+          try {
+            await api.del(`/api/clients/salary-workers/${deleteRow.manualId}`)
+            toast.success(`${deleteRow.fullName} removed from the summary`)
+            setDeleteRow(null)
+            await loadSummary()
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Could not remove the worker')
+          }
+        }}
+        title="Remove worker from the summary?"
+        item={deleteRow ? `${deleteRow.fullName} · IQAMA ${deleteRow.iqamaId}` : undefined}
+        description={`This removes the manually added billing row for ${periodLabel}. Payroll records are not affected.`}
+        confirmLabel="Remove"
+        destructive
+      />
 
       {/* Per-client printable billing statement */}
       <ClientSummaryPrintDialog

@@ -172,8 +172,14 @@ export type StaffCategory = {
 
 /** One worker × project billing line inside a client group (month-scoped) */
 export type ClientBillingLine = {
-  /** Payroll record this line mirrors (hours + manual client rates live there) */
+  /** Payroll record this line mirrors (hours + manual client rates live there).
+   *  Manual rows use the synthetic key `m:<ClientSalaryWorker.id>`. */
   payrollId: string
+  /** 'payroll' = mirrored from a Payroll row · 'manual' = added by hand in this
+   *  summary (ClientSalaryWorker record — name, iqama, project, hours, rate). */
+  source: 'payroll' | 'manual'
+  /** Present only on manual rows — id of the ClientSalaryWorker record */
+  manualId?: string
   projectId: string
   projectName: string
   staffId: string

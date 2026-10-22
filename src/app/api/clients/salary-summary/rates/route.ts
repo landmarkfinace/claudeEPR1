@@ -68,15 +68,26 @@ export async function PUT(req: NextRequest) {
 
     const result = await db.payroll.updateMany({ where, data })
 
+    // Manually added rows of the same project + month get the same rate —
+    // "apply to all" must mean ALL workers of the project, not only the ones
+    // with a payroll record. (Manual rows always carry hours, so the
+    // `onlyWithHours` filter does not apply to them.)
+    const manualResult = await db.clientSalaryWorker.updateMany({
+      where: { projectId: input.projectId, month: input.month, year: input.year },
+      data: { rate: input.clientRate },
+    })
+
+    const updated = result.count + manualResult.count
+
     await logActivity({
       user,
       module: 'payroll',
       action: 'updated',
-      description: `Client billing rate applied to ${result.count} worker${result.count === 1 ? '' : 's'} — ${project.name} · ${input.month}/${input.year}: ${input.clientRate}/h regular${input.clientOtRate !== undefined ? `, ${input.clientOtRate}/h OT` : ''}`,
+      description: `Client billing rate applied to ${updated} worker${updated === 1 ? '' : 's'} — ${project.name} · ${input.month}/${input.year}: ${input.clientRate}/h regular${input.clientOtRate !== undefined ? `, ${input.clientOtRate}/h OT` : ''}`,
     })
 
     return ok({
-      updated: result.count,
+      updated,
       projectId: input.projectId,
       clientRate: input.clientRate,
       clientOtRate: input.clientOtRate ?? null,

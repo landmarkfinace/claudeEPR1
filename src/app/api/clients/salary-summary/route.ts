@@ -7,6 +7,9 @@
 //   payroll.clientRate  — typed in this summary, per worker, per month
 //   fallback when 0     — the project's negotiated default client rate
 //   final fallback      — the worker's own pay rate (clearly flagged ⚠)
+// MANUALLY ADDED WORKERS (no payroll record — ClientSalaryWorker rows) are
+// merged into the same client groups: name, iqama no, project, total hours
+// and rate, exactly as entered. They join that client's totals, print and CSV.
 // Each group carries subtotal + 15% VAT + grand total and a per-worker line
 // list (hours, OT, rates, amount) so every company's summary can be printed /
 // downloaded separately.
@@ -159,6 +162,7 @@ export async function GET(req: NextRequest) {
       const otHours = p.overtimeHours
       g.rows.push({
         payrollId: p.id,
+        source: 'payroll',
         projectId: p.project?.id ?? '_unassigned',
         projectName: p.project?.name ?? 'Unassigned (no project)',
         staffId: p.staff.id,
@@ -187,6 +191,78 @@ export async function GET(req: NextRequest) {
         staffClients.set(p.staff.id, sc)
       }
       sc.clients.add(key)
+    }
+
+    // ---- Manually added workers (no payroll record) — merged into groups ----
+    // Grouped under their OWN client (row.clientId), regardless of which
+    // client the picked project belongs to — the client company is who pays.
+    const manual = await db.clientSalaryWorker.findMany({
+      where: { month, year },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            city: true,
+            contactPerson: true,
+            phone: true,
+            email: true,
+            crNumber: true,
+            address: true,
+            status: true,
+          },
+        },
+        project: { select: { id: true, name: true, clientRatePerHour: true } },
+      },
+      orderBy: [{ client: { name: 'asc' } }, { name: 'asc' }],
+    })
+
+    for (const w of manual) {
+      const key = w.client.id
+      let g = groups.get(key)
+      if (!g) {
+        g = {
+          clientId: w.client.id,
+          clientName: w.client.name,
+          city: w.client.city,
+          contactPerson: w.client.contactPerson,
+          phone: w.client.phone,
+          email: w.client.email,
+          crNumber: w.client.crNumber,
+          address: w.client.address,
+          clientStatus: w.client.status,
+          projectIds: new Set<string>(),
+          rows: [],
+        }
+        groups.set(key, g)
+      }
+      if (w.project) g.projectIds.add(w.project.id)
+
+      g.rows.push({
+        payrollId: `m:${w.id}`,
+        manualId: w.id,
+        source: 'manual',
+        projectId: w.project?.id ?? '_unassigned',
+        projectName: w.project?.name ?? 'Unassigned (no project)',
+        staffId: `m:${w.id}`,
+        fullName: w.name,
+        iqamaId: w.iqamaNo,
+        position: null,
+        categoryName: null,
+        hours: w.totalHours,
+        otHours: 0,
+        clientRate: w.rate,
+        clientOtRate: w.rate,
+        manualRate: w.rate,
+        manualOtRate: 0,
+        projectRate: 0,
+        rateSource: 'manual',
+        amount: round2(w.totalHours * w.rate),
+        workerRate: 0,
+        workerCost: 0,
+        monthlySalary: 0,
+        status: 'active',
+      })
     }
 
     // ---- Distinct-worker cards (a worker on 2 clients counts ONCE) ----

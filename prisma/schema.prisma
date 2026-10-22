@@ -82,6 +82,7 @@ model Client {
   agreements  Agreement[]
   eInvoices   EInvoice[] @relation("EInvoiceClient")
   nameLists   NameList[] @relation("NameListClient")
+  salaryWorkers ClientSalaryWorker[]
 
   @@index([status])
 }
@@ -105,9 +106,36 @@ model Project {
   payrolls     Payroll[]
   transactions Transaction[]
   nameLists    NameList[] @relation("NameListProject")
+  salaryWorkers ClientSalaryWorker[]
 
   @@index([status])
   @@index([clientId])
+}
+
+// Client Salary Summary — manually added billing rows. Workers the company
+// bills a client for WITHOUT a matching Payroll record (e.g. supplied through
+// a partner, or entered by hand from the client-signed sheet). One row = one
+// worker on one project for one month: name, iqama no, project, total hours
+// and the rate charged to the client. GET /api/clients/salary-summary merges
+// them into the client groups next to the payroll-mirrored lines, so they
+// join that client's totals, print and CSV automatically.
+model ClientSalaryWorker {
+  id         String   @id @default(cuid())
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectId  String?
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  month      Int // 1-12
+  year       Int
+  name       String
+  iqamaNo    String
+  totalHours Float    @default(0)
+  rate       Float    @default(0) // charged to the client per hour
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([clientId, month, year])
+  @@index([projectId])
 }
 
 model StaffCategory {
