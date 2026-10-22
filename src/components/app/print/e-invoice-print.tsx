@@ -413,7 +413,28 @@ export function EInvoiceDocument({
   const currency = settings.currency || 'SAR'
   const inv = invoice
   const items = inv.items ?? []
-  const title = DOC_TITLES[inv.docType] ?? DOC_TITLES.invoice
+  const title =
+    inv.invoiceKind === 'simplified' && inv.docType === 'invoice'
+      ? { en: 'SIMPLIFIED TAX INVOICE', ar: 'فاتورة ضريبية مبسطة' }
+      : (DOC_TITLES[inv.docType] ?? DOC_TITLES.invoice)
+  // Phase 2 standard invoices are only valid for the client after ZATCA clearance
+  const zatcaNotice =
+    inv.status === 'draft'
+      ? null
+      : inv.zatcaStatus === 'local_only' || inv.zatcaSubmissionMode === 'local'
+        ? 'LOCAL TEST — not valid with ZATCA'
+        : inv.hasSignedXml && inv.invoiceKind !== 'simplified' && inv.zatcaStatus !== 'cleared'
+          ? 'Not yet cleared by ZATCA — do not give to the client'
+          : null
+  // Buyer national address (structured) when entered, else the free-text address
+  const buyerNational = [
+    [inv.buyerBuildingNo, inv.buyerStreet].filter(Boolean).join(' '),
+    inv.buyerDistrict,
+    [inv.buyerCity, inv.buyerPostalCode].filter(Boolean).join(' '),
+    inv.buyerCountry && inv.buyerCountry !== 'SA' ? inv.buyerCountry : '',
+  ]
+    .filter(Boolean)
+    .join(', ')
   const companyName = settings.companyName || 'Landmark Inter Gulf'
   const balanceDue = round2(inv.totalDue - inv.paidAmount)
 
@@ -626,6 +647,14 @@ export function EInvoiceDocument({
                       </span>
                     </p>
                   ) : null}
+                  {inv.docType !== 'invoice' && inv.noteReason ? (
+                    <p className="mt-0.5 text-center text-[8.5px]" style={{ color: MUTED }}>
+                      Reason <span lang="ar" dir="rtl">(السبب)</span>:{' '}
+                      <span className="font-semibold" style={{ color: NAVY }}>
+                        {inv.noteReason}
+                      </span>
+                    </p>
+                  ) : null}
 
                   {/* 2 ─ gold rule broken by a centre diamond */}
                   <div className="mt-2 flex items-center gap-2">
@@ -684,7 +713,7 @@ export function EInvoiceDocument({
                           nameAr: inv.clientNameAr,
                           vat: inv.clientVatNumber,
                           cr: inv.clientCrNumber,
-                          addressEn: inv.clientAddressEn,
+                          addressEn: buyerNational || inv.clientAddressEn,
                           addressAr: inv.clientAddressAr,
                         },
                       ] as Array<{
@@ -981,6 +1010,12 @@ export function EInvoiceDocument({
                                   {it.descriptionAr}
                                 </p>
                               ) : null}
+                              {it.taxCategory && it.taxCategory !== 'S' ? (
+                                <p className="mt-px text-[7.5px] italic" style={{ color: MUTED }}>
+                                  {it.taxCategory === 'Z' ? 'Zero-rated' : it.taxCategory === 'E' ? 'VAT exempt' : 'Not subject to VAT'}
+                                  {it.exemptionReason ? ` — ${it.exemptionReason}` : ''}
+                                </p>
+                              ) : null}
                             </td>
                             <td className={`${td} border-b text-center`} style={{ borderColor: ROW_SEP }}>
                               <p>{it.unitEn || '—'}</p>
@@ -1227,15 +1262,20 @@ export function EInvoiceDocument({
                           style={{ width: '32mm', height: '32mm', borderColor: BORDER }}
                         >
                           <span className="text-[7px] font-semibold" style={{ color: MUTED }}>
-                            QR available
+                            QR appears
                             <br />
-                            after save
+                            after issuing
                           </span>
                           <span lang="ar" dir="rtl" className="text-[7px]" style={{ color: MUTED }}>
-                            الرمز بعد الحفظ
+                            يظهر الرمز بعد الإصدار
                           </span>
                         </div>
                       )}
+                      {zatcaNotice ? (
+                        <p className="mt-1 max-w-[34mm] text-center text-[7px] font-bold leading-tight text-red-700">
+                          {zatcaNotice}
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-center text-[7px] leading-tight" style={{ color: MUTED }}>
                         Scan to verify <span className="mx-0.5 text-neutral-300">|</span>{' '}
                         <span lang="ar" dir="rtl">امسح للتحقق</span>

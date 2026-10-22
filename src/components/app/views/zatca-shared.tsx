@@ -15,27 +15,62 @@ import { cn } from '@/lib/utils'
 
 import { Badge } from '@/components/ui/badge'
 
-export type ZatcaEnv = 'simulation' | 'preprod' | 'production'
+export type ZatcaEnv = 'local' | 'sandbox' | 'simulation' | 'production'
+export type ZatcaMode = 'phase1' | 'phase2'
 
-/** Per-environment Fatoora gateway URLs (public constants — client-safe copy of the server-side ZATCA_ENV_BASES). */
+/** Fatoora gateway URLs (client-safe copy of the server-side ZATCA_ENV_BASES). */
 export const ZATCA_ENV_GATEWAYS: Record<ZatcaEnv, string> = {
-  simulation: 'https://gw-fatura.zatca.gov.sa/e-invoicing/simulation',
-  preprod: 'https://gw-fatura.zatca.gov.sa/e-invoicing/developer-portal',
-  production: 'https://gw-fatura.zatca.gov.sa/e-invoicing/core',
+  local: '— nothing is sent —',
+  sandbox: 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal',
+  simulation: 'https://gw-fatoora.zatca.gov.sa/e-invoicing/simulation',
+  production: 'https://gw-fatoora.zatca.gov.sa/e-invoicing/core',
 }
 
 export const ENV_LABELS: Record<ZatcaEnv, string> = {
+  local: 'Local test',
+  sandbox: 'Sandbox',
   simulation: 'Simulation',
-  preprod: 'Pre-production',
   production: 'Production',
 }
 
-/** GET /api/zatca/profile — the raw CSID token never leaves the server. */
+export const ENV_HINTS: Record<ZatcaEnv, string> = {
+  local: 'Offline trial with a self-signed TEST certificate. Nothing reaches ZATCA and nothing produced here is legally valid.',
+  sandbox: 'ZATCA Developer Portal — free technical testing. Use OTP 123345 (ZATCA sandbox OTP). No legal effect.',
+  simulation: 'ZATCA Simulation portal — rehearsal with your real VAT number (OTP from fatoora.zatca.gov.sa → Simulation). No legal effect.',
+  production: 'ZATCA Core — LIVE. Invoices are legally cleared / reported. OTP from fatoora.zatca.gov.sa.',
+}
+
+export type ZatcaSellerAddress = {
+  street: string
+  buildingNo: string
+  additionalNo: string
+  district: string
+  city: string
+  postalCode: string
+}
+
+export type ZatcaComplianceCheck = { name: string; ok: boolean; status?: string; messages?: string[] }
+
+/** GET /api/zatca/profile — keys, CSIDs and secrets never leave the server. */
 export type ZatcaProfile = {
+  mode: ZatcaMode
   env: ZatcaEnv
-  egsSerial: string
-  csidTokenSet: boolean
   apiBase: string
+  egsSerial: string
+  egsName: string
+  branchName: string
+  industry: string
+  invoiceTypes: '1100' | '1000' | '0100'
+  sellerAddress: ZatcaSellerAddress
+  keysReady: boolean
+  csrReady: boolean
+  csrEnv: ZatcaEnv | null
+  complianceCsid: boolean
+  complianceChecks: ZatcaComplianceCheck[]
+  productionCsid: boolean
+  productionCsidExpiry: string | null
+  signingReady: boolean
+  signingWith: 'production' | 'compliance' | 'local-test' | null
   lastTest: {
     at: string
     ok: boolean
@@ -94,6 +129,35 @@ export function ZatcaStatusBadge({
         )}
       >
         Reported
+      </Badge>
+    )
+  }
+  if (status === 'pending') {
+    return (
+      <Badge className={cn('border-sky-200 bg-sky-50 font-medium text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300', className)}>
+        Not sent yet
+      </Badge>
+    )
+  }
+  if (status === 'local_only') {
+    return (
+      <Badge className={cn('border-slate-300 bg-slate-100 font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300', className)}>
+        Local test only
+      </Badge>
+    )
+  }
+  if (status === 'compliance_passed' || status === 'compliance_failed') {
+    return (
+      <Badge
+        className={cn(
+          'font-medium',
+          status === 'compliance_passed'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
+            : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300',
+          className
+        )}
+      >
+        Test check {status === 'compliance_passed' ? 'passed' : 'failed'}
       </Badge>
     )
   }

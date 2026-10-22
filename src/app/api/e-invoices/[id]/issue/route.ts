@@ -1,33 +1,21 @@
 // E-Invoice issue API — POST /api/e-invoices/[id]/issue
-// Draft → issued. Assigns the ZATCA readiness data at issue time:
-//   uuid (v4) · icv (sequential across all issued e-invoices) ·
-//   previousHash (latest issued e-invoice's hash, PIH chain — starts at
-//   ZATCA_INITIAL_PIH) · invoiceHash (base64 SHA-256 of the UBL XML).
-// PHASE 2 documents additionally get the ECDSA signature of the hash
-// (8-tag cryptographic QR). Totals are defensively recomputed first.
-// Response: full updated row + qrPayload + qrDataUrl.
-import { NextRequest } from 'next/server'
-import { randomUUID } from 'node:crypto'
+// Draft → issued, following the company's ZATCA phase (Settings → ZATCA):
+//   Phase 1 — ZATCA content checks, totals + UUID + 5-tag QR frozen.
+//   Phase 2 — ZATCA business-rule checks, signed UBL 2.1 XML (XAdES),
+//             ICV + PIH chain, QR with the cryptographic stamp. The document
+//             must then be cleared (standard) / reported (simplified).
+// Validation failures → 422 with { errors, warnings } so the UI can list them.
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
   ok,
-  badRequest,
-  notFound,
   serverError,
   requirePermission,
   isResponse,
   logActivity,
 } from '@/lib/api-helpers'
-import { getZatcaKeys, signHash, ecPublicKeyBase64 } from '@/lib/zatca'
-import {
-  computeInvoiceTotals,
-  buildEInvoiceXml,
-  hashEInvoiceXml,
-  buildEInvoiceQrPayload,
-  qrDataUrl,
-  readEInvoiceSellerInfo,
-  ZATCA_INITIAL_PIH,
-} from '@/lib/e-invoice'
+import { issueEInvoice, qrDataUrl, ZatcaValidationError } from '@/lib/e-invoice'
+import { ZatcaSetupError } from '@/lib/zatca'
 import { mapEInvoice, eInvoiceDetailInclude } from '../../mappers'
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -36,81 +24,51 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requirePermission('einvoices.edit')
     if (isResponse(auth)) return auth
-
     const { id } = await ctx.params
-    const inv = await db.eInvoice.findUnique({ where: { id }, include: { items: true } })
-    if (!inv) return notFound('E-Invoice not found')
-    if (inv.status !== 'draft') return badRequest('Only draft e-invoices can be issued')
 
-    // Defensive recompute from stored items (never trust stored aggregates)
-    const items = [...inv.items].sort((a, b) => a.sr - b.sr)
-    const totals = computeInvoiceTotals(items)
-
-    // PIH chain: latest issued e-invoice (highest icv) — or the KSA seed
-    const prev = await db.eInvoice.findFirst({
-      where: { icv: { not: null }, invoiceHash: { not: null } },
-      orderBy: [{ icv: 'desc' }, { issuedAt: 'desc' }],
-      select: { invoiceHash: true },
-    })
-    const previousHash = prev?.invoiceHash ?? ZATCA_INITIAL_PIH
-
-    // ICV: 1-based counter across ALL issued e-invoices
-    const maxIcv = await db.eInvoice.aggregate({
-      where: { icv: { not: null } },
-      _max: { icv: true },
-    })
-    const icv = (maxIcv._max.icv ?? 0) + 1
-
-    const uuid = randomUUID()
-    const seller = await readEInvoiceSellerInfo()
-
-    // The XML embeds the final uuid/icv/previousHash so the hash covers them
-    const xml = buildEInvoiceXml({ ...inv, ...totals, uuid }, items, seller, previousHash, icv)
-    const invoiceHash = hashEInvoiceXml(xml)
-
-    // PHASE 2 (Integration): sign the hash with the ZATCA ECDSA keypair —
-    // the QR grows to the full 8-tag cryptographic stamp and the document
-    // becomes ready for the Fatoora gateway (submit from the list view).
-    let signature: string | null = null
-    let publicKeyBase64 = ''
-    if ((inv.zatcaPhase ?? 1) === 2) {
-      const keys = await getZatcaKeys()
-      signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
-      publicKeyBase64 = ecPublicKeyBase64(keys.publicPem)
+    let result: Awaited<ReturnType<typeof issueEInvoice>>
+    try {
+      result = await issueEInvoice(id, auth.name)
+    } catch (e) {
+      if (e instanceof ZatcaValidationError) {
+        return NextResponse.json(
+          {
+            error: `ZATCA check failed: ${e.validation.errors[0]?.message ?? 'see details'}${
+              e.validation.errors.length > 1 ? ` (+${e.validation.errors.length - 1} more)` : ''
+            }`,
+            errors: e.validation.errors,
+            warnings: e.validation.warnings,
+          },
+          { status: 422 }
+        )
+      }
+      if (e instanceof ZatcaSetupError) {
+        return NextResponse.json({ error: e.message }, { status: 409 })
+      }
+      if (e instanceof Error && /not found|Only draft/.test(e.message)) {
+        return NextResponse.json({ error: e.message }, { status: e.message.includes('not found') ? 404 : 400 })
+      }
+      throw e
     }
 
-    const issuedAt = new Date()
-    const updated = await db.eInvoice.update({
-      where: { id: inv.id },
-      data: {
-        ...totals,
-        uuid,
-        icv,
-        previousHash,
-        invoiceHash,
-        ...(signature ? { signature } : {}),
-        status: 'issued',
-        issuedAt,
-        issuedByName: auth.name,
-      },
-      include: eInvoiceDetailInclude,
-    })
-
-    const payload = buildEInvoiceQrPayload(
-      seller,
-      updated,
-      signature ? { invoiceHash, signature, publicKeyBase64 } : null
-    )
-    const qr = await qrDataUrl(payload)
-
+    const updated = await db.eInvoice.findUniqueOrThrow({ where: { id }, include: eInvoiceDetailInclude })
+    const qr = await qrDataUrl(result.qrPayload)
     await logActivity({
       user: auth,
       action: 'issued',
       module: 'einvoice',
-      description: `E-Invoice ${updated.invoiceNumber} issued (ZATCA Phase ${updated.zatcaPhase ?? 1}) — ${updated.clientNameEn}`,
-      amount: totals.totalDue,
+      description: `E-Invoice ${updated.invoiceNumber} issued (ZATCA Phase ${result.phase}${
+        result.phase === 2 ? `, ICV ${updated.icv}` : ''
+      }) — ${updated.clientNameEn}`,
+      amount: updated.totalDue,
     })
-    return ok({ ...mapEInvoice(updated), qrPayload: payload, qrDataUrl: qr })
+    return ok({
+      ...mapEInvoice(updated),
+      qrPayload: result.qrPayload,
+      qrDataUrl: qr,
+      warnings: result.validation.warnings,
+      needsSubmission: result.phase === 2,
+    })
   } catch (err) {
     console.error('[api/e-invoices/[id]/issue POST]', err)
     return serverError()

@@ -1,31 +1,36 @@
-// ZATCA connection profile API — GET / PUT.
-// GET  (einvoices.view) → the Phase 2 gateway profile (env, EGS serial,
-//                         apiBase, last connection test, csidTokenSet flag —
-//                         the raw CSID token NEVER leaves the server).
-// PUT  (settings.edit)  → update env / EGS serial / CSID token / apiBase.
-//   • csidToken: '' (or omitted) keeps the existing token; null clears it.
-//   • apiBase: '' or null resets to the per-environment gateway default.
+// ZATCA profile — GET (any e-invoice viewer) / PUT (settings.edit).
+// Company phase (Phase 1 / Phase 2), environment, EGS unit identity and the
+// seller's national address. Keys, CSIDs and secrets are never returned.
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import {
-  ok,
-  badRequest,
-  serverError,
-  requirePermission,
-  isResponse,
-  logActivity,
-} from '@/lib/api-helpers'
-import { readZatcaProfile, writeZatcaSetting } from '@/lib/zatca'
+import { ok, badRequest, serverError, requirePermission, isResponse, logActivity } from '@/lib/api-helpers'
+import { readZatcaProfile, writeZatcaSetting, SELLER_ADDRESS_KEYS } from '@/lib/zatca'
 
 export const dynamic = 'force-dynamic'
 
 const profileSchema = z.object({
-  env: z.enum(['simulation', 'preprod', 'production']).optional(),
-  egsSerial: z.string().trim().max(120, 'EGS serial cannot exceed 120 characters').optional(),
-  // '' = keep the existing token · null = clear it · string = replace it
-  csidToken: z.string().trim().max(4000, 'CSID token cannot exceed 4000 characters').nullable().optional(),
-  // '' / null = fall back to the per-environment gateway default
-  apiBase: z.string().trim().max(300, 'Gateway URL cannot exceed 300 characters').nullable().optional(),
+  mode: z.enum(['phase1', 'phase2']).optional(),
+  env: z.enum(['local', 'sandbox', 'simulation', 'production']).optional(),
+  egsSerial: z
+    .string()
+    .trim()
+    .max(120)
+    .refine((v) => v === '' || /^1-[^|]+\|2-[^|]+\|3-[^|]+$/.test(v), 'EGS serial must look like 1-Solution|2-Model|3-SerialNo')
+    .optional(),
+  egsName: z.string().trim().max(64).optional(),
+  branchName: z.string().trim().max(64).optional(),
+  industry: z.string().trim().max(64).optional(),
+  invoiceTypes: z.enum(['1100', '1000', '0100']).optional(),
+  sellerAddress: z
+    .object({
+      street: z.string().trim().max(120),
+      buildingNo: z.string().trim().max(4).refine((v) => v === '' || /^\d{4}$/.test(v), 'Building number must be 4 digits'),
+      additionalNo: z.string().trim().max(4).refine((v) => v === '' || /^\d{4}$/.test(v), 'Additional number must be 4 digits'),
+      district: z.string().trim().max(120),
+      city: z.string().trim().max(120),
+      postalCode: z.string().trim().max(5).refine((v) => v === '' || /^\d{5}$/.test(v), 'Postal code must be 5 digits'),
+    })
+    .optional(),
 })
 
 export async function GET() {
@@ -40,11 +45,8 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    // Same permission as the Settings route — the ZATCA profile is a settings
-    // concern (kept in the Setting table under zatca_* keys).
     const auth = await requirePermission('settings.edit')
     if (isResponse(auth)) return auth
-
     let raw: unknown
     try {
       raw = await req.json()
@@ -52,34 +54,30 @@ export async function PUT(req: NextRequest) {
       return badRequest('Invalid JSON body')
     }
     const parsed = profileSchema.safeParse(raw)
-    if (!parsed.success) {
-      return badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body')
-    }
-    const body = parsed.data
+    if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? 'Invalid request body')
+    const b = parsed.data
 
-    // env must be stored first-class so the per-env apiBase default tracks it
-    if (body.env !== undefined) {
-      await writeZatcaSetting('zatca_env', body.env)
-    }
-    if (body.egsSerial !== undefined) {
-      await writeZatcaSetting('zatca_egs_serial', body.egsSerial)
-    }
-    if (body.csidToken !== undefined && body.csidToken !== '') {
-      // '' keeps the existing token (never blank it by accident); null clears
-      await writeZatcaSetting('zatca_csid_token', body.csidToken)
-    }
-    if (body.apiBase !== undefined) {
-      await writeZatcaSetting('zatca_api_base', body.apiBase === '' ? null : body.apiBase)
+    if (b.mode) await writeZatcaSetting('zatca_mode', b.mode)
+    if (b.env) await writeZatcaSetting('zatca_environment', b.env)
+    if (b.egsSerial !== undefined) await writeZatcaSetting('zatca_egs_serial', b.egsSerial)
+    if (b.egsName !== undefined) await writeZatcaSetting('zatca_egs_name', b.egsName)
+    if (b.branchName !== undefined) await writeZatcaSetting('zatca_branch_name', b.branchName)
+    if (b.industry !== undefined) await writeZatcaSetting('zatca_branch_industry', b.industry)
+    if (b.invoiceTypes) await writeZatcaSetting('zatca_invoice_types', b.invoiceTypes)
+    if (b.sellerAddress) {
+      for (const [k, key] of Object.entries(SELLER_ADDRESS_KEYS)) {
+        await writeZatcaSetting(key, b.sellerAddress[k as keyof typeof b.sellerAddress] ?? '')
+      }
     }
 
+    const profile = await readZatcaProfile()
     await logActivity({
       user: auth,
-      action: 'updated',
+      action: 'update',
       module: 'settings',
-      description: `ZATCA connection profile updated (${body.env ? `env: ${body.env}` : 'fields'}${body.csidToken ? ', CSID token set' : ''})`,
+      description: `ZATCA settings updated (${profile.mode === 'phase2' ? 'Phase 2' : 'Phase 1'}, ${profile.env})`,
     })
-
-    return ok(await readZatcaProfile())
+    return ok(profile)
   } catch {
     return serverError()
   }

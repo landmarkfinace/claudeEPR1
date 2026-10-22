@@ -24,6 +24,7 @@ import {
 import { nextEInvoiceNumber, computeInvoiceTotals } from '@/lib/e-invoice'
 import {
   mapEInvoice,
+  zatcaHeaderData,
   eInvoiceListInclude,
   eInvoiceSchema,
   normalizeEItems,
@@ -252,6 +253,7 @@ export async function POST(req: NextRequest) {
           showReceiverSignature: body.showReceiverSignature ?? true,
           zatcaPhase: body.zatcaPhase ?? 1,
           relatedInvoiceId,
+          ...zatcaHeaderData(body),
           items: { create: items },
         },
         include: { items: { orderBy: { sr: 'asc' } } },

@@ -42,6 +42,9 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         unitPrice: it.unitPrice,
         discount: it.discount,
         vatPercent: it.vatPercent,
+        taxCategory: it.taxCategory,
+        exemptionCode: it.exemptionCode,
+        exemptionReason: it.exemptionReason,
         taxableAmount: it.taxableAmount,
         vatAmount: it.vatAmount,
         lineTotal: it.lineTotal,
@@ -81,6 +84,15 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           notesAr: source.notesAr,
           arManualFlags: source.arManualFlags,
           showReceiverSignature: source.showReceiverSignature,
+          invoiceKind: source.invoiceKind,
+          noteReason: source.noteReason,
+          paymentMeansCode: source.paymentMeansCode,
+          buyerStreet: source.buyerStreet,
+          buyerBuildingNo: source.buyerBuildingNo,
+          buyerDistrict: source.buyerDistrict,
+          buyerCity: source.buyerCity,
+          buyerPostalCode: source.buyerPostalCode,
+          buyerCountry: source.buyerCountry,
           // notes keep their correction target; plain invoices drop the link
           relatedInvoiceId:
             source.docType === 'credit_note' || source.docType === 'debit_note'

@@ -1,22 +1,31 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // E-Invoice library (server-side only — imports the Prisma client).
-// Bilingual (EN/AR) ZATCA-style tax invoices, credit notes and debit notes:
+// Bilingual (EN/AR) ZATCA tax invoices, credit notes and debit notes:
 //   • number generation  INV-YYYY-00001 | CRN-YYYY-00001 | DBN-YYYY-00001
-//   • per-line + header money math (server is the single source of truth)
-//   • UBL 2.1-style XML (deterministic — hashes cover ALL invoice content)
-//   • base64 SHA-256 invoice hash + PIH chain seed
-//   • 5-tag TLV QR payload (Phase 1 style) rendered as a data-URL PNG
-// Seller identity/bank details come from the Setting table (same source the
-// quotations/invoices print views use).
+//   • per-line + header money math (server is the single source of truth;
+//     VAT per category = round(taxable × rate) as ZATCA BR-CO-17 requires)
+//   • ZATCA validation before issuing (Phase 1 and Phase 2 rules)
+//   • issuing: Phase 1 → 5-tag QR frozen on the document;
+//              Phase 2 → signed UBL 2.1 XML + ICV/PIH chain + 8/9-tag QR
+// Seller identity/bank details come from the Setting table.
 // Frontend note: this module is SERVER-ONLY (db import) — client components
 // must not import it; duplicate the tiny pure helpers client-side if needed.
 // ─────────────────────────────────────────────────────────────────────────────
-import { createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { Prisma, PrismaClient } from '@prisma/client'
 import QRCode from 'qrcode'
 import { db } from '@/lib/db'
 import { round2 } from '@/lib/format'
-import { tlvEncode, ZATCA_INITIAL_PIH, getZatcaKeys, signHash, ecPublicKeyBase64 } from '@/lib/zatca'
+import {
+  tlvEncode,
+  ZATCA_INITIAL_PIH,
+  getZatcaSigner,
+  readSellerInfo,
+  readZatcaProfile,
+  isValidKsaVat,
+  type ZatcaSellerInfo,
+} from '@/lib/zatca'
+import { signUbl, unitCodeFor, type UblDocument, type UblTaxCategory } from '@/lib/zatca-ubl'
 
 export { ZATCA_INITIAL_PIH }
 
@@ -89,18 +98,27 @@ export type EInvoiceTotals = {
   totalDue: number
 }
 
-/** Header totals from normalized items (each with taxableAmount/vatAmount). */
+/** Header totals from normalized items. VAT is computed per VAT category
+ *  (taxable of the category × rate, rounded) — ZATCA rule BR-CO-17. */
 export function computeInvoiceTotals(
-  items: (EInvoiceItemInput & Partial<EInvoiceItemTotals>)[]
+  items: (EInvoiceItemInput & Partial<EInvoiceItemTotals> & { taxCategory?: string | null })[]
 ): EInvoiceTotals {
   let subtotal = 0
   let totalDiscount = 0
-  let vatSum = 0
+  const groups = new Map<string, { taxable: number; rate: number }>()
   for (const it of items) {
     subtotal = round2(subtotal + round2(round2(it.quantity) * round2(it.unitPrice)))
     totalDiscount = round2(totalDiscount + round2(it.discount ?? 0))
-    vatSum = round2(vatSum + (it.vatAmount ?? computeItemTotals(it).vatAmount))
+    const t = it.taxableAmount ?? computeItemTotals(it).taxableAmount
+    const cat = it.taxCategory || ((it.vatPercent ?? 15) > 0 ? 'S' : 'Z')
+    const rate = cat === 'S' ? round2(it.vatPercent ?? 15) : 0
+    const key = `${cat}|${rate}`
+    const g = groups.get(key) ?? { taxable: 0, rate }
+    g.taxable = round2(g.taxable + t)
+    groups.set(key, g)
   }
+  let vatSum = 0
+  for (const g of groups.values()) vatSum = round2(vatSum + round2((g.taxable * g.rate) / 100))
   const taxableAmount = round2(subtotal - totalDiscount)
   return {
     subtotal,
@@ -111,39 +129,24 @@ export function computeInvoiceTotals(
   }
 }
 
-// ── Seller info (Settings — same defaults as the print views) ───────────────
+// ── Seller info (Settings) ──────────────────────────────────────────────────
 
-export type ESellerInfo = {
-  companyName: string
-  companyNameAr: string
-  address: string
-  addressAr: string
-  vatNumber: string
-  crNumber: string
-  currency: string
-  bankName: string
-  bankIban: string
+export type ESellerInfo = ZatcaSellerInfo & {
   bankAccountNumber: string
   bankAccountName: string
   bankSwiftCode: string
   bankAddress: string
 }
 
-/** Read seller + bank Setting rows (pattern of zatca.ts readSellerInfo, extended). */
 export async function readEInvoiceSellerInfo(): Promise<ESellerInfo> {
-  const rows = await db.setting.findMany()
+  const base = await readSellerInfo()
+  const rows = await db.setting.findMany({
+    where: { key: { in: ['bankAccountNumber', 'bankAccountName', 'bankSwiftCode', 'bankAddress'] } },
+  })
   const map: Record<string, string> = {}
   for (const r of rows) map[r.key] = r.value
   return {
-    companyName: map.companyName || 'Landmark Inter Gulf',
-    companyNameAr: map.companyNameAr || 'لاندمارك انتر جلف',
-    address: map.address || '',
-    addressAr: map.addressAr || '',
-    vatNumber: (map.vatNumber || '').trim(),
-    crNumber: (map.crNumber || '').trim(),
-    currency: map.currency || 'SAR',
-    bankName: map.bankName || '',
-    bankIban: map.bankIban || '',
+    ...base,
     bankAccountNumber: map.bankAccountNumber || '',
     bankAccountName: map.bankAccountName || '',
     bankSwiftCode: map.bankSwiftCode || '',
@@ -151,305 +154,36 @@ export async function readEInvoiceSellerInfo(): Promise<ESellerInfo> {
   }
 }
 
-// ── UBL 2.1-style XML (deterministic, bilingual) ────────────────────────────
+// ── KSA local date/time (UTC+3, no daylight saving) ────────────────────────
 
-/** Structural type satisfied by Prisma EInvoice rows (and plain objects in tests). */
-export type EXmlInvoice = {
-  invoiceNumber: string
-  uuid: string | null
-  docType: string
-  issueDate: Date
-  supplyDate: Date | null
-  dueDate: Date | null
-  clientNameEn: string
-  clientNameAr: string
-  clientVatNumber: string | null
-  clientCrNumber: string | null
-  clientAddressEn: string | null
-  clientAddressAr: string | null
-  poRef: string | null
-  contractRef: string | null
-  subtotal: number
-  totalDiscount: number
-  taxableAmount: number
-  vatAmount: number
-  totalDue: number
+export function ksaDateTime(d: Date): { date: string; time: string } {
+  const k = new Date(d.getTime() + 3 * 3_600_000)
+  const iso = k.toISOString()
+  return { date: iso.slice(0, 10), time: iso.slice(11, 19) }
 }
 
-export type EXmlItem = {
-  sr: number
-  descriptionEn: string
-  descriptionAr: string
-  unitEn: string | null
-  quantity: number
-  unitPrice: number
-  discount: number
-  vatPercent: number
-  taxableAmount: number
-  vatAmount: number
-  lineTotal: number
-}
+/** Calendar date stored for a date-only field (saved as UTC midnight). */
+const dateOnly = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null)
 
-function xmlEscape(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
+// ── QR ──────────────────────────────────────────────────────────────────────
 
 /**
- * UBL 2.1-style XML for the bilingual e-invoice. Root element follows the
- * docType (Invoice | CreditNote | DebitNote). RegistrationName carries the
- * English legal name; PartyName/Name carries the Arabic name. The document
- * is deterministic and covers ALL invoice content (number, uuid, dates,
- * parties EN+AR, VAT/CR numbers, every line with descriptionEn/Ar, qty,
- * price, discount, vat%, totals, previousHash, icv) so the SHA-256 hash is
- * a true content fingerprint.
+ * Phase 1 QR (ZATCA "Generation" phase) — 5 TLV tags, 1-byte tag + 1-byte length:
+ *   1 seller name · 2 seller VAT number · 3 timestamp (ISO 8601)
+ *   4 invoice total incl. VAT · 5 VAT total
  */
-export function buildEInvoiceXml(
-  inv: EXmlInvoice,
-  items: EXmlItem[],
-  seller: ESellerInfo,
-  previousHash: string,
-  icv: number
+export function buildPhase1QrPayload(
+  seller: { companyName: string; companyNameAr: string; vatNumber: string },
+  invoice: { issuedAt: Date | null; issueDate: Date; totalDue: number; vatAmount: number }
 ): string {
-  const cur = xmlEscape(seller.currency)
-  const date = inv.issueDate.toISOString().slice(0, 10)
-  const time = inv.issueDate.toISOString().slice(11, 19) + 'Z'
-  // 0100000 = standard (B2B) · 0200000 = simplified; notes reuse 0100000
-  const typeCode = '0100000'
-  const root =
-    inv.docType === 'credit_note' ? 'CreditNote' : inv.docType === 'debit_note' ? 'DebitNote' : 'Invoice'
-
-  const sellerArBlock = seller.companyNameAr
-    ? `
-      <cac:PartyName><cbc:Name>${xmlEscape(seller.companyNameAr)}</cbc:Name></cac:PartyName>`
-    : ''
-  const sellerAddrAr = seller.addressAr
-    ? `
-        <cbc:AdditionalStreetName>${xmlEscape(seller.addressAr)}</cbc:AdditionalStreetName>`
-    : ''
-  const buyerArBlock = inv.clientNameAr
-    ? `
-      <cac:PartyName><cbc:Name>${xmlEscape(inv.clientNameAr)}</cbc:Name></cac:PartyName>`
-    : ''
-  const buyerAddrAr = inv.clientAddressAr
-    ? `
-        <cbc:AdditionalStreetName>${xmlEscape(inv.clientAddressAr)}</cbc:AdditionalStreetName>`
-    : ''
-
-  const lines = items
-    .map(
-      (it) => `  <cac:InvoiceLine>
-    <cbc:ID>${it.sr}</cbc:ID>${it.unitEn ? `
-    <cbc:InvoicedQuantity unitCode="${xmlEscape(it.unitEn)}">${round2(it.quantity)}</cbc:InvoicedQuantity>` : `
-    <cbc:InvoicedQuantity>${round2(it.quantity)}</cbc:InvoicedQuantity>`}
-    <cbc:LineExtensionAmount currencyID="${cur}">${round2(it.taxableAmount).toFixed(2)}</cbc:LineExtensionAmount>${it.discount > 0 ? `
-    <cac:AllowanceCharge>
-      <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
-      <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>
-      <cbc:Amount currencyID="${cur}">${round2(it.discount).toFixed(2)}</cbc:Amount>
-    </cac:AllowanceCharge>` : ''}
-    <cac:Item>
-      <cbc:Name>${xmlEscape(it.descriptionEn)}</cbc:Name>${it.descriptionAr ? `
-      <cac:ItemInstance><cbc:AdditionalItemProperty><cbc:Name>description_ar</cbc:Name><cbc:Value>${xmlEscape(it.descriptionAr)}</cbc:Value></cbc:AdditionalItemProperty></cac:ItemInstance>` : ''}
-      <cac:ClassifiedTaxCategory>
-        <cbc:ID>${it.vatPercent > 0 ? 'S' : 'Z'}</cbc:ID>
-        <cbc:Percent>${round2(it.vatPercent).toFixed(2)}</cbc:Percent>
-        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:ClassifiedTaxCategory>
-    </cac:Item>
-    <cac:Price>
-      <cbc:PriceAmount currencyID="${cur}">${round2(it.unitPrice).toFixed(2)}</cbc:PriceAmount>
-    </cac:Price>
-    <cac:TaxTotal>
-      <cbc:TaxAmount currencyID="${cur}">${round2(it.vatAmount).toFixed(2)}</cbc:TaxAmount>
-      <cac:TaxSubtotal>
-        <cbc:TaxableAmount currencyID="${cur}">${round2(it.taxableAmount).toFixed(2)}</cbc:TaxableAmount>
-        <cbc:TaxAmount currencyID="${cur}">${round2(it.vatAmount).toFixed(2)}</cbc:TaxAmount>
-        <cac:TaxCategory>
-          <cbc:ID>${it.vatPercent > 0 ? 'S' : 'Z'}</cbc:ID>
-          <cbc:Percent>${round2(it.vatPercent).toFixed(2)}</cbc:Percent>
-          <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-        </cac:TaxCategory>
-      </cac:TaxSubtotal>
-    </cac:TaxTotal>
-  </cac:InvoiceLine>`
-    )
-    .join('\n')
-
-  // VAT subtotals grouped by rate (deterministic ordering)
-  const rateGroups = new Map<number, { taxable: number; vat: number }>()
-  for (const it of items) {
-    const key = round2(it.vatPercent)
-    const g = rateGroups.get(key) ?? { taxable: 0, vat: 0 }
-    g.taxable = round2(g.taxable + it.taxableAmount)
-    g.vat = round2(g.vat + it.vatAmount)
-    rateGroups.set(key, g)
-  }
-  const subtotals = [...rateGroups.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(
-      ([rate, g]) => `    <cac:TaxSubtotal>
-      <cbc:TaxableAmount currencyID="${cur}">${round2(g.taxable).toFixed(2)}</cbc:TaxableAmount>
-      <cbc:TaxAmount currencyID="${cur}">${round2(g.vat).toFixed(2)}</cbc:TaxAmount>
-      <cac:TaxCategory>
-        <cbc:ID>${rate > 0 ? 'S' : 'Z'}</cbc:ID>
-        <cbc:Percent>${round2(rate).toFixed(2)}</cbc:Percent>
-        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:TaxCategory>
-    </cac:TaxSubtotal>`
-    )
-    .join('\n')
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<${root} xmlns="urn:oasis:names:specification:ubl:schema:xsd:${root}-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-  <cbc:ProfileID>reporting:1.0</cbc:ProfileID>
-  <cbc:ID>${xmlEscape(inv.invoiceNumber)}</cbc:ID>
-  <cbc:UUID>${xmlEscape(inv.uuid ?? '')}</cbc:UUID>
-  <cbc:IssueDate>${date}</cbc:IssueDate>
-  <cbc:IssueTime>${time}</cbc:IssueTime>${inv.supplyDate ? `
-  <cbc:DeliveryDate>${inv.supplyDate.toISOString().slice(0, 10)}</cbc:DeliveryDate>` : ''}${inv.dueDate ? `
-  <cbc:DueDate>${inv.dueDate.toISOString().slice(0, 10)}</cbc:DueDate>` : ''}
-  <cbc:InvoiceTypeCode name="${typeCode}">${typeCode}</cbc:InvoiceTypeCode>
-  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>ICV</cbc:ID>
-    <cbc:UUID>${icv}</cbc:UUID>
-  </cac:AdditionalDocumentReference>
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>PIH</cbc:ID>
-    <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${previousHash}</cbc:EmbeddedDocumentBinaryObject>
-    </cac:Attachment>
-  </cac:AdditionalDocumentReference>${inv.poRef ? `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>PO_REF</cbc:ID>
-    <cbc:UUID>${xmlEscape(inv.poRef)}</cbc:UUID>
-  </cac:AdditionalDocumentReference>` : ''}${inv.contractRef ? `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>CONTRACT_REF</cbc:ID>
-    <cbc:UUID>${xmlEscape(inv.contractRef)}</cbc:UUID>
-  </cac:AdditionalDocumentReference>` : ''}
-  <cac:AccountingSupplierParty>
-    <cac:Party>${seller.crNumber ? `
-      <cac:PartyIdentification><cbc:ID schemeID="CR">${xmlEscape(seller.crNumber)}</cbc:ID></cac:PartyIdentification>` : ''}${sellerArBlock}
-      <cac:PostalAddress>
-        <cbc:StreetName>${xmlEscape(seller.address)}</cbc:StreetName>${sellerAddrAr}
-        <cac:Country><cbc:IdentificationCode>SA</cbc:IdentificationCode></cac:Country>
-      </cac:PostalAddress>
-      <cac:PartyTaxScheme>
-        <cbc:CompanyID schemeID="VAT">${xmlEscape(seller.vatNumber)}</cbc:CompanyID>
-        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:PartyTaxScheme>
-      <cac:PartyLegalEntity>
-        <cbc:RegistrationName>${xmlEscape(seller.companyName)}</cbc:RegistrationName>
-      </cac:PartyLegalEntity>
-    </cac:Party>
-  </cac:AccountingSupplierParty>
-  <cac:AccountingCustomerParty>
-    <cac:Party>${inv.clientCrNumber ? `
-      <cac:PartyIdentification><cbc:ID schemeID="CR">${xmlEscape(inv.clientCrNumber)}</cbc:ID></cac:PartyIdentification>` : ''}${buyerArBlock}${inv.clientVatNumber ? `
-      <cac:PartyTaxScheme>
-        <cbc:CompanyID schemeID="VAT">${xmlEscape(inv.clientVatNumber)}</cbc:CompanyID>
-        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:PartyTaxScheme>` : ''}
-      <cac:PostalAddress>
-        <cbc:StreetName>${xmlEscape(inv.clientAddressEn ?? '')}</cbc:StreetName>${buyerAddrAr}
-        <cac:Country><cbc:IdentificationCode>SA</cbc:IdentificationCode></cac:Country>
-      </cac:PostalAddress>
-      <cac:PartyLegalEntity>
-        <cbc:RegistrationName>${xmlEscape(inv.clientNameEn)}</cbc:RegistrationName>
-      </cac:PartyLegalEntity>
-    </cac:Party>
-  </cac:AccountingCustomerParty>${seller.bankIban ? `
-  <cac:PaymentMeans>
-    <cbc:PaymentMeansCode>42</cbc:PaymentMeansCode>
-    <cac:PayeeFinancialAccount><cbc:ID>${xmlEscape(seller.bankIban)}</cbc:ID></cac:PayeeFinancialAccount>
-  </cac:PaymentMeans>` : ''}
-  <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${cur}">${round2(inv.vatAmount).toFixed(2)}</cbc:TaxAmount>
-${subtotals}
-  </cac:TaxTotal>
-  <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${cur}">${round2(inv.subtotal).toFixed(2)}</cbc:LineExtensionAmount>
-    <cbc:AllowanceTotalAmount currencyID="${cur}">${round2(inv.totalDiscount).toFixed(2)}</cbc:AllowanceTotalAmount>
-    <cbc:TaxExclusiveAmount currencyID="${cur}">${round2(inv.taxableAmount).toFixed(2)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="${cur}">${round2(inv.totalDue).toFixed(2)}</cbc:TaxInclusiveAmount>
-    <cbc:PayableAmount currencyID="${cur}">${round2(inv.totalDue).toFixed(2)}</cbc:PayableAmount>
-  </cac:LegalMonetaryTotal>
-${lines}
-</${root}>`
-}
-
-/** ZATCA-style invoice hash: base64 of the SHA-256 digest of the XML (UTF-8). */
-export function hashEInvoiceXml(xml: string): string {
-  return createHash('sha256').update(xml, 'utf8').digest('base64')
-}
-
-// ── QR payload (phase-aware TLV) ────────────────────────────────────────────
-
-/** Structural type satisfied by Prisma EInvoice rows. */
-export type EQRInvoice = {
-  zatcaPhase?: number | null
-  issuedAt: Date | null
-  issueDate: Date
-  totalDue: number
-  vatAmount: number
-}
-
-/** Phase 2 stamp fields appended to the QR (tags 6-8) when available. */
-export type EZatcaStampFields = {
-  invoiceHash: string
-  signature: string
-  publicKeyBase64: string
-}
-
-/**
- * Phase-aware QR payload (base64 TLV):
- *   PHASE 1 (Generation) — the 5 mandatory tags only, no crypto:
- *     1 seller name (Arabic preferred) · 2 seller VAT number
- *     3 ISO-8601 timestamp (issuedAt if set else issueDate)
- *     4 invoice total (VAT inclusive) · 5 VAT total
- *   PHASE 2 (Integration) — same 5 tags PLUS the cryptographic stamp:
- *     6 invoice hash (base64 SHA-256 of the UBL XML) · 7 ECDSA signature
- *     8 ECDSA public key (raw 64-byte x‖y point)
- */
-export function buildEInvoiceQrPayload(
-  seller: ESellerInfo,
-  invoice: EQRInvoice,
-  stamp?: EZatcaStampFields | null
-): string {
-  const entries = [
-    {
-      tag: 1,
-      value: seller.companyNameAr.trim() ? seller.companyNameAr : seller.companyName,
-    },
+  const ts = (invoice.issuedAt ?? invoice.issueDate).toISOString().slice(0, 19) + 'Z'
+  return tlvEncode([
+    { tag: 1, value: seller.companyNameAr.trim() || seller.companyName },
     { tag: 2, value: seller.vatNumber },
-    {
-      tag: 3,
-      value: (invoice.issuedAt ?? invoice.issueDate).toISOString(),
-    },
+    { tag: 3, value: ts },
     { tag: 4, value: round2(invoice.totalDue).toFixed(2) },
     { tag: 5, value: round2(invoice.vatAmount).toFixed(2) },
-  ]
-  // Phase 2 + complete stamp → extend to the full 8-tag cryptographic QR
-  if (
-    (invoice.zatcaPhase ?? 1) === 2 &&
-    stamp &&
-    stamp.invoiceHash &&
-    stamp.signature &&
-    stamp.publicKeyBase64
-  ) {
-    entries.push(
-      { tag: 6, value: stamp.invoiceHash },
-      { tag: 7, value: stamp.signature },
-      { tag: 8, value: stamp.publicKeyBase64 }
-    )
-  }
-  return tlvEncode(entries).toString('base64')
+  ]).toString('base64')
 }
 
 /** Render a QR payload as a PNG data URL (pure black on white, quiet zone 4). */
@@ -460,6 +194,356 @@ export async function qrDataUrl(payload: string): Promise<string> {
     errorCorrectionLevel: 'M',
     color: { dark: '#000000', light: '#FFFFFF' },
   })
+}
+
+// ── ZATCA validation ────────────────────────────────────────────────────────
+
+export type ZatcaIssue = { field: string; message: string }
+export type ZatcaValidation = { errors: ZatcaIssue[]; warnings: ZatcaIssue[] }
+
+type ValidatableItem = {
+  sr: number
+  descriptionEn: string
+  vatPercent: number
+  taxCategory: string
+  exemptionCode: string | null
+  exemptionReason: string | null
+}
+
+type ValidatableInvoice = {
+  docType: string
+  invoiceKind: string
+  clientNameEn: string
+  clientVatNumber: string | null
+  clientCrNumber: string | null
+  clientAddressEn: string | null
+  buyerStreet: string | null
+  buyerBuildingNo: string | null
+  buyerDistrict: string | null
+  buyerCity: string | null
+  buyerPostalCode: string | null
+  buyerCountry: string
+  issueDate: Date
+  supplyDate: Date | null
+  relatedInvoiceId: string | null
+  noteReason: string | null
+}
+
+/**
+ * ZATCA checks run before a document is issued. Phase 1 covers the content a
+ * tax invoice must show (VAT Implementing Regulations Art. 53); Phase 2 adds
+ * the KSA business rules the Fatoora gateway enforces (BR-KSA-…).
+ */
+export function validateForZatca(
+  inv: ValidatableInvoice,
+  items: ValidatableItem[],
+  seller: ZatcaSellerInfo,
+  phase: 1 | 2
+): ZatcaValidation {
+  const errors: ZatcaIssue[] = []
+  const warnings: ZatcaIssue[] = []
+  const err = (field: string, message: string) => errors.push({ field, message })
+  const warn = (field: string, message: string) => warnings.push({ field, message })
+  const p2 = phase === 2
+  const standard = inv.invoiceKind !== 'simplified'
+  const isNote = inv.docType === 'credit_note' || inv.docType === 'debit_note'
+
+  // Seller
+  if (!isValidKsaVat(seller.vatNumber))
+    err('seller.vat', 'Company VAT number must be 15 digits, starting and ending with 3 (Settings → Company & Tax)')
+  if (!seller.companyName.trim()) err('seller.name', 'Company name is missing (Settings)')
+  if (!seller.companyNameAr.trim()) warn('seller.nameAr', 'Company name in Arabic is missing — tax invoices must be readable in Arabic')
+  const a = seller.national
+  if (p2) {
+    if (!seller.crNumber) err('seller.cr', 'Company CR number is required for Phase 2 (Settings → Company & Tax)')
+    if (!a.street) err('seller.street', 'Company street name is missing (Settings → ZATCA → National address)')
+    if (!/^\d{4}$/.test(a.buildingNo)) err('seller.building', 'Company building number must be 4 digits (Settings → ZATCA → National address)')
+    if (!a.district) err('seller.district', 'Company district is missing (Settings → ZATCA → National address)')
+    if (!a.city) err('seller.city', 'Company city is missing (Settings → ZATCA → National address)')
+    if (!/^\d{5}$/.test(a.postalCode)) err('seller.postal', 'Company postal code must be 5 digits (Settings → ZATCA → National address)')
+  } else if (!seller.address.trim() && !a.street) {
+    err('seller.address', 'Company address is missing (Settings)')
+  }
+
+  // Buyer
+  const vat = (inv.clientVatNumber ?? '').trim()
+  if (vat && !isValidKsaVat(vat) && (inv.buyerCountry || 'SA') === 'SA')
+    err('buyer.vat', 'Client VAT number must be 15 digits, starting and ending with 3')
+  if (standard) {
+    if (!inv.clientNameEn.trim()) err('buyer.name', 'Client name is required on a standard tax invoice')
+    if (!vat) {
+      if (p2 && !(inv.clientCrNumber ?? '').trim())
+        err('buyer.id', 'Client has no VAT number — enter the client CR number instead (BR-KSA-14)')
+      else warn('buyer.vat', 'Client VAT number is empty — only correct if the client is not VAT-registered')
+    }
+    if (p2 && (inv.buyerCountry || 'SA') === 'SA') {
+      if (!inv.buyerStreet) err('buyer.street', 'Client street name is required (client national address)')
+      if (!/^\d{4}$/.test(inv.buyerBuildingNo ?? '')) err('buyer.building', 'Client building number must be 4 digits')
+      if (!inv.buyerDistrict) err('buyer.district', 'Client district is required')
+      if (!inv.buyerCity) err('buyer.city', 'Client city is required')
+      if (!/^\d{5}$/.test(inv.buyerPostalCode ?? '')) err('buyer.postal', 'Client postal code must be 5 digits')
+    } else if (!p2 && !inv.clientAddressEn && !inv.buyerStreet) {
+      err('buyer.address', 'Client address is required on a standard tax invoice')
+    }
+  }
+
+  // Dates
+  const today = ksaDateTime(new Date()).date
+  const issue = dateOnly(inv.issueDate) ?? today
+  if (issue > today) (p2 ? err : warn)('issueDate', 'Issue date is in the future — ZATCA does not accept future-dated invoices')
+  if (standard && !inv.supplyDate)
+    (p2 ? err : warn)('supplyDate', 'Supply date is required on a standard tax invoice (date the service was delivered)')
+
+  // Notes
+  if (isNote) {
+    if (!inv.relatedInvoiceId) err('relatedInvoiceId', 'Select the original invoice this note corrects')
+    if (!(inv.noteReason ?? '').trim()) err('noteReason', 'Enter the reason for the credit / debit note (required by ZATCA)')
+  }
+
+  // Lines
+  if (items.length === 0) err('items', 'At least one line item is required')
+  for (const it of items) {
+    if (!it.descriptionEn.trim()) err(`items.${it.sr}`, `Line ${it.sr}: description is required`)
+    if (it.taxCategory !== 'S') {
+      if (p2 && !it.exemptionCode) err(`items.${it.sr}`, `Line ${it.sr}: choose the ZATCA exemption / zero-rating reason code`)
+      if (!(it.exemptionReason ?? '').trim() && !it.exemptionCode)
+        err(`items.${it.sr}`, `Line ${it.sr}: give the reason why no VAT is charged`)
+    } else if (it.vatPercent <= 0) {
+      err(`items.${it.sr}`, `Line ${it.sr}: a 0% line must be marked Zero-rated, Exempt or Out of scope`)
+    }
+  }
+  return { errors, warnings }
+}
+
+// ── Phase 2 document assembly ───────────────────────────────────────────────
+
+type IssuableItem = ValidatableItem & {
+  descriptionAr: string
+  unitEn: string | null
+  quantity: number
+  unitPrice: number
+  discount: number
+  taxableAmount: number
+  vatAmount: number
+}
+
+type IssuableInvoice = ValidatableInvoice & {
+  invoiceNumber: string
+  dueDate: Date | null
+  poRef: string | null
+  contractRef: string | null
+  paymentMeansCode: string
+}
+
+/** Build the UBL document model (amounts recomputed exactly as the XML states them). */
+export function buildUblDocument(
+  inv: IssuableInvoice,
+  rawItems: IssuableItem[],
+  seller: ESellerInfo,
+  opts: { uuid: string; icv: number; pih: string; issuedAt: Date; billingReference: string | null }
+): UblDocument {
+  const items = [...rawItems].sort((x, y) => x.sr - y.sr)
+  const groups = new Map<string, { category: UblTaxCategory; percent: number; taxable: number; exemptionCode: string | null; exemptionReason: string | null }>()
+  const lines = items.map((it) => {
+    const category = (['S', 'Z', 'E', 'O'].includes(it.taxCategory) ? it.taxCategory : 'S') as UblTaxCategory
+    const percent = category === 'S' ? round2(it.vatPercent) : 0
+    const lineExtension = round2(it.taxableAmount)
+    const vatAmount = round2((lineExtension * percent) / 100)
+    const key = `${category}|${percent}|${it.exemptionCode ?? ''}`
+    const g = groups.get(key) ?? {
+      category,
+      percent,
+      taxable: 0,
+      exemptionCode: category === 'S' ? null : it.exemptionCode,
+      exemptionReason: category === 'S' ? null : it.exemptionReason || it.exemptionCode,
+    }
+    g.taxable = round2(g.taxable + lineExtension)
+    groups.set(key, g)
+    const name = it.descriptionAr?.trim() ? `${it.descriptionEn.trim()} / ${it.descriptionAr.trim()}` : it.descriptionEn.trim()
+    return {
+      id: it.sr,
+      name: name.slice(0, 1000),
+      quantity: it.quantity,
+      unitCode: unitCodeFor(it.unitEn),
+      unitPrice: round2(it.unitPrice),
+      discount: round2(it.discount),
+      lineExtension,
+      vatPercent: percent,
+      vatAmount,
+      taxCategory: category,
+    }
+  })
+  const taxSubtotals = [...groups.values()]
+    .sort((x, y) => x.category.localeCompare(y.category) || x.percent - y.percent)
+    .map((g) => ({ ...g, vat: round2((g.taxable * g.percent) / 100) }))
+  const lineExtensionTotal = round2(lines.reduce((s, l) => s + l.lineExtension, 0))
+  const vatTotal = round2(taxSubtotals.reduce((s, g) => s + g.vat, 0))
+  const { date: _d, time } = ksaDateTime(opts.issuedAt)
+  return {
+    docType: inv.docType === 'credit_note' ? 'credit_note' : inv.docType === 'debit_note' ? 'debit_note' : 'invoice',
+    kind: inv.invoiceKind === 'simplified' ? 'simplified' : 'standard',
+    number: inv.invoiceNumber,
+    uuid: opts.uuid,
+    issueDate: dateOnly(inv.issueDate)!,
+    issueTime: time,
+    supplyDate: dateOnly(inv.supplyDate),
+    dueDate: dateOnly(inv.dueDate),
+    currency: seller.currency || 'SAR',
+    icv: opts.icv,
+    pih: opts.pih,
+    billingReference: opts.billingReference,
+    noteReason: inv.noteReason?.trim() || null,
+    paymentMeansCode: inv.paymentMeansCode || '30',
+    iban: seller.bankIban || null,
+    poRef: inv.poRef,
+    contractRef: inv.contractRef,
+    seller,
+    buyer: {
+      name: inv.clientNameEn.trim(),
+      vatNumber: inv.clientVatNumber?.trim() || null,
+      crNumber: inv.clientCrNumber?.trim() || null,
+      street: inv.buyerStreet,
+      buildingNo: inv.buyerBuildingNo,
+      district: inv.buyerDistrict,
+      city: inv.buyerCity,
+      postalCode: inv.buyerPostalCode,
+      country: inv.buyerCountry || 'SA',
+    },
+    lines,
+    taxSubtotals,
+    lineExtensionTotal,
+    taxExclusiveTotal: lineExtensionTotal,
+    vatTotal,
+    taxInclusiveTotal: round2(lineExtensionTotal + vatTotal),
+    payableAmount: round2(lineExtensionTotal + vatTotal),
+  }
+}
+
+// ── Issuing ─────────────────────────────────────────────────────────────────
+
+/** Serialises Phase 2 issuing so two documents never take the same ICV / PIH. */
+let issueQueue: Promise<unknown> = Promise.resolve()
+function serialised<T>(fn: () => Promise<T>): Promise<T> {
+  const run = issueQueue.then(fn, fn)
+  issueQueue = run.catch(() => undefined)
+  return run
+}
+
+export class ZatcaValidationError extends Error {
+  constructor(public validation: ZatcaValidation) {
+    super(validation.errors.map((e) => e.message).join(' · '))
+  }
+}
+
+/**
+ * Issue a draft: validate, then freeze everything ZATCA needs.
+ *   Phase 1 — totals, UUID and the 5-tag QR are frozen on the document.
+ *   Phase 2 — UBL 2.1 XML signed with the EGS certificate, ICV/PIH chained,
+ *             QR with the cryptographic stamp; the document then waits for
+ *             clearance (standard) or reporting (simplified).
+ */
+export async function issueEInvoice(id: string, issuedByName: string) {
+  return serialised(async () => {
+    const inv = await db.eInvoice.findUnique({
+      where: { id },
+      include: { items: true, relatedInvoice: { select: { invoiceNumber: true, status: true } } },
+    })
+    if (!inv) throw new Error('E-Invoice not found')
+    if (inv.status !== 'draft') throw new Error('Only draft e-invoices can be issued')
+
+    const profile = await readZatcaProfile()
+    const phase: 1 | 2 = profile.mode === 'phase2' ? 2 : 1
+    const seller = await readEInvoiceSellerInfo()
+    const items = [...inv.items].sort((a, b) => a.sr - b.sr)
+    const validation = validateForZatca(inv, items, seller, phase)
+    if (inv.relatedInvoice && inv.relatedInvoice.status === 'draft')
+      validation.errors.push({ field: 'relatedInvoiceId', message: 'The original invoice is still a draft' })
+    if (validation.errors.length > 0) throw new ZatcaValidationError(validation)
+
+    const totals = computeInvoiceTotals(items)
+    const issuedAt = new Date()
+    const uuid = randomUUID()
+
+    if (phase === 1) {
+      const qrPayload = buildPhase1QrPayload(seller, { issuedAt, issueDate: inv.issueDate, ...totals })
+      const updated = await db.eInvoice.update({
+        where: { id },
+        data: {
+          ...totals,
+          uuid,
+          zatcaPhase: 1,
+          qrPayload,
+          status: 'issued',
+          issuedAt,
+          issuedByName,
+        },
+      })
+      return { invoice: updated, qrPayload, validation, phase }
+    }
+
+    const signer = await getZatcaSigner()
+    // ICV / PIH chain of this EGS in this environment
+    const prev = await db.eInvoice.findFirst({
+      where: { signedXml: { not: null }, zatcaSubmissionMode: signer.env, icv: { not: null } },
+      orderBy: { icv: 'desc' },
+      select: { icv: true, invoiceHash: true },
+    })
+    const icv = (prev?.icv ?? 0) + 1
+    const pih = prev?.invoiceHash ?? ZATCA_INITIAL_PIH
+    const doc = buildUblDocument(inv, items, seller, {
+      uuid,
+      icv,
+      pih,
+      issuedAt,
+      billingReference: inv.relatedInvoice?.invoiceNumber ?? null,
+    })
+    const signed = signUbl(doc, signer, issuedAt)
+    const updated = await db.eInvoice.update({
+      where: { id },
+      data: {
+        subtotal: totals.subtotal,
+        totalDiscount: totals.totalDiscount,
+        taxableAmount: doc.taxExclusiveTotal,
+        vatAmount: doc.vatTotal,
+        totalDue: doc.taxInclusiveTotal,
+        uuid,
+        icv,
+        previousHash: pih,
+        invoiceHash: signed.invoiceHash,
+        signature: signed.signature,
+        signedXml: signed.xml,
+        qrPayload: signed.qrPayload,
+        zatcaPhase: 2,
+        zatcaStatus: 'pending',
+        zatcaSubmissionMode: signer.env,
+        status: 'issued',
+        issuedAt,
+        issuedByName,
+      },
+    })
+    return { invoice: updated, qrPayload: signed.qrPayload, validation, phase, signerKind: signer.kind }
+  })
+}
+
+/**
+ * QR for an issued document: the frozen payload, or (documents issued before
+ * this version) a correctly encoded 5-tag payload that is then frozen.
+ */
+export async function ensureQrPayload(inv: {
+  id: string
+  status: string
+  qrPayload: string | null
+  issuedAt: Date | null
+  issueDate: Date
+  totalDue: number
+  vatAmount: number
+}): Promise<string | null> {
+  if (inv.status === 'draft') return null
+  if (inv.qrPayload) return inv.qrPayload
+  const seller = await readSellerInfo()
+  const payload = buildPhase1QrPayload(seller, inv)
+  await db.eInvoice.update({ where: { id: inv.id }, data: { qrPayload: payload } }).catch(() => undefined)
+  return payload
 }
 
 // ── Derived status helpers ──────────────────────────────────────────────────
@@ -480,79 +564,3 @@ export function isEInvoiceOverdue(inv: {
   return inv.dueDate < todayStart
 }
 
-// ── Phase 2 submission bundle (UBL XML + cryptographic stamp) ───────────────
-
-export type EInvoiceSubmission = {
-  /** UBL 2.1 XML whose SHA-256 hash equals invoiceHash */
-  xml: string
-  invoiceHash: string
-  /** base64 ECDSA signature of the invoice hash */
-  signature: string
-  /** base64 raw 64-byte EC public key (QR tag 8) */
-  publicKeyBase64: string
-  uuid: string
-  icv: number
-  /** True when the stored stamp no longer matched the rebuilt XML and was re-signed */
-  restamped: boolean
-}
-
-/** Prisma row shape required to (re)build a Phase 2 submission. */
-export type ESubmissionInvoice = Prisma.EInvoiceGetPayload<{ include: { items: true } }>
-
-/**
- * Build everything needed to submit one PHASE 2 e-invoice to the Fatoora
- * gateway: the UBL 2.1 XML document plus its cryptographic stamp. The XML is
- * rebuilt deterministically from the stored row (uuid / icv / previousHash
- * embedded, so it hashes identically); if the current document no longer
- * hashes to the stored stamp (e.g. company details changed in Settings after
- * issuing), the stamp is re-signed and PERSISTED so the printed QR, the
- * stored fields and the submitted XML always agree.
- */
-export async function buildEInvoiceSubmission(
-  inv: ESubmissionInvoice,
-  sellerOverride?: ESellerInfo
-): Promise<EInvoiceSubmission> {
-  if ((inv.zatcaPhase ?? 1) !== 2) {
-    throw new Error('ZATCA submission requires a Phase 2 e-invoice')
-  }
-  const seller = sellerOverride ?? (await readEInvoiceSellerInfo())
-  const items = [...inv.items].sort((a, b) => a.sr - b.sr)
-  const totals = computeInvoiceTotals(items)
-  const uuid = inv.uuid ?? ''
-  const icv = inv.icv ?? 1
-  const previousHash = inv.previousHash ?? ZATCA_INITIAL_PIH
-
-  const xml = buildEInvoiceXml({ ...inv, ...totals, uuid }, items, seller, previousHash, icv)
-  const invoiceHash = hashEInvoiceXml(xml)
-
-  // Stored stamp still valid → reuse it byte-for-byte
-  if (inv.invoiceHash === invoiceHash && inv.signature) {
-    const keys = await getZatcaKeys()
-    return {
-      xml,
-      invoiceHash,
-      signature: inv.signature,
-      publicKeyBase64: ecPublicKeyBase64(keys.publicPem),
-      uuid,
-      icv,
-      restamped: false,
-    }
-  }
-
-  // Stamp drifted (or was never signed) → re-sign + persist
-  const keys = await getZatcaKeys()
-  const signature = signHash(keys.privatePem, Buffer.from(invoiceHash, 'base64'))
-  await db.eInvoice.update({
-    where: { id: inv.id },
-    data: { invoiceHash, signature },
-  })
-  return {
-    xml,
-    invoiceHash,
-    signature,
-    publicKeyBase64: ecPublicKeyBase64(keys.publicPem),
-    uuid,
-    icv,
-    restamped: true,
-  }
-}

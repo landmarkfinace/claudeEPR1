@@ -19,6 +19,7 @@ import {
 import { computeInvoiceTotals } from '@/lib/e-invoice'
 import {
   mapEInvoice,
+  zatcaHeaderData,
   eInvoiceDetailInclude,
   eInvoiceSchema,
   normalizeEItems,
@@ -150,6 +151,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
           // Phase is editable while draft (the route only runs for drafts)
           ...(body.zatcaPhase ? { zatcaPhase: body.zatcaPhase } : {}),
           relatedInvoiceId,
+          ...zatcaHeaderData(body),
           items: { create: items },
         },
         include: eInvoiceDetailInclude,

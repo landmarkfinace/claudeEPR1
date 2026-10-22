@@ -26,9 +26,12 @@ export function getAuthToken(): string | null {
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /** parsed JSON error body (e.g. { errors, warnings } from ZATCA checks) */
+  data: unknown
+  constructor(message: string, status: number, data: unknown = null) {
     super(message)
     this.status = status
+    this.data = data
     this.name = 'ApiError'
   }
 }
@@ -63,7 +66,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
       (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
         ? body.error
         : null) ?? `Request failed (${res.status})`
-    throw new ApiError(message, res.status)
+    throw new ApiError(message, res.status, body)
   }
   return body as T
 }

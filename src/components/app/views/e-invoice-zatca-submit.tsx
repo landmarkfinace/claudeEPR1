@@ -44,16 +44,24 @@ import {
   ZatcaStatusBadge,
   type ZatcaCheck,
   type ZatcaProfile,
+  ENV_LABELS,
 } from '@/components/app/views/zatca-shared'
 
 /** POST /api/e-invoices/[id]/zatca/report success payload. */
 type EReportResult = {
-  zatcaStatus: 'reported' | 'cleared' | 'rejected'
-  zatcaSubmittedAt: string
-  mode: 'simulation' | 'production'
-  checks: ZatcaCheck[]
-  response: Record<string, unknown>
+  zatcaStatus: 'reported' | 'cleared' | 'rejected' | 'local_only' | 'compliance_passed' | 'compliance_failed'
+  zatcaSubmittedAt?: string
+  mode: string
+  endpoint?: 'clearance' | 'reporting' | 'compliance'
+  httpStatus?: number
+  errors: string[]
+  warnings: string[]
 }
+
+const messagesToChecks = (r: { errors?: string[]; warnings?: string[] }): ZatcaCheck[] => [
+  ...(r.errors ?? []).map((m, i) => ({ name: `ZATCA error ${i + 1}`, ok: false, severity: 'error' as const, detail: m })),
+  ...(r.warnings ?? []).map((m, i) => ({ name: `ZATCA warning ${i + 1}`, ok: false, severity: 'warning' as const, detail: m })),
+]
 
 /** Authenticated UBL 2.1 XML download for an e-invoice (fetch → blob). */
 export async function downloadEInvoiceUbl(
@@ -159,13 +167,13 @@ export function EInvoiceZatcaSubmitDialog({
         },
       })
       const body = (await res.json().catch(() => null)) as
-        | (EReportResult & { error?: string; checks?: ZatcaCheck[] })
+        | (EReportResult & { error?: string })
         | null
       if (!res.ok) {
         const message =
           body && typeof body.error === 'string' ? body.error : `Submission failed (${res.status})`
         setError(message)
-        setErrorChecks(Array.isArray(body?.checks) ? body!.checks! : [])
+        setErrorChecks(body ? messagesToChecks(body) : [])
         toast.error(message)
         return
       }
@@ -176,13 +184,20 @@ export function EInvoiceZatcaSubmitDialog({
         return
       }
       setResult(body)
-      toast.success(
+      const okStatus = ['cleared', 'reported', 'compliance_passed'].includes(body.zatcaStatus)
+      const msg =
         body.zatcaStatus === 'cleared'
-          ? `E-Invoice ${invoice!.invoiceNumber} cleared by ZATCA`
+          ? `E-Invoice ${invoice!.invoiceNumber} cleared by ZATCA — you can now give it to the client`
           : body.zatcaStatus === 'reported'
             ? `E-Invoice ${invoice!.invoiceNumber} reported to ZATCA`
-            : `ZATCA rejected e-invoice ${invoice!.invoiceNumber} — check the validation details`
-      )
+            : body.zatcaStatus === 'compliance_passed'
+              ? `Test check passed (compliance CSID) — finish onboarding to send real invoices`
+              : body.zatcaStatus === 'local_only'
+                ? 'Local test environment — nothing was sent to ZATCA'
+                : `ZATCA rejected ${invoice!.invoiceNumber} — see the errors below`
+      if (okStatus) toast.success(msg)
+      else if (body.zatcaStatus === 'local_only') toast.warning(msg)
+      else toast.error(msg)
       onSubmitted?.()
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Submission failed'
@@ -205,7 +220,9 @@ export function EInvoiceZatcaSubmitDialog({
     }
   }
 
-  const env = profile?.env ?? 'simulation'
+  const env = profile?.env ?? 'local'
+  const isSimplified = invoice.invoiceKind === 'simplified'
+  const done = ['cleared', 'reported'].includes(invoice.zatcaStatus ?? '') || ['cleared', 'reported'].includes(result?.zatcaStatus ?? '')
   const liveStatus = result?.zatcaStatus ?? invoice.zatcaStatus
   const liveSubmittedAt = result?.zatcaSubmittedAt ?? invoice.zatcaSubmittedAt
 
@@ -215,12 +232,13 @@ export function EInvoiceZatcaSubmitDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            Submit to ZATCA — {invoice.invoiceNumber}
+            {isSimplified ? 'Report' : 'Clear'} with ZATCA — {invoice.invoiceNumber}
           </DialogTitle>
           <DialogDescription>
-            Phase 2 (Integration) e-invoice. The bilingual UBL 2.1 XML is
-            validated, then cleared on the Fatoora gateway according to the
-            connection profile below.
+            {isSimplified
+              ? 'Simplified invoice — must be reported to ZATCA within 24 hours of issuing.'
+              : 'Standard invoice — must be cleared by ZATCA BEFORE it is given to the client. After clearance the QR from ZATCA is printed automatically.'}{' '}
+            The XML sent is exactly the one signed when the invoice was issued.
           </DialogDescription>
         </DialogHeader>
 
@@ -242,12 +260,12 @@ export function EInvoiceZatcaSubmitDialog({
                     'font-medium',
                     env === 'production' &&
                       'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
-                    env === 'preprod' &&
+                    (env === 'sandbox' || env === 'simulation') &&
                       'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300'
                   )}
-                  variant={env === 'simulation' ? 'secondary' : 'default'}
+                  variant={env === 'local' ? 'secondary' : 'default'}
                 >
-                  {env === 'simulation' ? 'Simulation' : env === 'preprod' ? 'Pre-production' : 'Production'} mode
+                  {ENV_LABELS[env]}
                 </Badge>
               )}
             </div>
@@ -262,23 +280,25 @@ export function EInvoiceZatcaSubmitDialog({
                   <dd className="truncate font-mono">{profile.egsSerial || '—'}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">CSID token</dt>
+                  <dt className="text-muted-foreground">Signing certificate</dt>
                   <dd className="flex items-center gap-1.5">
-                    {profile.csidTokenSet ? (
+                    {profile.signingWith === 'production' ? (
                       <>
                         <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                        <span>configured</span>
+                        <span>Production CSID</span>
                       </>
+                    ) : profile.signingWith === 'compliance' ? (
+                      <span className="text-amber-700 dark:text-amber-300">Compliance CSID (test checks only)</span>
+                    ) : profile.signingWith === 'local-test' ? (
+                      <span className="text-muted-foreground">Local TEST certificate — not sent</span>
                     ) : (
-                      <span className="text-muted-foreground">
-                        not set — simulation fallback
-                      </span>
+                      <span className="text-rose-600">Not onboarded</span>
                     )}
                   </dd>
                 </div>
                 <div className="min-w-0 sm:col-span-2">
                   <dt className="text-muted-foreground">Gateway</dt>
-                  <dd className="truncate font-mono">{profile.apiBase}</dd>
+                  <dd className="truncate font-mono">{profile.apiBase || '— local test, nothing is sent —'}</dd>
                 </div>
                 {profile.lastTest ? (
                   <div className="sm:col-span-2">
@@ -348,11 +368,12 @@ export function EInvoiceZatcaSubmitDialog({
               <div className="flex flex-wrap items-center gap-2">
                 <ZatcaStatusBadge status={result.zatcaStatus} />
                 <span className="text-xs text-muted-foreground">
-                  {result.mode === 'production' ? 'live gateway' : 'simulation'} ·{' '}
-                  {formatDateTime(result.zatcaSubmittedAt)}
+                  {ENV_LABELS[(result.mode as keyof typeof ENV_LABELS) ?? 'local'] ?? result.mode}
+                  {result.endpoint ? ` · ${result.endpoint}` : ''}
+                  {result.zatcaSubmittedAt ? ` · ${formatDateTime(result.zatcaSubmittedAt)}` : ''}
                 </span>
               </div>
-              <ZatcaChecksList checks={result.checks} />
+              <ZatcaChecksList checks={messagesToChecks(result)} />
             </div>
           ) : null}
         </div>
@@ -374,14 +395,14 @@ export function EInvoiceZatcaSubmitDialog({
           <Button
             type="button"
             onClick={() => void handleSubmit()}
-            disabled={submitting || invoice.status === 'draft'}
+            disabled={submitting || invoice.status === 'draft' || done || !invoice.hasSignedXml}
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Send className="h-4 w-4" />
             )}
-            {result ? 'Submit again' : 'Submit to ZATCA'}
+            {done ? 'Already accepted by ZATCA' : result ? 'Send again' : isSimplified ? 'Report to ZATCA' : 'Clear with ZATCA'}
           </Button>
         </DialogFooter>
       </DialogContent>

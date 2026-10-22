@@ -1210,6 +1210,9 @@ export type EInvoiceItemRow = {
   unitPrice: number
   discount: number
   vatPercent: number
+  taxCategory: string // S | Z | E | O
+  exemptionCode: string | null
+  exemptionReason: string | null
   taxableAmount: number
   vatAmount: number
   lineTotal: number
@@ -1262,7 +1265,18 @@ export type EInvoiceRow = {
   zatcaPhase: number
   zatcaStatus: string | null // reported | cleared | rejected (Phase 2 submission outcome)
   zatcaSubmittedAt: string | null
-  zatcaSubmissionMode: string | null // simulation | production
+  zatcaSubmissionMode: string | null // local | sandbox | simulation | production (environment at issue)
+  invoiceKind: 'standard' | 'simplified'
+  noteReason: string | null
+  paymentMeansCode: string
+  buyerStreet: string | null
+  buyerBuildingNo: string | null
+  buyerDistrict: string | null
+  buyerCity: string | null
+  buyerPostalCode: string | null
+  buyerCountry: string
+  hasSignedXml: boolean
+  hasClearedXml: boolean
   relatedInvoiceId: string | null
   uuid: string | null
   icv: number | null

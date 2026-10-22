@@ -1,62 +1,23 @@
-// POST /api/e-invoices/[id]/zatca/report — submit ONE Phase 2 e-invoice to
-// the ZATCA Fatoora gateway (the "connect system" flow for e-invoices).
-// Phase 1 e-invoices are rejected: Phase 1 and Phase 2 are SEPARATE
-// per-invoice designations (boss requirement — use whichever is needed).
-//
-//   Simulation mode (profile env = simulation, or preprod/production without
-//   a CSID token): full local validation runs, a realistic gateway response
-//   is produced and persisted (zatcaStatus / zatcaSubmittedAt /
-//   zatcaSubmissionMode='simulation' / zatcaResponse JSON).
-//
-//   Production mode (env = preprod|production AND CSID token set): the UBL
-//   2.1 XML is POSTed to /invoices/clearance/single (standard B2B) with the
-//   CSID bearer token (15s timeout). The gateway response is mapped to
-//   reported|cleared|rejected and persisted. Network failure → 502 with a
-//   clear, actionable message.
-//
-// Shares the SAME ZATCA connection profile as the classic Invoice module
-// (Settings → env / EGS serial / CSID token).
+// POST /api/e-invoices/[id]/zatca/report — send ONE issued Phase 2 e-invoice
+// to ZATCA (Fatoora), exactly as signed at issue time:
+//   • standard (B2B) → Clearance API  /invoices/clearance/single (Clearance-Status: 1)
+//     ZATCA returns the cleared XML with its own stamp + QR → stored and printed.
+//   • simplified (B2C) → Reporting API /invoices/reporting/single (within 24 h)
+//   • onboarding not finished yet (compliance CSID only) → /compliance/invoices
+//     (test check, nothing is registered with ZATCA)
+//   • local environment → nothing is sent; the invoice is marked "local_only".
+// The signed XML is never rebuilt or re-signed here — what was issued is what
+// ZATCA receives.
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { round2 } from '@/lib/format'
-import {
-  ok,
-  badRequest,
-  notFound,
-  serverError,
-  requirePermission,
-  isResponse,
-  logActivity,
-} from '@/lib/api-helpers'
-import {
-  readZatcaProfile,
-  readZatcaCsidToken,
-} from '@/lib/zatca'
-import {
-  buildEInvoiceSubmission,
-  readEInvoiceSellerInfo,
-  computeInvoiceTotals,
-} from '@/lib/e-invoice'
+import { ok, badRequest, notFound, serverError, requirePermission, isResponse, logActivity } from '@/lib/api-helpers'
+import { readSubmissionAuth, readZatcaProfile, zatcaMessages, zatcaRequest } from '@/lib/zatca'
+import { qrFromXml } from '@/lib/zatca-ubl'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: Promise<{ id: string }> }
-
-type ZatcaCheck = {
-  name: string
-  ok: boolean
-  severity: 'error' | 'warning'
-  detail: string
-}
-
-/** Shape ZATCA's gateway answers with (reporting + clearance variants). */
-type ZatcaGatewayResponse = {
-  reportingStatus?: string
-  clearanceStatus?: string
-  status?: number
-  messages?: { type?: string; code?: string; message?: string; status?: string }[]
-  [key: string]: unknown
-}
 
 export async function POST(_req: NextRequest, ctx: Ctx) {
   try {
@@ -64,186 +25,139 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     if (isResponse(auth)) return auth
     const { id } = await ctx.params
 
-    const invoice = await db.eInvoice.findUnique({
-      where: { id },
-      include: { items: { orderBy: { sr: 'asc' } } },
-    })
+    const invoice = await db.eInvoice.findUnique({ where: { id } })
     if (!invoice) return notFound('E-Invoice not found')
-
-    // Phase 1 documents never touch the gateway — Phase 1 & Phase 2 are
-    // SEPARATE per-invoice designations.
-    if ((invoice.zatcaPhase ?? 1) !== 2) {
+    if (invoice.status === 'draft') return badRequest('Issue the e-invoice first')
+    if (!invoice.signedXml || !invoice.invoiceHash || !invoice.uuid) {
       return badRequest(
-        'Only Phase 2 (Integration) e-invoices can be submitted to ZATCA — switch the document to Phase 2 while it is still a draft'
+        (invoice.zatcaPhase ?? 1) === 2
+          ? 'This invoice was issued by the old system without a valid ZATCA signature and cannot be sent. Issue a credit note for it and create a new invoice.'
+          : 'Phase 1 invoices are not sent to ZATCA'
       )
     }
-    if (invoice.status === 'draft') {
-      return badRequest('Issue the e-invoice first — ZATCA only accepts issued documents')
+    if (invoice.zatcaStatus === 'cleared' || invoice.zatcaStatus === 'reported') {
+      return badRequest(`Already ${invoice.zatcaStatus} by ZATCA`)
     }
 
-    // ---- rebuild the submission (stamp + UBL 2.1 XML, always consistent) ----
-    const submission = await buildEInvoiceSubmission(invoice)
-    const { xml, invoiceHash, signature, uuid, icv, restamped } = submission
+    const profile = await readZatcaProfile()
+    const simplified = invoice.invoiceKind === 'simplified'
+    const submittedAt = new Date()
 
-    // ---- local validation (always) ----
-    const seller = await readEInvoiceSellerInfo()
-    const checks: ZatcaCheck[] = []
+    // The environment the document was signed in must be the active one
+    if (invoice.zatcaSubmissionMode && invoice.zatcaSubmissionMode !== profile.env) {
+      return badRequest(
+        `This invoice was signed in the "${invoice.zatcaSubmissionMode}" environment but the active ZATCA environment is "${profile.env}". Switch back, or issue a new invoice.`
+      )
+    }
 
-    checks.push({
-      name: 'Seller VAT number',
-      ok: Boolean(seller.vatNumber),
-      severity: 'error',
-      detail: seller.vatNumber
-        ? `Seller VAT ${seller.vatNumber}`
-        : 'Seller VAT number is not set in Settings',
-    })
+    if (profile.env === 'local') {
+      await db.eInvoice.update({
+        where: { id },
+        data: { zatcaStatus: 'local_only', zatcaSubmittedAt: submittedAt, zatcaResponse: JSON.stringify({ local: true }) },
+      })
+      return ok({
+        zatcaStatus: 'local_only',
+        mode: 'local',
+        errors: [],
+        warnings: [
+          'LOCAL TEST environment — nothing was sent to ZATCA. The signature uses a self-signed test certificate and is not valid with ZATCA.',
+        ],
+      })
+    }
 
-    // E-Invoices are standard B2B (0100000) — buyer VAT expected but an
-    // unregistered buyer is allowed → warning, not error.
-    const buyerVat = invoice.clientVatNumber ?? ''
-    checks.push({
-      name: 'Buyer VAT number',
-      ok: Boolean(buyerVat),
-      severity: 'warning',
-      detail: buyerVat
-        ? `Buyer VAT ${buyerVat}`
-        : 'Buyer VAT number is missing — an unregistered buyer is allowed, the invoice will carry a warning',
-    })
+    const creds = await readSubmissionAuth()
+    if (!creds) {
+      return NextResponse.json(
+        { error: 'ZATCA onboarding is not finished for this environment (Settings → ZATCA → Onboarding)' },
+        { status: 409 }
+      )
+    }
 
-    // Totals recomputed from the stored items must match the stored aggregates
-    const totals = computeInvoiceTotals(invoice.items)
-    const totalsOk =
-      Math.abs(round2(totals.taxableAmount) - round2(invoice.taxableAmount)) <= 0.01 &&
-      Math.abs(round2(totals.vatAmount) - round2(invoice.vatAmount)) <= 0.01 &&
-      Math.abs(round2(totals.totalDue) - round2(invoice.totalDue)) <= 0.01
-    checks.push({
-      name: 'Totals consistent',
-      ok: totalsOk,
-      severity: 'error',
-      detail: totalsOk
-        ? `Taxable ${round2(invoice.taxableAmount)} + VAT ${round2(invoice.vatAmount)} = ${round2(invoice.totalDue)}`
-        : 'Stored totals do not match the recomputed line items — contact support',
-    })
+    const payload = {
+      invoiceHash: invoice.invoiceHash,
+      uuid: invoice.uuid,
+      invoice: Buffer.from(invoice.signedXml, 'utf8').toString('base64'),
+    }
+    const authPair = { token: creds.token, secret: creds.secret }
 
-    checks.push({
-      name: 'Line items',
-      ok: invoice.items.length > 0,
-      severity: 'error',
-      detail:
-        invoice.items.length > 0
-          ? `${invoice.items.length} line item${invoice.items.length === 1 ? '' : 's'}`
-          : 'The e-invoice has no line items',
-    })
+    let endpoint: 'compliance' | 'clearance' | 'reporting' =
+      creds.kind === 'compliance' ? 'compliance' : simplified ? 'reporting' : 'clearance'
 
-    checks.push({
-      name: 'Cryptographic stamp',
-      ok: Boolean(uuid && invoiceHash && signature),
-      severity: 'error',
-      detail:
-        uuid && invoiceHash && signature
-          ? `ICV ${icv} · hash + ECDSA signature present${restamped ? ' (re-signed before this submission)' : ''}`
-          : 'The Phase 2 stamp is incomplete — re-issue the document',
-    })
+    const call = async () =>
+      endpoint === 'compliance'
+        ? zatcaRequest(creds.env, '/compliance/invoices', { body: payload, auth: authPair })
+        : endpoint === 'clearance'
+          ? zatcaRequest(creds.env, '/invoices/clearance/single', {
+              body: payload,
+              auth: authPair,
+              headers: { 'Clearance-Status': '1' },
+            })
+          : zatcaRequest(creds.env, '/invoices/reporting/single', {
+              body: payload,
+              auth: authPair,
+              headers: { 'Clearance-Status': '0' },
+            })
 
-    const blocking = checks.filter((c) => !c.ok && c.severity === 'error')
-    if (blocking.length > 0) {
+    let result
+    try {
+      result = await call()
+      // 303 = ZATCA has switched clearance off → report the invoice instead
+      if (endpoint === 'clearance' && result.httpStatus === 303) {
+        endpoint = 'reporting'
+        result = await call()
+      }
+    } catch (err) {
       return NextResponse.json(
         {
-          error: `ZATCA validation failed: ${blocking.map((c) => c.name).join(', ')}`,
-          checks,
+          error: `Could not reach ZATCA (${err instanceof Error ? err.message : 'network error'}). Nothing changed — try again later.`,
         },
-        { status: 400 }
+        { status: 502 }
       )
     }
 
-    // ---- decide the mode (same connection profile as the Invoice module) ----
-    const profile = await readZatcaProfile()
-    const csidToken = await readZatcaCsidToken()
-    const useProduction = profile.env !== 'simulation' && Boolean(csidToken)
-    const mode: 'simulation' | 'production' = useProduction ? 'production' : 'simulation'
-    const submittedAt = new Date()
-    // E-Invoices are standard B2B tax documents → clearance flow
-    const isSimplified = false
+    const { httpStatus, body } = result
+    const { errors, warnings } = zatcaMessages(body)
+    const clearance = String(body.clearanceStatus ?? '').toUpperCase()
+    const reporting = String(body.reportingStatus ?? '').toUpperCase()
 
-    let zatcaStatus: 'reported' | 'cleared' | 'rejected'
-    let response: Record<string, unknown>
-
-    if (!useProduction) {
-      // ---- SIMULATION: realistic local response, no gateway call ----
-      zatcaStatus = isSimplified ? 'reported' : 'cleared'
-      response = {
-        simulated: true,
-        status: isSimplified ? 202 : 200,
-        ...(isSimplified
-          ? { reportingStatus: 'REPORTED' }
-          : { clearanceStatus: 'CLEARED' }),
-        reportingTime: submittedAt.toISOString(),
-        uuid,
-        invoiceHash,
-        invoiceCounterValue: icv,
-        ...(isSimplified ? {} : { clearanceUuid: `sim-${uuid}` }),
-        ...(restamped
-          ? { note: 'Stamp was re-signed before submission (document changed since the last stamp)' }
-          : {}),
-        ...(profile.env !== 'simulation'
-          ? { note: `Profile env is ${profile.env} but no CSID token is configured — submission simulated locally` }
-          : {}),
-        checks,
-        messages: [],
-      }
-    } else {
-      // ---- PRODUCTION: POST the UBL to the Fatoora gateway ----
-      const endpoint = isSimplified ? 'invoices/report/single' : 'invoices/clearance/single'
-      let gateway: ZatcaGatewayResponse
-      try {
-        const res = await fetch(`${profile.apiBase.replace(/\/$/, '')}/${endpoint}`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${csidToken}`,
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            invoiceHash,
-            uuid,
-            invoice: Buffer.from(xml, 'utf8').toString('base64'),
-          }),
-          signal: AbortSignal.timeout(15000),
-          cache: 'no-store',
-        })
-        const text = await res.text()
-        try {
-          gateway = JSON.parse(text) as ZatcaGatewayResponse
-        } catch {
-          gateway = { status: res.status, messages: [{ message: text.slice(0, 500) }] }
-        }
-      } catch (err) {
-        return NextResponse.json(
-          {
-            error: `Could not reach the ZATCA gateway (${
-              err instanceof Error ? err.message : 'network error'
-            }) — check internet connectivity or switch the profile to simulation mode`,
-          },
-          { status: 502 }
-        )
-      }
-
-      const reported = (gateway.reportingStatus ?? '').toUpperCase() === 'REPORTED'
-      const cleared = (gateway.clearanceStatus ?? '').toUpperCase() === 'CLEARED'
-      zatcaStatus = cleared ? 'cleared' : reported ? 'reported' : 'rejected'
-      response = { ...gateway, gatewayStatus: gateway.status, checks }
+    if (httpStatus === 401) {
+      return NextResponse.json(
+        { error: 'ZATCA rejected the credentials (401). The CSID may have expired — renew it in Settings → ZATCA.' },
+        { status: 502 }
+      )
+    }
+    if (httpStatus === 429 || httpStatus >= 500) {
+      return NextResponse.json(
+        { error: `ZATCA is busy or unavailable (HTTP ${httpStatus}). Nothing changed — try again in a few minutes.` },
+        { status: 502 }
+      )
     }
 
-    // ---- persist the submission outcome on the e-invoice ----
+    let zatcaStatus: 'cleared' | 'reported' | 'rejected' | 'compliance_passed' | 'compliance_failed'
+    let clearedXml: string | null = null
+    if (endpoint === 'compliance') {
+      const passed = (httpStatus === 200 || httpStatus === 202) && (clearance === 'CLEARED' || reporting === 'REPORTED')
+      zatcaStatus = passed ? 'compliance_passed' : 'compliance_failed'
+    } else if (endpoint === 'clearance') {
+      zatcaStatus = clearance === 'CLEARED' && (httpStatus === 200 || httpStatus === 202) ? 'cleared' : 'rejected'
+      if (zatcaStatus === 'cleared' && typeof body.clearedInvoice === 'string') {
+        clearedXml = Buffer.from(body.clearedInvoice, 'base64').toString('utf8')
+      }
+    } else {
+      zatcaStatus = reporting === 'REPORTED' && (httpStatus === 200 || httpStatus === 202) ? 'reported' : 'rejected'
+    }
+
+    const clearedQr = clearedXml ? qrFromXml(clearedXml) : null
+    const stored = { ...body }
+    delete (stored as { clearedInvoice?: unknown }).clearedInvoice
     await db.eInvoice.update({
       where: { id },
       data: {
         zatcaStatus,
         zatcaSubmittedAt: submittedAt,
-        zatcaSubmissionMode: mode,
-        zatcaResponse: JSON.stringify(response),
-        // keep the (possibly re-signed) stamp fields in sync
-        ...(restamped ? { invoiceHash, signature } : {}),
+        zatcaResponse: JSON.stringify({ httpStatus, endpoint, ...stored }),
+        ...(clearedXml ? { clearedXml } : {}),
+        ...(clearedQr ? { qrPayload: clearedQr } : {}),
       },
     })
 
@@ -251,16 +165,18 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
       user: auth,
       action: 'submitted',
       module: 'einvoice',
-      description: `E-Invoice ${invoice.invoiceNumber} submitted to ZATCA (Phase 2, ${mode}) — ${zatcaStatus}`,
+      description: `E-Invoice ${invoice.invoiceNumber} sent to ZATCA (${endpoint}, ${profile.env}) — ${zatcaStatus}`,
       amount: round2(invoice.totalDue),
     })
 
     return ok({
       zatcaStatus,
       zatcaSubmittedAt: submittedAt.toISOString(),
-      mode,
-      checks,
-      response,
+      mode: profile.env,
+      endpoint,
+      httpStatus,
+      errors,
+      warnings,
     })
   } catch (err) {
     console.error('[api/e-invoices/[id]/zatca/report POST]', err)

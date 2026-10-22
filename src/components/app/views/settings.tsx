@@ -1,20 +1,18 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Building2,
   DatabaseBackup,
   Globe2,
   ImagePlus,
   Loader2,
-  PlugZap,
   RotateCcw,
   Save,
   ShieldCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, getAuthToken } from '@/lib/api-client'
-import { formatDateTime } from '@/lib/format'
 import { useAppStore, can } from '@/lib/store'
 import { PAY_TYPE_LABELS, type AppSettings, type PayType } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -24,16 +22,8 @@ import {
   GlossarySettingsSection,
 } from '@/components/app/settings/e-invoice-settings'
 import { AiSettingsSection } from '@/components/app/settings/ai-settings'
+import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
-import {
-  ENV_LABELS,
-  ZATCA_ENV_GATEWAYS,
-  ZatcaChecksList,
-  type ZatcaEnv,
-  type ZatcaProfile,
-  type ZatcaTestResult,
-} from '@/components/app/views/zatca-shared'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -99,107 +89,6 @@ export function SettingsView() {
   const [nameError, setNameError] = useState<string | null>(null)
   const [backingUp, setBackingUp] = useState(false)
   const logoInputRef = useRef<HTMLInputElement>(null)
-
-  // ---- ZATCA Phase 2 connection profile (separate from the settings form) ----
-  const [zatcaProfile, setZatcaProfile] = useState<ZatcaProfile | null>(null)
-  const [profileLoading, setProfileLoading] = useState(true)
-  const [connEnv, setConnEnv] = useState<ZatcaEnv>('simulation')
-  const [connEgsSerial, setConnEgsSerial] = useState('')
-  const [connApiBase, setConnApiBase] = useState('') // '' = per-env gateway default
-  const [connCsidToken, setConnCsidToken] = useState('') // typed token (empty = keep existing)
-  const [savingProfile, setSavingProfile] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<ZatcaTestResult | null>(null)
-
-  const loadZatcaProfile = useCallback(async () => {
-    setProfileLoading(true)
-    try {
-      const p = await api.get<ZatcaProfile>('/api/zatca/profile')
-      setZatcaProfile(p)
-      setConnEnv(p.env)
-      setConnEgsSerial(p.egsSerial)
-      // keep only a CUSTOM override in the input — the per-env default is
-      // shown as muted helper text so switching environments tracks it
-      setConnApiBase(p.apiBase === ZATCA_ENV_GATEWAYS[p.env] ? '' : p.apiBase)
-      setConnCsidToken('')
-    } catch {
-      setZatcaProfile(null) // the card offers a retry button
-    } finally {
-      setProfileLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadZatcaProfile()
-  }, [loadZatcaProfile])
-
-  /** The gateway URL that Phase 2 submissions will hit with the current inputs. */
-  const effectiveApiBase = connApiBase.trim() || ZATCA_ENV_GATEWAYS[connEnv]
-  const csidTokenSet = zatcaProfile?.csidTokenSet ?? false
-
-  /** PUT /api/zatca/profile — env + EGS serial + custom gateway (+ new token). */
-  async function handleSaveProfile() {
-    if (savingProfile) return
-    setSavingProfile(true)
-    try {
-      const p = await api.put<ZatcaProfile>('/api/zatca/profile', {
-        env: connEnv,
-        egsSerial: connEgsSerial.trim(),
-        // '' → server resets to the per-environment gateway default
-        apiBase: connApiBase.trim(),
-        // typed token replaces the stored one; empty keeps it server-side
-        ...(connCsidToken.trim() !== '' ? { csidToken: connCsidToken.trim() } : {}),
-      })
-      setZatcaProfile(p)
-      setConnEnv(p.env)
-      setConnEgsSerial(p.egsSerial)
-      setConnApiBase(p.apiBase === ZATCA_ENV_GATEWAYS[p.env] ? '' : p.apiBase)
-      setConnCsidToken('')
-      toast.success('ZATCA connection saved')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not save the ZATCA connection')
-    } finally {
-      setSavingProfile(false)
-    }
-  }
-
-  /** Clear the stored CSID token (PUT csidToken: null). */
-  async function handleClearToken() {
-    if (savingProfile) return
-    setSavingProfile(true)
-    try {
-      const p = await api.put<ZatcaProfile>('/api/zatca/profile', { csidToken: null })
-      setZatcaProfile(p)
-      setConnCsidToken('')
-      toast.success('CSID token cleared — submissions fall back to simulation')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Could not clear the CSID token')
-    } finally {
-      setSavingProfile(false)
-    }
-  }
-
-  /** POST /api/zatca/test-connection — local checks (simulation) or a real gateway probe. */
-  async function handleTestConnection() {
-    if (testing) return
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const r = await api.post<ZatcaTestResult>('/api/zatca/test-connection', {})
-      setTestResult(r)
-      // the outcome is persisted server-side as the last test — refetch it
-      api
-        .get<ZatcaProfile>('/api/zatca/profile')
-        .then((p) => setZatcaProfile(p))
-        .catch(() => {})
-      if (r.ok) toast.success('ZATCA connection test passed')
-      else toast.error('ZATCA connection test failed — see the details below')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Connection test failed')
-    } finally {
-      setTesting(false)
-    }
-  }
 
   /** Download the full-system JSON backup (admin-only endpoint). */
   async function handleBackup() {
@@ -567,9 +456,9 @@ export function SettingsView() {
         <SectionCard className="p-6">
           <h2 className="text-base font-semibold">ZATCA e-Invoicing &amp; Connection</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Seller identity for the invoice QR (Phase 1 tags 1–2 and the Phase 2 UBL
-            XML), plus the Phase 2 gateway connection used for reporting e-invoices
-            to ZATCA (Fatoora).
+            Company identity printed on every tax invoice and in the ZATCA QR, the company ZATCA phase,
+            and the Phase 2 connection to ZATCA (Fatoora). VAT and CR numbers are saved with the main
+            Save button; the ZATCA panel below has its own Save button.
           </p>
           <div className="mt-6 space-y-5">
             <div className="grid gap-5 sm:grid-cols-2">
@@ -604,250 +493,7 @@ export function SettingsView() {
                 </p>
               </div>
             </div>
-            <div className="rounded-lg border border-dashed bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
-              <span className="font-medium text-foreground">
-                Phase 1 and Phase 2 are separate per-invoice designations:
-              </span>{' '}
-              Phase 1 invoices print the 5-tag TLV QR (no portal submission);
-              Phase 2 invoices carry the 8-tag cryptographic QR + UBL 2.1 XML and
-              are submitted from Invoices → ZATCA. Where those submissions go is
-              configured in the connection profile below.
-            </div>
-
-            {/* ---- Phase 2 Connection (Fatoora) — saved via PUT /api/zatca/profile ---- */}
-            <div className="space-y-4 rounded-lg border p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="flex items-center gap-1.5 text-sm font-semibold">
-                    <PlugZap className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    Phase 2 Connection (Fatoora)
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Gateway profile for reporting / clearing Phase 2 e-invoices —
-                    saved separately from the settings form.
-                  </p>
-                </div>
-                {profileLoading ? (
-                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" /> loading…
-                  </span>
-                ) : zatcaProfile ? (
-                  <Badge
-                    className={cn(
-                      'font-medium',
-                      connEnv === 'production' &&
-                        'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
-                      connEnv === 'preprod' &&
-                        'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300'
-                    )}
-                    variant={connEnv === 'simulation' ? 'secondary' : 'default'}
-                  >
-                    {ENV_LABELS[connEnv]}
-                  </Badge>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => void loadZatcaProfile()}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Retry
-                  </Button>
-                )}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="zatca-env">Environment</Label>
-                  <Select
-                    value={connEnv}
-                    onValueChange={(v) => setConnEnv(v as ZatcaEnv)}
-                    disabled={!canEdit}
-                  >
-                    <SelectTrigger id="zatca-env" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="simulation">
-                        Simulation — local validation
-                      </SelectItem>
-                      <SelectItem value="preprod">
-                        Pre-production — developer portal
-                      </SelectItem>
-                      <SelectItem value="production">Production</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Simulation validates locally without calling the gateway.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="zatca-egs">EGS Unit Serial Number</Label>
-                  <Input
-                    id="zatca-egs"
-                    value={connEgsSerial}
-                    onChange={(e) => setConnEgsSerial(e.target.value)}
-                    placeholder="1-landmarkintergulf|2-SRV|3-001"
-                    className="font-mono"
-                    disabled={!canEdit}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    EGS (POS) serial in the N-value|N-value format.
-                  </p>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor="zatca-csid">CSID Token</Label>
-                    {csidTokenSet ? (
-                      <Badge className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-                        set
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      id="zatca-csid"
-                      type="password"
-                      value={connCsidToken}
-                      onChange={(e) => setConnCsidToken(e.target.value)}
-                      placeholder="Bearer token from Fatoora onboarding"
-                      className="font-mono"
-                      autoComplete="off"
-                      disabled={!canEdit}
-                    />
-                    {csidTokenSet ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0"
-                        onClick={() => void handleClearToken()}
-                        disabled={!canEdit || savingProfile}
-                      >
-                        Clear token
-                      </Button>
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Stored server-side only — never returned by the API. Leave empty
-                    to keep the existing token; without one, pre-production /
-                    production submissions fall back to simulation.
-                  </p>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="zatca-api-base">Custom Gateway URL (optional)</Label>
-                  <Input
-                    id="zatca-api-base"
-                    value={connApiBase}
-                    onChange={(e) => setConnApiBase(e.target.value)}
-                    placeholder={ZATCA_ENV_GATEWAYS[connEnv]}
-                    className="font-mono"
-                    disabled={!canEdit}
-                  />
-                  <p className="break-all text-xs text-muted-foreground">
-                    Effective gateway:{' '}
-                    <span className="font-mono">{effectiveApiBase}</span>
-                    {connApiBase.trim() === ''
-                      ? ` (default for ${ENV_LABELS[connEnv].toLowerCase()})`
-                      : ' (custom override)'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleTestConnection()}
-                    disabled={testing}
-                  >
-                    {testing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Globe2 className="h-4 w-4" />
-                    )}
-                    Test Connection
-                  </Button>
-                ) : null}
-                {canEdit ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleSaveProfile()}
-                    disabled={savingProfile}
-                  >
-                    {savingProfile ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <PlugZap className="h-4 w-4" />
-                    )}
-                    Save Connection
-                  </Button>
-                ) : null}
-                {zatcaProfile?.lastTest ? (
-                  <span className="text-xs text-muted-foreground">
-                    Last test:{' '}
-                    <span
-                      className={cn(
-                        'font-medium',
-                        zatcaProfile.lastTest.ok
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-rose-700 dark:text-rose-400'
-                      )}
-                    >
-                      {zatcaProfile.lastTest.ok ? 'passed' : 'failed'}
-                    </span>{' '}
-                    · {ENV_LABELS[zatcaProfile.lastTest.mode]} ·{' '}
-                    {formatDateTime(zatcaProfile.lastTest.at)} ·{' '}
-                    {zatcaProfile.lastTest.latencyMs} ms
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Not tested yet.</span>
-                )}
-              </div>
-
-              {/* ---- Test result panel ---- */}
-              {testResult ? (
-                <div
-                  className={cn(
-                    'space-y-2 rounded-lg border p-3 text-xs',
-                    testResult.ok
-                      ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/60'
-                      : 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/60'
-                  )}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      className={cn(
-                        'font-medium',
-                        testResult.ok
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
-                          : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300'
-                      )}
-                    >
-                      {testResult.ok ? 'Passed' : 'Failed'}
-                    </Badge>
-                    <span className="text-muted-foreground">
-                      {ENV_LABELS[testResult.mode]} · {testResult.latencyMs} ms
-                      {testResult.httpStatus ? ` · HTTP ${testResult.httpStatus}` : ''}
-                    </span>
-                  </div>
-                  <ZatcaChecksList checks={testResult.checks} />
-                  {testResult.note ? (
-                    <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      {testResult.note}
-                    </p>
-                  ) : null}
-                  {testResult.error ? (
-                    <p className="text-[11px] font-medium leading-relaxed text-rose-700 dark:text-rose-300">
-                      {testResult.error}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+            <ZatcaSettingsPanel canEdit={canEdit} />
           </div>
         </SectionCard>
 

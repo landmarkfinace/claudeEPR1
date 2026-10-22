@@ -2183,3 +2183,26 @@ Work Log:
 - NEW /api/dashboard fields (each permission-gated, each in its own try/catch so one failure never blanks the dashboard): workforce (active/on-site/available/in-interview), receivables (open issued invoices, overdue, invoiced this month — drafts excluded), pipeline (quotations sent/draft, supplier P.O.s ordered), todayLists (name lists dated today, not cancelled).
 - NEW dashboard design: navy blueprint-grid hero (greeting, date, net balance, income/expense totals and this month, quick actions New name list / New invoice / New quotation + mobile-only Add income/expense), "Needs attention" queue (expired/≤30-day IQAMA, overdue invoices, unpaid salaries, quotations awaiting reply, today's lists), metric tiles (Total staff with on-site bar, Salary paid, Advance outstanding, To collect, System users — every old "View …" link kept), 6-month income/expense bar chart, "Money in the pipeline", Payroll status + Pending payouts (Mark Paid + show all kept), Name lists today, Workforce by client, Document compliance, Recent activity. Verified desktop 1440, mobile 390 (no horizontal overflow), dark mode.
 - NOTES for the boss: BASELINE_PERMISSIONS currently grants every permission to every signed-in user (owner request) — roles have no effect until it is restricted. E-Invoice module "outstanding" total includes draft invoices; the dashboard counts issued invoices only.
+
+---
+Task ID: ZATCA-PHASE1-PHASE2-COMPLIANCE
+Agent: Claude (Anthropic)
+Task: Audit the E-Invoice module against ZATCA Phase 1 / Phase 2 and fix it the way ZATCA specifies.
+
+Bugs found and fixed:
+- QR TLV used a 2-byte length; ZATCA uses 1 byte → QR could not be read by ZATCA scanners. lib/zatca.ts tlvEncode.
+- QR rebuilt from current Settings on every view (and shown on drafts) → now frozen on the document at issue (EInvoice.qrPayload); drafts have no QR.
+- Phase chosen per invoice → ZATCA sets it per taxpayer: company setting zatca_mode (Settings → ZATCA).
+- Notes had no reason (KSA-10) → EInvoice.noteReason, required for credit/debit notes.
+- 0% lines had no category/reason → EInvoiceItem.taxCategory (S/Z/E/O) + exemptionCode (VATEX-SA-…) + exemptionReason.
+- VAT total = sum of line VAT → now per VAT category (BR-CO-17), same in UI, DB and XML.
+- Phase 2: P-256 key → secp256k1; no CSID → full onboarding (CSR builder in lib/zatca-asn1.ts, OTP → compliance CSID → compliance checks → production CSID, /api/zatca/onboarding); XML rewritten to the KSA UBL profile (lib/zatca-ubl.ts: root Invoice + 388/381/383, 0100000/0200000, TaxCurrencyCode, BillingReference, Delivery, PaymentMeans/InstructionNote, national addresses, two TaxTotals, correct LegalMonetaryTotal order, line RoundingAmount, XAdES UBLExtensions, cac:Signature, QR in XML); hash = SHA-256 of the C14N form without UBLExtensions/Signature/QR (verified identical to an independent xmldom+xmldsigjs C14N oracle and to zatca-xml-js on its own sample); QR tags 6-9 (8 = SPKI DER, 9 = cert signature, simplified only).
+- Gateway: host typo gw-fatura → gw-fatoora, report/single → reporting/single, Bearer → Basic(token:secret), Accept-Version V2, Clearance-Status header; standard → clearance (cleared XML + ZATCA QR stored), simplified → reporting; 303 fallback; compliance CSID → /compliance/invoices.
+- "Simulation" faked CLEARED without calling ZATCA → environments are now local (nothing sent, status local_only) / sandbox / simulation / production.
+- Issued documents were re-signed later (broke the PIH chain) → signed XML frozen at issue (EInvoice.signedXml), ICV/PIH chained per environment, issuing serialised.
+- Validation before issue (validateForZatca): seller VAT 3…3, CR, national address (4-digit building, 5-digit postal), buyer VAT/CRN/address for standard invoices, supply date, note reason + original invoice, exemption codes, future dates. 422 with the list.
+
+Schema (db:push required): EInvoice.invoiceKind, noteReason, paymentMeansCode, buyerStreet/BuildingNo/District/City/PostalCode/Country, signedXml, clearedXml, qrPayload; EInvoiceItem.taxCategory, exemptionCode, exemptionReason.
+UI: Settings → new ZatcaSettingsPanel; E-Invoice form: Standard/Simplified, note reason, payment means, client national address (prefilled from the client's last invoice), per-line VAT category + reason code; print: Simplified title, note reason, buyer national address, exemption text, "not yet cleared" / "LOCAL TEST" notice under the QR.
+Legacy Phase 2 rows (old fake stamp, no signedXml) cannot be sent; Phase 1 rows without qrPayload get a correct 5-tag QR frozen on first view.
+Not possible from the dev sandbox: a live call to ZATCA (network blocked) — test with Sandbox (OTP 123345) on the server first.

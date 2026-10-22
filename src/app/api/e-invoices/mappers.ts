@@ -68,6 +68,9 @@ function mapItem(it: EItemRecord): EInvoiceItemRow {
     unitPrice: round2(it.unitPrice),
     discount: round2(it.discount),
     vatPercent: round2(it.vatPercent),
+    taxCategory: it.taxCategory,
+    exemptionCode: it.exemptionCode,
+    exemptionReason: it.exemptionReason,
     taxableAmount: round2(it.taxableAmount),
     vatAmount: round2(it.vatAmount),
     lineTotal: round2(it.lineTotal),
@@ -151,6 +154,17 @@ export function mapEInvoice(
     zatcaStatus: inv.zatcaStatus ?? null,
     zatcaSubmittedAt: inv.zatcaSubmittedAt ? inv.zatcaSubmittedAt.toISOString() : null,
     zatcaSubmissionMode: inv.zatcaSubmissionMode ?? null,
+    invoiceKind: inv.invoiceKind === 'simplified' ? 'simplified' : 'standard',
+    noteReason: inv.noteReason,
+    paymentMeansCode: inv.paymentMeansCode,
+    buyerStreet: inv.buyerStreet,
+    buyerBuildingNo: inv.buyerBuildingNo,
+    buyerDistrict: inv.buyerDistrict,
+    buyerCity: inv.buyerCity,
+    buyerPostalCode: inv.buyerPostalCode,
+    buyerCountry: inv.buyerCountry,
+    hasSignedXml: Boolean(inv.signedXml),
+    hasClearedXml: Boolean(inv.clearedXml),
     relatedInvoiceId: inv.relatedInvoiceId,
     uuid: inv.uuid,
     icv: inv.icv,
@@ -213,6 +227,10 @@ export const eItemSchema = z.object({
     .min(0, 'VAT percent cannot be negative')
     .max(100, 'VAT percent cannot exceed 100')
     .optional(),
+  // ZATCA VAT category: S standard · Z zero-rated · E exempt · O out of scope
+  taxCategory: z.enum(['S', 'Z', 'E', 'O']).optional(),
+  exemptionCode: z.string().max(40).nullable().optional(),
+  exemptionReason: z.string().max(300, 'Exemption reason is too long').nullable().optional(),
 })
 
 export const eInvoiceSchema = z.object({
@@ -243,6 +261,16 @@ export const eInvoiceSchema = z.object({
   zatcaPhase: z.union([z.literal(1), z.literal(2)]).optional(),
   arManualFlags: z.array(z.string().max(40)).max(20).optional(),
   relatedInvoiceId: z.string().nullable().optional(),
+  // ZATCA document details
+  invoiceKind: z.enum(['standard', 'simplified']).optional(),
+  noteReason: z.string().max(500, 'Reason is too long').nullable().optional(),
+  paymentMeansCode: z.enum(['1', '10', '30', '42', '48']).optional(),
+  buyerStreet: z.string().max(160).nullable().optional(),
+  buyerBuildingNo: z.string().max(10).nullable().optional(),
+  buyerDistrict: z.string().max(120).nullable().optional(),
+  buyerCity: z.string().max(120).nullable().optional(),
+  buyerPostalCode: z.string().max(10).nullable().optional(),
+  buyerCountry: z.string().length(2).optional(),
   items: z
     .array(eItemSchema)
     .min(1, 'At least one line item is required')
@@ -265,9 +293,28 @@ export type NormalizedEItem = {
   unitPrice: number
   discount: number
   vatPercent: number
+  taxCategory: string
+  exemptionCode: string | null
+  exemptionReason: string | null
   taxableAmount: number
   vatAmount: number
   lineTotal: number
+}
+
+/** ZATCA header fields shared by create / update. */
+export function zatcaHeaderData(body: EInvoiceBody) {
+  const t = (v: string | null | undefined) => v?.trim() || null
+  return {
+    invoiceKind: body.invoiceKind ?? 'standard',
+    noteReason: t(body.noteReason),
+    paymentMeansCode: body.paymentMeansCode ?? '30',
+    buyerStreet: t(body.buyerStreet),
+    buyerBuildingNo: t(body.buyerBuildingNo),
+    buyerDistrict: t(body.buyerDistrict),
+    buyerCity: t(body.buyerCity),
+    buyerPostalCode: t(body.buyerPostalCode),
+    buyerCountry: (body.buyerCountry ?? 'SA').toUpperCase(),
+  }
 }
 
 /**
@@ -286,7 +333,13 @@ export function normalizeEItems(
     if (discount > round2(quantity * unitPrice)) {
       return { error: `Line ${i + 1}: discount cannot be greater than the line amount` }
     }
-    const totals = computeItemTotals({ quantity, unitPrice, discount, vatPercent: it.vatPercent ?? 15 })
+    // Non-standard VAT categories carry 0% and must say why (ZATCA BR-KSA-69 / BR-E-10 / BR-Z-10 / BR-O-10)
+    const taxCategory = it.taxCategory ?? ((it.vatPercent ?? 15) > 0 ? 'S' : 'Z')
+    const vatPercent = taxCategory === 'S' ? round2(it.vatPercent ?? 15) : 0
+    if (taxCategory === 'S' && vatPercent <= 0) {
+      return { error: `Line ${i + 1}: standard-rated lines need a VAT rate above 0% (choose Zero-rated, Exempt or Out of scope instead)` }
+    }
+    const totals = computeItemTotals({ quantity, unitPrice, discount, vatPercent })
     out.push({
       sr: i + 1,
       descriptionEn: it.descriptionEn.trim(),
@@ -298,7 +351,10 @@ export function normalizeEItems(
       quantity,
       unitPrice,
       discount,
-      vatPercent: round2(it.vatPercent ?? 15),
+      vatPercent,
+      taxCategory,
+      exemptionCode: taxCategory === 'S' ? null : it.exemptionCode?.trim() || null,
+      exemptionReason: taxCategory === 'S' ? null : it.exemptionReason?.trim() || null,
       taxableAmount: totals.taxableAmount,
       vatAmount: totals.vatAmount,
       lineTotal: totals.lineTotal,

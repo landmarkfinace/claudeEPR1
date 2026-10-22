@@ -1,30 +1,15 @@
-// POST /api/zatca/test-connection — verify the Phase 2 gateway configuration.
-//   • simulation env → LOCAL validation only (VAT number, EGS serial format,
-//     EC keypair) — no network call is made.
-//   • preprod/production env → a real GET to the gateway's /invoices/pid
-//     endpoint with the CSID bearer token (8s timeout). A network failure is
-//     EXPECTED in an offline sandbox and is reported clearly (ok:false with
-//     the error), never thrown.
-// The outcome is persisted as the zatca_last_test Setting row either way.
+// POST /api/zatca/test-connection — readiness report for e-invoicing:
+// company details, national address, phase, onboarding state, and (for the
+// online environments) whether the ZATCA gateway can be reached from this server.
 import {
   ok,
   serverError,
   requirePermission,
   isResponse,
 } from '@/lib/api-helpers'
-import {
-  readZatcaProfile,
-  readZatcaCsidToken,
-  readSellerInfo,
-  hasZatcaKeys,
-  saveZatcaLastTest,
-  type ZatcaLastTest,
-} from '@/lib/zatca'
+import { readZatcaProfile, readSellerInfo, saveZatcaLastTest, isValidKsaVat, ZATCA_ENV_BASES, type ZatcaLastTest } from '@/lib/zatca'
 
 export const dynamic = 'force-dynamic'
-
-/** ZATCA EGS serial format: "N-value" segments joined by '|', e.g. 1-landmarkintergulf|2-SRV|3-001 */
-const EGS_SERIAL_RE = /^\d+-[^|]+(\|\d+-[^|]+)+$/
 
 type LocalCheck = { name: string; ok: boolean; detail: string }
 
@@ -32,107 +17,74 @@ export async function POST() {
   try {
     const auth = await requirePermission('einvoices.view')
     if (isResponse(auth)) return auth
-
-    const startedAt = Date.now()
+    const started = Date.now()
     const profile = await readZatcaProfile()
+    const seller = await readSellerInfo()
+    const a = seller.national
     const checks: LocalCheck[] = []
 
-    // Local sanity checks — always useful context, included in every result
-    const seller = await readSellerInfo()
-    const vatOk = /^\d{15}$/.test(seller.vatNumber)
     checks.push({
-      name: 'Seller VAT number',
-      ok: vatOk,
-      detail: vatOk
-        ? `VAT ${seller.vatNumber} (15 digits) is set`
-        : 'Seller VAT number is missing or not 15 digits — set it under Settings → Company & Tax',
+      name: 'Company VAT number',
+      ok: isValidKsaVat(seller.vatNumber),
+      detail: isValidKsaVat(seller.vatNumber) ? `VAT ${seller.vatNumber}` : '15 digits, starting and ending with 3 — Settings → Company & Tax',
     })
-
-    const egsOk = EGS_SERIAL_RE.test(profile.egsSerial)
+    checks.push({ name: 'Company CR number', ok: Boolean(seller.crNumber), detail: seller.crNumber || 'Missing — Settings → Company & Tax' })
+    const addrOk = Boolean(a.street && /^\d{4}$/.test(a.buildingNo) && a.district && a.city && /^\d{5}$/.test(a.postalCode))
     checks.push({
-      name: 'EGS unit serial',
-      ok: egsOk,
-      detail: egsOk
-        ? `EGS serial ${profile.egsSerial} has the required N-value|N-value format`
-        : 'EGS serial is missing or malformed — expected e.g. 1-landmarkintergulf|2-SRV|3-001',
+      name: 'National address',
+      ok: addrOk,
+      detail: addrOk ? `${a.buildingNo} ${a.street}, ${a.district}, ${a.city} ${a.postalCode}` : 'Street, 4-digit building no., district, city and 5-digit postal code are required for Phase 2',
     })
-
-    const keysOk = await hasZatcaKeys()
     checks.push({
-      name: 'ECDSA keypair',
-      ok: keysOk,
-      detail: keysOk
-        ? 'EC P-256 keypair is present (QR tags 7-8 / UBL signature)'
-        : 'No ZATCA keypair yet — it is generated automatically when the first Phase 2 invoice is stamped',
+      name: 'Phase',
+      ok: true,
+      detail: profile.mode === 'phase2' ? 'Phase 2 (Integration) — invoices are signed and sent to ZATCA' : 'Phase 1 (Generation) — QR only, nothing is sent to ZATCA',
     })
-
-    // ---- simulation: local validation only, no gateway call ----
-    if (profile.env === 'simulation') {
-      const latencyMs = Date.now() - startedAt
-      const result = {
-        ok: checks.every((c) => c.ok),
-        mode: 'simulation' as const,
-        checks,
-        latencyMs,
-        note: 'Simulation mode validates the configuration locally without calling the ZATCA gateway.',
-      }
-      const lastTest: ZatcaLastTest = {
-        at: new Date().toISOString(),
-        ok: result.ok,
-        mode: profile.env,
-        error: result.ok ? undefined : 'Local validation failed — see checks',
-        latencyMs,
-      }
-      await saveZatcaLastTest(lastTest)
-      return ok(result)
-    }
-
-    // ---- preprod / production: probe the real gateway ----
-    const token = await readZatcaCsidToken()
-    let httpStatus: number | undefined
-    let errorMessage: string | undefined
-    let reachable = false
-
-    try {
-      const res = await fetch(`${profile.apiBase.replace(/\/$/, '')}/invoices/pid`, {
-        method: 'GET',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        signal: AbortSignal.timeout(8000),
-        cache: 'no-store',
+    if (profile.mode === 'phase2') {
+      checks.push({
+        name: 'Signing certificate',
+        ok: profile.signingReady,
+        detail:
+          profile.signingWith === 'production'
+            ? 'Production CSID'
+            : profile.signingWith === 'compliance'
+              ? 'Compliance CSID only — finish onboarding to send real invoices'
+              : profile.signingWith === 'local-test'
+                ? 'LOCAL TEST certificate — not valid with ZATCA'
+                : 'Not onboarded — Settings → ZATCA → Onboarding',
       })
-      httpStatus = res.status
-      reachable = true
-      if (!res.ok) {
-        errorMessage = `Gateway responded with HTTP ${res.status} — ${
-          token ? 'the CSID token may be invalid or expired' : 'no CSID token is configured'
-        }`
-      }
-    } catch (err) {
-      // Offline sandbox / DNS failure / timeout — expected, report clearly
-      errorMessage = `Gateway unreachable (${
-        err instanceof Error ? err.message : 'network error'
-      }) — check internet connectivity or use simulation mode`
     }
 
-    const latencyMs = Date.now() - startedAt
-    const result = {
-      ok: reachable && (httpStatus ?? 500) < 400 && checks.every((c) => c.ok),
-      mode: profile.env,
-      checks,
-      httpStatus,
-      error: errorMessage,
-      latencyMs,
+    let httpStatus: number | undefined
+    let error: string | undefined
+    if (profile.env !== 'local') {
+      try {
+        const res = await fetch(`${ZATCA_ENV_BASES[profile.env]}/compliance`, {
+          method: 'POST',
+          headers: { 'Accept-Version': 'V2', 'Content-Type': 'application/json' },
+          body: '{}',
+          signal: AbortSignal.timeout(10000),
+          cache: 'no-store',
+        })
+        httpStatus = res.status
+        // any HTTP answer (400/401 for an empty request) proves the gateway is reachable
+        checks.push({ name: 'ZATCA gateway reachable', ok: true, detail: `${ZATCA_ENV_BASES[profile.env]} answered (HTTP ${res.status})` })
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'network error'
+        checks.push({ name: 'ZATCA gateway reachable', ok: false, detail: `Cannot reach ZATCA from this server: ${error}` })
+      }
     }
-    const lastTest: ZatcaLastTest = {
+
+    const result: ZatcaLastTest = {
       at: new Date().toISOString(),
-      ok: result.ok,
+      ok: checks.every((c) => c.ok),
       mode: profile.env,
       httpStatus,
-      error: errorMessage,
-      latencyMs,
+      error,
+      latencyMs: Date.now() - started,
     }
-    await saveZatcaLastTest(lastTest)
-    return ok(result)
+    await saveZatcaLastTest(result)
+    return ok({ ...result, checks })
   } catch {
     return serverError()
   }

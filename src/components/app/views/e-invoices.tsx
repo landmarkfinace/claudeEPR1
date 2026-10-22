@@ -44,7 +44,7 @@ import {
   X,
 } from 'lucide-react'
 
-import { api, qs } from '@/lib/api-client'
+import { api, ApiError, qs } from '@/lib/api-client'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { fileToDataUrl } from '@/lib/image-data-url'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
@@ -114,6 +114,7 @@ import {
   downloadEInvoiceUbl,
 } from './e-invoice-zatca-submit'
 import { ZatcaStatusBadge } from './zatca-shared'
+import { PAYMENT_MEANS, TAX_CATEGORY_LABELS, VAT_EXEMPTION_CODES } from '@/lib/zatca-codes'
 
 // ── List response shapes ────────────────────────────────────────────────────
 
@@ -272,11 +273,24 @@ type EItemForm = {
   unitPrice: string
   discount: string
   vatPercent: string
+  /** ZATCA VAT category: S standard · Z zero-rated · E exempt · O out of scope */
+  taxCategory: 'S' | 'Z' | 'E' | 'O'
+  exemptionCode: string
+  exemptionReason: string
 }
 
 type EIForm = {
   docType: 'invoice' | 'credit_note' | 'debit_note'
   zatcaPhase: 1 | 2
+  invoiceKind: 'standard' | 'simplified'
+  noteReason: string
+  paymentMeansCode: string
+  buyerStreet: string
+  buyerBuildingNo: string
+  buyerDistrict: string
+  buyerCity: string
+  buyerPostalCode: string
+  buyerCountry: string
   relatedInvoiceId: string
   clientId: string
   clientNameEn: string
@@ -390,6 +404,9 @@ function newItemForm(): EItemForm {
     unitPrice: '',
     discount: '',
     vatPercent: '15',
+    taxCategory: 'S',
+    exemptionCode: '',
+    exemptionReason: '',
   }
 }
 
@@ -399,6 +416,15 @@ function emptyForm(showReceiverSignature: boolean): EIForm {
   return {
     docType: 'invoice',
     zatcaPhase: 1,
+    invoiceKind: 'standard',
+    noteReason: '',
+    paymentMeansCode: '30',
+    buyerStreet: '',
+    buyerBuildingNo: '',
+    buyerDistrict: '',
+    buyerCity: '',
+    buyerPostalCode: '',
+    buyerCountry: 'SA',
     relatedInvoiceId: '',
     clientId: '',
     clientNameEn: '',
@@ -613,6 +639,14 @@ export function EInvoicesView() {
   const [nextNumber, setNextNumber] = useState('')
   const nextNumberCache = useRef<Map<string, string>>(new Map())
   const [issuedInvoices, setIssuedInvoices] = useState<EInvoiceRow[]>([])
+  // Company ZATCA phase (Settings → ZATCA) — decides how documents are issued
+  const [zatcaMode, setZatcaMode] = useState<'phase1' | 'phase2'>('phase1')
+  useEffect(() => {
+    api
+      .get<{ mode: 'phase1' | 'phase2' }>('/api/zatca/profile')
+      .then((p) => setZatcaMode(p.mode === 'phase2' ? 'phase2' : 'phase1'))
+      .catch(() => undefined)
+  }, [])
   const issuedLoaded = useRef(false)
 
   // ---- translation ----
@@ -873,6 +907,15 @@ export function EInvoicesView() {
           ? (full.docType as EIForm['docType'])
           : 'invoice',
         zatcaPhase: full.zatcaPhase === 2 ? 2 : 1,
+        invoiceKind: full.invoiceKind === 'simplified' ? 'simplified' : 'standard',
+        noteReason: full.noteReason ?? '',
+        paymentMeansCode: full.paymentMeansCode || '30',
+        buyerStreet: full.buyerStreet ?? '',
+        buyerBuildingNo: full.buyerBuildingNo ?? '',
+        buyerDistrict: full.buyerDistrict ?? '',
+        buyerCity: full.buyerCity ?? '',
+        buyerPostalCode: full.buyerPostalCode ?? '',
+        buyerCountry: full.buyerCountry || 'SA',
         relatedInvoiceId: full.relatedInvoiceId ?? '',
         clientId: full.clientId ?? '',
         clientNameEn: full.clientNameEn,
@@ -909,6 +952,9 @@ export function EInvoicesView() {
             unitPrice: String(it.unitPrice),
             discount: it.discount ? String(it.discount) : '',
             vatPercent: String(Math.round(it.vatPercent)),
+            taxCategory: (['S', 'Z', 'E', 'O'].includes(it.taxCategory) ? it.taxCategory : 'S') as EItemForm['taxCategory'],
+            exemptionCode: it.exemptionCode ?? '',
+            exemptionReason: it.exemptionReason ?? '',
           }
         }),
         arManual: manual,
@@ -968,6 +1014,27 @@ export function EInvoicesView() {
       // values now come from the client record — no longer "manually typed"
       arManual: { ...f.arManual, clientName: false, clientAddress: false },
     }))
+    // Re-use the national address typed on this client's previous invoice
+    api
+      .get<{ rows: EInvoiceRow[] }>(`/api/e-invoices${qs({ clientId: v, pageSize: 20 })}`)
+      .then(async (res) => {
+        const last = (res.rows ?? []).find((r) => r.buyerStreet || r.buyerCity)
+        if (!last) return
+        setForm((f) =>
+          f.clientId !== v || f.buyerStreet || f.buyerCity
+            ? f
+            : {
+                ...f,
+                buyerStreet: last.buyerStreet ?? '',
+                buyerBuildingNo: last.buyerBuildingNo ?? '',
+                buyerDistrict: last.buyerDistrict ?? '',
+                buyerCity: last.buyerCity ?? '',
+                buyerPostalCode: last.buyerPostalCode ?? '',
+                buyerCountry: last.buyerCountry || 'SA',
+              }
+        )
+      })
+      .catch(() => undefined)
   }
 
   /** Quick-add a client from inside the e-invoice form — saved to Clients. */
@@ -1238,15 +1305,22 @@ export function EInvoicesView() {
       const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
       const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
       const discount = Math.min(Math.max(0, parseNum(it.discount) ?? 0), round2(quantity * unitPrice))
-      const vatPercent = parseNum(it.vatPercent) ?? 15
+      const vatPercent = it.taxCategory === 'S' ? (parseNum(it.vatPercent) ?? 15) : 0
       const taxable = round2(quantity * unitPrice - discount)
       const vat = round2((taxable * vatPercent) / 100)
-      return { gross: round2(quantity * unitPrice), discount, taxable, vat, lineTotal: round2(taxable + vat) }
+      return { gross: round2(quantity * unitPrice), discount, taxable, vat, lineTotal: round2(taxable + vat), group: `${it.taxCategory}|${vatPercent}`, vatPercent }
     })
     const subtotal = round2(items.reduce((s, it) => s + it.gross, 0))
     const totalDiscount = round2(items.reduce((s, it) => s + it.discount, 0))
     const taxableAmount = round2(items.reduce((s, it) => s + it.taxable, 0))
-    const vatAmount = round2(items.reduce((s, it) => s + it.vat, 0))
+    // ZATCA BR-CO-17: VAT = taxable of each VAT category × rate (same as the server)
+    const groups = new Map<string, { taxable: number; rate: number }>()
+    for (const it of items) {
+      const g = groups.get(it.group) ?? { taxable: 0, rate: it.vatPercent }
+      g.taxable = round2(g.taxable + it.taxable)
+      groups.set(it.group, g)
+    }
+    const vatAmount = round2([...groups.values()].reduce((s, g) => s + round2((g.taxable * g.rate) / 100), 0))
     return { items, subtotal, totalDiscount, taxableAmount, vatAmount, totalDue: round2(taxableAmount + vatAmount) }
   }, [form])
 
@@ -1290,7 +1364,15 @@ export function EInvoicesView() {
 
     const body = {
       docType: form.docType,
-      zatcaPhase: form.zatcaPhase,
+      invoiceKind: form.invoiceKind,
+      noteReason: form.docType !== 'invoice' ? form.noteReason.trim() || null : null,
+      paymentMeansCode: form.paymentMeansCode,
+      buyerStreet: form.buyerStreet.trim() || null,
+      buyerBuildingNo: form.buyerBuildingNo.trim() || null,
+      buyerDistrict: form.buyerDistrict.trim() || null,
+      buyerCity: form.buyerCity.trim() || null,
+      buyerPostalCode: form.buyerPostalCode.trim() || null,
+      buyerCountry: form.buyerCountry || 'SA',
       clientId: form.clientId || null,
       clientNameEn,
       clientNameAr: form.clientNameAr.trim(),
@@ -1324,7 +1406,10 @@ export function EInvoicesView() {
         quantity: Math.max(0, parseNum(it.quantity) ?? 0),
         unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
         discount: round2(Math.max(0, parseNum(it.discount) ?? 0)),
-        vatPercent: parseNum(it.vatPercent) ?? 15,
+        vatPercent: it.taxCategory === 'S' ? (parseNum(it.vatPercent) ?? 15) : 0,
+        taxCategory: it.taxCategory,
+        exemptionCode: it.taxCategory === 'S' ? null : it.exemptionCode || null,
+        exemptionReason: it.taxCategory === 'S' ? null : it.exemptionReason.trim() || null,
       })),
     }
 
@@ -1362,15 +1447,35 @@ export function EInvoicesView() {
     if (!target || issuing) return
     setIssuing(true)
     try {
-      const issued = await api.post<EInvoiceRow>(`/api/e-invoices/${target.id}/issue`, {})
-      toast.success(
-        `${issued.invoiceNumber} issued — locked with the ZATCA hash chain and QR code`
+      const issued = await api.post<EInvoiceRow & { needsSubmission?: boolean; warnings?: { message: string }[] }>(
+        `/api/e-invoices/${target.id}/issue`,
+        {}
       )
+      toast.success(
+        issued.needsSubmission
+          ? `${issued.invoiceNumber} issued and signed (Phase 2) — now send it to ZATCA from the ZATCA button`
+          : `${issued.invoiceNumber} issued — locked with the ZATCA QR code`
+      )
+      for (const w of issued.warnings ?? []) toast.warning(w.message)
       setIssueTarget(null)
       nextNumberCache.current.clear()
       void load()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not issue the e-invoice')
+      const data = e instanceof ApiError ? (e.data as { errors?: { message: string }[] } | null) : null
+      if (data?.errors && data.errors.length > 0) {
+        toast.error('ZATCA check failed — fix these before issuing', {
+          description: (
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {data.errors.map((x, i) => (
+                <li key={i}>{x.message}</li>
+              ))}
+            </ul>
+          ),
+          duration: 15000,
+        })
+      } else {
+        toast.error(e instanceof Error ? e.message : 'Could not issue the e-invoice')
+      }
     } finally {
       setIssuing(false)
     }
@@ -1403,6 +1508,15 @@ export function EInvoicesView() {
         clientCrNumber: full.clientCrNumber,
         clientAddressEn: full.clientAddressEn,
         clientAddressAr: full.clientAddressAr,
+        invoiceKind: full.invoiceKind,
+        paymentMeansCode: full.paymentMeansCode,
+        buyerStreet: full.buyerStreet,
+        buyerBuildingNo: full.buyerBuildingNo,
+        buyerDistrict: full.buyerDistrict,
+        buyerCity: full.buyerCity,
+        buyerPostalCode: full.buyerPostalCode,
+        buyerCountry: full.buyerCountry,
+        supplyDate: full.supplyDate ? toDateInputValue(full.supplyDate) : null,
         issueDate: toDateInputValue(new Date()),
         items: [
           {
@@ -1580,6 +1694,17 @@ export function EInvoicesView() {
       zatcaStatus: null,
       zatcaSubmittedAt: null,
       zatcaSubmissionMode: null,
+      invoiceKind: form.invoiceKind,
+      noteReason: form.noteReason.trim() || null,
+      paymentMeansCode: form.paymentMeansCode,
+      buyerStreet: form.buyerStreet.trim() || null,
+      buyerBuildingNo: form.buyerBuildingNo.trim() || null,
+      buyerDistrict: form.buyerDistrict.trim() || null,
+      buyerCity: form.buyerCity.trim() || null,
+      buyerPostalCode: form.buyerPostalCode.trim() || null,
+      buyerCountry: form.buyerCountry || 'SA',
+      hasSignedXml: false,
+      hasClearedXml: false,
       clientId: form.clientId || null,
       clientNameEn: form.clientNameEn.trim() || 'Client name',
       clientNameAr: form.clientNameAr.trim(),
@@ -1633,7 +1758,10 @@ export function EInvoicesView() {
         quantity: Math.max(0, parseNum(it.quantity) ?? 0),
         unitPrice: Math.max(0, parseNum(it.unitPrice) ?? 0),
         discount: round2(Math.max(0, parseNum(it.discount) ?? 0)),
-        vatPercent: parseNum(it.vatPercent) ?? 15,
+        vatPercent: it.taxCategory === 'S' ? (parseNum(it.vatPercent) ?? 15) : 0,
+        taxCategory: it.taxCategory,
+        exemptionCode: it.exemptionCode || null,
+        exemptionReason: it.exemptionReason || null,
         taxableAmount: calc.items[i]?.taxable ?? 0,
         vatAmount: calc.items[i]?.vat ?? 0,
         lineTotal: calc.items[i]?.lineTotal ?? 0,
@@ -2468,62 +2596,92 @@ export function EInvoicesView() {
               )}
             </div>
 
-            {/* ZATCA phase — per-invoice designation (Phase 1 & 2 are separate) */}
+            {/* Invoice type (ZATCA) — the phase itself is a company setting */}
             <div className="space-y-2">
-              <Label>ZATCA Phase</Label>
+              <Label>ZATCA Invoice Type</Label>
               <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={form.zatcaPhase === 1}
-                  onClick={() => setField('zatcaPhase', 1)}
-                  className={cn(
-                    'rounded-lg border p-3 text-left transition-colors',
-                    form.zatcaPhase === 1
-                      ? 'border-[#132A4A] bg-[#132A4A]/[0.04] ring-1 ring-[#132A4A]/30 dark:border-[#E1B169]/50 dark:bg-[#0C1D33]/50 dark:ring-[#E1B169]/30'
-                      : 'border-border hover:border-muted-foreground/40'
-                  )}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <QrCode className="mt-0.5 h-4 w-4 shrink-0 text-[#132A4A] dark:text-[#E1B169]" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">Phase 1 · Generation</p>
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                        QR with the 5 mandatory TLV tags (seller, VAT no., timestamp,
-                        total, VAT). No crypto, no portal submission.
-                      </p>
-                    </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={form.zatcaPhase === 2}
-                  onClick={() => setField('zatcaPhase', 2)}
-                  className={cn(
-                    'rounded-lg border p-3 text-left transition-colors',
-                    form.zatcaPhase === 2
-                      ? 'border-emerald-600 bg-emerald-50/60 ring-1 ring-emerald-600/30 dark:border-emerald-500/60 dark:bg-emerald-950/40 dark:ring-emerald-500/30'
-                      : 'border-border hover:border-muted-foreground/40'
-                  )}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">Phase 2 · Integration</p>
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                        Full 8-tag cryptographic QR (hash + ECDSA signature + key) +
-                        UBL XML. Submit to the ZATCA Fatoora portal after issuing.
-                      </p>
-                    </div>
-                  </div>
-                </button>
+                {(
+                  [
+                    {
+                      v: 'standard',
+                      title: 'Standard Tax Invoice (B2B)',
+                      text: 'For companies. Client name, VAT/CR number and national address are required. Phase 2: cleared by ZATCA before it is given to the client.',
+                    },
+                    {
+                      v: 'simplified',
+                      title: 'Simplified Tax Invoice (B2C)',
+                      text: 'For individuals / walk-in customers. Client details optional. Phase 2: reported to ZATCA within 24 hours.',
+                    },
+                  ] as const
+                ).map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.invoiceKind === o.v}
+                    onClick={() => setField('invoiceKind', o.v)}
+                    className={cn(
+                      'rounded-lg border p-3 text-left transition-colors',
+                      form.invoiceKind === o.v
+                        ? 'border-[#132A4A] bg-[#132A4A]/[0.04] ring-1 ring-[#132A4A]/30 dark:border-[#E1B169]/50 dark:bg-[#0C1D33]/50 dark:ring-[#E1B169]/30'
+                        : 'border-border hover:border-muted-foreground/40'
+                    )}
+                  >
+                    <p className="text-sm font-semibold">{o.title}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{o.text}</p>
+                  </button>
+                ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Choose per invoice — Phase 1 when the QR is enough, Phase 2 when it
-                must be cleared on the Fatoora gateway. The phase locks when the
-                document is issued.
+              <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                {zatcaMode === 'phase2' ? (
+                  <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                ) : (
+                  <QrCode className="mt-px h-3.5 w-3.5 shrink-0" />
+                )}
+                <span>
+                  Company ZATCA phase:{' '}
+                  <span className="font-semibold text-foreground">
+                    {zatcaMode === 'phase2' ? 'Phase 2 · Integration' : 'Phase 1 · Generation'}
+                  </span>{' '}
+                  (Settings → ZATCA). ZATCA sets the phase per company, so every invoice
+                  issued now follows it.
+                </span>
               </p>
+            </div>
+
+            {form.docType !== 'invoice' ? (
+              <div className="space-y-2">
+                <Label htmlFor="ei-note-reason">
+                  Reason for this {form.docType === 'credit_note' ? 'credit' : 'debit'} note{' '}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="ei-note-reason"
+                  value={form.noteReason}
+                  onChange={(e) => setField('noteReason', e.target.value)}
+                  placeholder={form.docType === 'credit_note' ? 'e.g. Overcharged hours returned / service cancelled' : 'e.g. Additional overtime hours not billed'}
+                  maxLength={500}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Required by ZATCA on every credit / debit note (printed and sent in the XML).
+                </p>
+              </div>
+            ) : null}
+
+            <div className="space-y-2 sm:max-w-sm">
+              <Label htmlFor="ei-pay-means">Payment Means (ZATCA code)</Label>
+              <Select value={form.paymentMeansCode} onValueChange={(v) => setField('paymentMeansCode', v)}>
+                <SelectTrigger id="ei-pay-means" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_MEANS.map((m) => (
+                    <SelectItem key={m.code} value={m.code}>
+                      {m.label} ({m.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </section>
 
@@ -2628,6 +2786,44 @@ export function EInvoicesView() {
                   onEnBlur={() => handleHeaderEnBlur('clientAddress')}
                   onTranslate={() => void translateHeaderField('clientAddress')}
                 />
+              </div>
+            </div>
+            <div className="space-y-2 rounded-lg border border-dashed p-3">
+              <p className="text-xs font-semibold">
+                Client national address (ZATCA){' '}
+                {form.invoiceKind === 'standard' ? (
+                  <span className="font-normal text-muted-foreground">
+                    — required for Phase 2 standard invoices to Saudi clients
+                  </span>
+                ) : (
+                  <span className="font-normal text-muted-foreground">— optional for simplified invoices</span>
+                )}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-6">
+                <div className="space-y-1 sm:col-span-3">
+                  <Label htmlFor="ei-b-street" className="text-[11px]">Street</Label>
+                  <Input id="ei-b-street" value={form.buyerStreet} onChange={(e) => setField('buyerStreet', e.target.value)} placeholder="King Fahd Road" />
+                </div>
+                <div className="space-y-1 sm:col-span-1">
+                  <Label htmlFor="ei-b-bldg" className="text-[11px]">Building No.</Label>
+                  <Input id="ei-b-bldg" value={form.buyerBuildingNo} onChange={(e) => setField('buyerBuildingNo', e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="1234" inputMode="numeric" className="font-mono" />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="ei-b-district" className="text-[11px]">District</Label>
+                  <Input id="ei-b-district" value={form.buyerDistrict} onChange={(e) => setField('buyerDistrict', e.target.value)} placeholder="Al Olaya" />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="ei-b-city" className="text-[11px]">City</Label>
+                  <Input id="ei-b-city" value={form.buyerCity} onChange={(e) => setField('buyerCity', e.target.value)} placeholder="Riyadh" />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="ei-b-postal" className="text-[11px]">Postal Code</Label>
+                  <Input id="ei-b-postal" value={form.buyerPostalCode} onChange={(e) => setField('buyerPostalCode', e.target.value.replace(/\D/g, '').slice(0, 5))} placeholder="12345" inputMode="numeric" className="font-mono" />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="ei-b-country" className="text-[11px]">Country</Label>
+                  <Input id="ei-b-country" value={form.buyerCountry} onChange={(e) => setField('buyerCountry', e.target.value.toUpperCase().slice(0, 2))} placeholder="SA" className="font-mono uppercase" maxLength={2} />
+                </div>
               </div>
             </div>
           </section>
@@ -2785,7 +2981,7 @@ export function EInvoicesView() {
               <div>
                 <Label className="text-sm">Line Items</Label>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Per-line discount and VAT (15% / 0%) — taxable, VAT and totals update live.
+                  Per-line discount and VAT category (15%, zero-rated, exempt or out of scope) — taxable, VAT and totals update live.
                 </p>
               </div>
               <Button
@@ -2962,20 +3158,32 @@ export function EInvoicesView() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">VAT %</Label>
+                      <Label className="text-[11px] text-muted-foreground">VAT</Label>
                       <Select
-                        value={it.vatPercent}
-                        onValueChange={(v) => setItemField(it.key, { vatPercent: v })}
+                        value={it.taxCategory === 'S' ? `S-${it.vatPercent}` : it.taxCategory}
+                        onValueChange={(v) => {
+                          if (v.startsWith('S-')) {
+                            setItemField(it.key, { taxCategory: 'S', vatPercent: v.slice(2), exemptionCode: '', exemptionReason: '' })
+                          } else {
+                            const cat = v as EItemForm['taxCategory']
+                            const first = VAT_EXEMPTION_CODES.find((c) => c.category === cat)
+                            setItemField(it.key, {
+                              taxCategory: cat,
+                              vatPercent: '0',
+                              exemptionCode: first?.code ?? '',
+                              exemptionReason: first?.label ?? '',
+                            })
+                          }
+                        }}
                       >
-                        <SelectTrigger
-                          className="h-9 w-full"
-                          aria-label={`Item ${i + 1} VAT percent`}
-                        >
+                        <SelectTrigger className="h-9 w-full" aria-label={`Item ${i + 1} VAT category`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="15">15%</SelectItem>
-                          <SelectItem value="0">0%</SelectItem>
+                          <SelectItem value="S-15">15% standard</SelectItem>
+                          <SelectItem value="Z">0% zero-rated</SelectItem>
+                          <SelectItem value="E">Exempt</SelectItem>
+                          <SelectItem value="O">Out of scope</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2998,6 +3206,43 @@ export function EInvoicesView() {
                       </p>
                     </div>
                   </div>
+                  {it.taxCategory !== 'S' ? (
+                    <div className="mt-3 grid gap-3 rounded-md border border-amber-200 bg-amber-50/60 p-3 sm:grid-cols-2 dark:border-amber-900/60 dark:bg-amber-950/20">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">
+                          ZATCA reason code ({TAX_CATEGORY_LABELS[it.taxCategory]})
+                        </Label>
+                        <Select
+                          value={it.exemptionCode || 'none'}
+                          onValueChange={(v) => {
+                            const c = VAT_EXEMPTION_CODES.find((x) => x.code === v)
+                            setItemField(it.key, { exemptionCode: v === 'none' ? '' : v, exemptionReason: c?.label ?? it.exemptionReason })
+                          }}
+                        >
+                          <SelectTrigger className="h-9 w-full" aria-label={`Item ${i + 1} exemption code`}>
+                            <SelectValue placeholder="Choose the reason code" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {VAT_EXEMPTION_CODES.filter((c) => c.category === it.taxCategory).map((c) => (
+                              <SelectItem key={c.code} value={c.code}>
+                                {c.code} — {c.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">Reason text (printed)</Label>
+                        <Input
+                          value={it.exemptionReason}
+                          onChange={(e) => setItemField(it.key, { exemptionReason: e.target.value })}
+                          placeholder="Why no VAT is charged on this line"
+                          className="h-9"
+                          maxLength={300}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -3080,10 +3325,11 @@ export function EInvoicesView() {
           <AlertDialogHeader>
             <AlertDialogTitle>Issue {issueTarget?.invoiceNumber}?</AlertDialogTitle>
             <AlertDialogDescription>
-              After issuing, the invoice is LOCKED — it receives its ZATCA UUID, invoice counter
-              (ICV) and hash-chain signature, and can no longer be edited or deleted. Corrections
-              must be made with a Credit Note or Debit Note. Payments can still be recorded, and a
-              signed delivery copy can be attached.
+              The ZATCA checks run first. After issuing, the invoice is LOCKED and can no longer be
+              edited or deleted — corrections need a Credit Note or Debit Note.{' '}
+              {zatcaMode === 'phase2'
+                ? 'Phase 2: the invoice is signed with the ZATCA certificate (ICV + hash chain). A standard invoice must then be cleared with ZATCA before you give it to the client; a simplified one must be reported within 24 hours.'
+                : 'Phase 1: the ZATCA QR code is fixed on the invoice.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
