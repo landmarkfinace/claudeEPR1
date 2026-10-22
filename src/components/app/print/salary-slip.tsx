@@ -1,6 +1,6 @@
 'use client'
 
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatDate, formatMoney, monthName, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import { PAY_TYPE_LABELS, type AppSettings, type PayrollRow } from '@/lib/types'
 
@@ -60,6 +61,20 @@ export function SalarySlipDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `Salary-Slip-${payroll?.staff.fullName ? payroll.staff.fullName.replace(/\s+/g, '-') : 'staff'}-${payroll ? `${payroll.month}-${payroll.year}` : ''}`,
+                  e.currentTarget
+                )
+              }
+              disabled={!payroll}
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={() => window.print()} disabled={!payroll}>
               <Printer className="h-4 w-4" />

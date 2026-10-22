@@ -15,6 +15,7 @@ import {
 } from 'recharts'
 import {
   BarChart3,
+  FileDown,
   Printer,
   RefreshCw,
   TrendingDown,
@@ -24,6 +25,7 @@ import {
 
 import { api, qs } from '@/lib/api-client'
 import { formatDate, formatMoney, formatNumber, toDateInputValue } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { Paginated, ProjectRow, TransactionType } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -289,6 +291,19 @@ export function AccountsSummaryView() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4" />
             Print Statement
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) =>
+              void downloadPrintAreaAsPdf(
+                `Accounts-Summary-${from}-to-${to}`,
+                e.currentTarget
+              )
+            }
+          >
+            <FileDown className="h-4 w-4" />
+            Download PDF
           </Button>
           <Button
             variant="outline"

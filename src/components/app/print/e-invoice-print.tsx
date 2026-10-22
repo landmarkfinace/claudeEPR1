@@ -26,7 +26,7 @@
 // signature / stamp) and the ZATCA QR data URL and passes them as props —
 // no data fetching happens in here (lint forbids fetch-in-effect in dialogs).
 import { useState } from 'react'
-import { Paperclip, Printer, X } from 'lucide-react'
+import { FileDown, Paperclip, Printer, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ import {
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { formatNumber, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { AppSettings, EInvoiceConfig, EInvoiceItemRow, EInvoiceRow } from '@/lib/types'
 
@@ -347,6 +348,20 @@ export function EInvoicePrintDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `E-Invoice-${invoice?.invoiceNumber ?? 'draft'}`,
+                  e.currentTarget
+                )
+              }
+              disabled={!invoice}
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={handlePrint} disabled={!invoice}>
               <Printer className="h-4 w-4" />

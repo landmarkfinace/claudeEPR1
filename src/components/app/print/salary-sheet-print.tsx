@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent,
   DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { api } from '@/lib/api-client'
 import { formatDateTime, formatMoney, formatNumber, monthName } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   CategoryBreakdown,
@@ -187,6 +188,15 @@ export function SalarySheetPrintDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(`Salary-Sheet-${periodLabel}`, e.currentTarget)
+              }
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button onClick={() => window.print()}>
               <Printer className="h-4 w-4" />

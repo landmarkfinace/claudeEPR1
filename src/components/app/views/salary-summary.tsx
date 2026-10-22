@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BadgeDollarSign, FileBarChart, Printer, Receipt, Users, Wallet } from 'lucide-react'
+import { BadgeDollarSign, FileBarChart, FileDown, Printer, Receipt, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -21,6 +21,7 @@ import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
 import { printWithPageRule } from '@/components/app/print/print-page-rule'
 import { api, qs } from '@/lib/api-client'
 import { formatMoney, formatNumber, monthName, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import { MONTHS } from '@/lib/types'
 import type { Paginated, ProjectRow } from '@/lib/types'
@@ -158,6 +159,17 @@ export function SalarySummaryView() {
         >
           <Printer className="h-4 w-4" />
           Print
+        </Button>
+        <Button
+          className="print-hidden"
+          variant="outline"
+          onClick={(e) =>
+            void downloadPrintAreaAsPdf(`Salary-Summary-${periodLabel}`, e.currentTarget)
+          }
+          disabled={!data || rows.length === 0}
+        >
+          <FileDown className="h-4 w-4" />
+          Download PDF
         </Button>
       </PageHeader>
 

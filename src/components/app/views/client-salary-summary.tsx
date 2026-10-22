@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Download,
   FileBarChart,
+  FileDown,
   FolderKanban,
   Info,
   Loader2,
@@ -71,6 +72,7 @@ import { useDebounce } from '@/hooks/use-debounce'
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatMoney, formatNumber, monthName, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type {
@@ -1280,6 +1282,20 @@ export function ClientSalarySummaryView() {
         >
           <Printer className="h-4 w-4" />
           Print
+        </Button>
+        <Button
+          className="print-hidden"
+          variant="outline"
+          onClick={(e) =>
+            void downloadPrintAreaAsPdf(
+              `Client-Salary-Summary-${monthName(Number(month))}-${year}`,
+              e.currentTarget
+            )
+          }
+          disabled={!view || groups.length === 0}
+        >
+          <FileDown className="h-4 w-4" />
+          Download PDF
         </Button>
       </PageHeader>
 

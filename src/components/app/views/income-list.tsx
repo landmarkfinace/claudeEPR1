@@ -9,6 +9,7 @@ import {
   Building2,
   CalendarDays,
   Download,
+  FileDown,
   Loader2,
   Lock,
   Pencil,
@@ -22,6 +23,7 @@ import {
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, toDateInputValue } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import type {
   Paginated,
@@ -444,6 +446,19 @@ export function TransactionsListView({
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4" />
             Print Statement
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) =>
+              void downloadPrintAreaAsPdf(
+                `${isIncome ? 'Income' : 'Expense'}-List`,
+                e.currentTarget
+              )
+            }
+          >
+            <FileDown className="h-4 w-4" />
+            Download PDF
           </Button>
           <Button
             variant="outline"

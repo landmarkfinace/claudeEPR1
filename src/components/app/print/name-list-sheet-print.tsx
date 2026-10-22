@@ -24,7 +24,7 @@
 // The Columns setting hides data everywhere (print AND Excel): changes are
 // saved to the list instantly so the server-side Excel export always matches.
 import { useEffect, useMemo, useState } from 'react'
-import { Columns3, FileSpreadsheet, Printer, X } from 'lucide-react'
+import { Columns3, FileDown, FileSpreadsheet, Printer, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -41,6 +41,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { usePageRule } from '@/components/app/print/print-page-rule'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   AppSettings,
@@ -292,6 +293,19 @@ export function NameListSheetPrintDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `Name-List-Sheet-${first ? first.listNo : 'list'}`,
+                  e.currentTarget
+                )
+              }
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={() => window.print()}>
               <Printer className="h-4 w-4" />

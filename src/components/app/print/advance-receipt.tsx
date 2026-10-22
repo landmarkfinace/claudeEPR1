@@ -7,7 +7,7 @@
 // Styled after the company letterhead (navy rule + gold accent) like the
 // salary slip, with amount in words, the salary recovery schedule and
 // signature blocks (Received By / Prepared By / Approved By).
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, monthName, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import {
   advanceRef,
   lastInstallmentMonth,
@@ -97,6 +98,20 @@ export function AdvanceReceiptDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `Advance-Receipt-${advance ? advanceRef(advance.id) : 'receipt'}`,
+                  e.currentTarget
+                )
+              }
+              disabled={!advance}
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={() => window.print()} disabled={!advance}>
               <Printer className="h-4 w-4" />

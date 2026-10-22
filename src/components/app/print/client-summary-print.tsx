@@ -6,11 +6,12 @@
 // entered client rate per hour, then Subtotal + 15% VAT + Grand Total. Styled
 // after the company letterhead (navy rule + gold accent), A4 portrait.
 import { Fragment, useMemo } from 'react'
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDateTime, formatMoney, formatNumber, monthName } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { ClientSalaryGroup } from '@/lib/types'
 
@@ -127,6 +128,18 @@ export function ClientSummaryPrintDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `Client-Summary-${group.clientName}-${monthName(month)}-${year}`,
+                  e.currentTarget
+                )
+              }
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button onClick={() => window.print()}>
               <Printer className="h-4 w-4" />

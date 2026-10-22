@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronsUpDown,
   CircleDashed,
+  FileDown,
   HandCoins,
   Landmark,
   Loader2,
@@ -79,6 +80,7 @@ import { useViewIntent } from '@/hooks/use-view-intent'
 import { api, qs } from '@/lib/api-client'
 import { buildCsv, csvFilename, downloadCsv } from '@/lib/csv'
 import { formatDate, formatMoney, formatNumber, monthName, toDateInputValue } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { can, useAppStore } from '@/lib/store'
 import {
   MONTHS,
@@ -387,6 +389,18 @@ export function AdvancesView() {
         >
           <Printer className="mr-2 h-4 w-4" />
           Print PDF
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 print-hidden"
+          onClick={(e) =>
+            void downloadPrintAreaAsPdf('Worker-Advances', e.currentTarget)
+          }
+          disabled={loading || rows.length === 0}
+        >
+          <FileDown className="mr-2 h-4 w-4" />
+          Download PDF
         </Button>
         <Button
           variant="outline"

@@ -42,7 +42,7 @@
 // at the foot of the letter on every page. Uploaded signature/stamp artwork
 // is anchored INTO the "Approved By" box: the signature sits exactly on its
 // line and the stamp inside the dashed circle.
-import { Printer, FileSpreadsheet, X } from 'lucide-react'
+import { Printer, FileDown, FileSpreadsheet, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -54,6 +54,7 @@ import {
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { formatMoney, formatNumber, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
   AppSettings,
@@ -442,6 +443,20 @@ export function QuotationPrintDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  `Quotation-${quotation?.quoteNumber ?? 'draft'}`,
+                  e.currentTarget
+                )
+              }
+              disabled={!quotation}
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={() => window.print()} disabled={!quotation}>
               <Printer className="h-4 w-4" />

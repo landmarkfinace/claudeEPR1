@@ -8,11 +8,12 @@
 //     with a Company/Unassigned row and a grand total row.
 // Styled after the company letterhead (navy rule + gold accent), signature lines at
 // the bottom so the printed / saved-as-PDF statement can be physically signed.
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDateTime, formatMoney, monthName } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { ExpenseStatement } from '@/lib/types'
 
@@ -117,6 +118,20 @@ export function ExpenseStatementPrintDialog({
               <X className="h-4 w-4" />
               Close
             </Button>
+            <Button
+              variant="outline"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(
+                  isSingle
+                    ? `Expense-Statement-${single?.spender.fullName ?? 'worker'}-${statement.year}`
+                    : `Expense-Statement-${statement.year}`,
+                  e.currentTarget
+                )
+              }
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
+            </Button>
             <Button onClick={() => window.print()}>
               <Printer className="h-4 w-4" />
               Print / Save PDF
@@ -126,7 +141,10 @@ export function ExpenseStatementPrintDialog({
 
         {/* Scrollable preview */}
         <div className="nice-scrollbar flex-1 overflow-auto bg-neutral-100 p-3 sm:p-6 print:overflow-visible print:bg-white print:p-0">
-          <div className="print-area mx-auto min-w-[620px] max-w-[860px] bg-white p-6 text-neutral-900 shadow-sm print:min-w-0 print:max-w-none print:p-0">
+          <div
+            className="print-area mx-auto min-w-[620px] max-w-[860px] bg-white p-6 text-neutral-900 shadow-sm print:min-w-0 print:max-w-none print:p-0"
+            data-orientation={isSingle ? 'portrait' : 'landscape'}
+          >
             {/* Company letterhead — brand navy rule + gold accent */}
             <div className="flex items-start justify-between gap-6 border-b-2 border-[#0F1F3D] pb-4">
               <div className="flex items-center gap-3">

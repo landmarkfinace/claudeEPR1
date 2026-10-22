@@ -36,7 +36,7 @@
 // Letterhead modes: 'none' (styled typed header, compact 12/14mm margins —
 // no blank reserved zones) | 'header' | 'header_footer' | 'full' (artwork
 // uploaded via Settings; content is padded inside the reserved bands).
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatNumber, round2 } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { AppSettings, DocItemRow, LetterheadConfig, SupplierPoRow } from '@/lib/types'
 
@@ -367,6 +368,17 @@ export function SupplierPoPrintDialog({
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(`Purchase-Order-${po?.poNumber ?? 'draft'}`, e.currentTarget)
+              }
+              disabled={!po}
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button size="sm" onClick={() => window.print()} disabled={!po}>
               <Printer className="h-4 w-4" />

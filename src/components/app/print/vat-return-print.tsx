@@ -6,11 +6,12 @@
 //   • quarterly breakdown of the report year (Q1..Q4 input VAT)
 //   • signature lines (prepared by / authorized by)
 // Print via the browser (Ctrl+P → "Save as PDF" for the PDF export).
-import { Printer, X } from 'lucide-react'
+import { Printer, FileDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, monthName } from '@/lib/format'
+import { downloadPrintAreaAsPdf } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type { VatBillRow, VatBillTotals, VatSummaryData } from '@/lib/types'
 
@@ -73,6 +74,15 @@ export function VatReturnPrintDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
+            </Button>
+            <Button
+              variant="outline"
+              onClick={(e) =>
+                void downloadPrintAreaAsPdf(`VAT-Return-${periodLabel}`, e.currentTarget)
+              }
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
             </Button>
             <Button onClick={() => window.print()}>
               <Printer className="h-4 w-4" />
