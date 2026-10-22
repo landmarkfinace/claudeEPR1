@@ -17,6 +17,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   BookmarkPlus,
   Building2,
   Calculator,
@@ -42,6 +45,7 @@ import { amountInWords } from '@/lib/amount-words'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
 import type { ClientRow, LetterheadConfig, Paginated, QuotationAssetRow, QuotationRow } from '@/lib/types'
+import { parseTerms, serializeTerms, validateTerms, type TermItem } from '@/lib/quotation-terms'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -77,6 +81,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 
 import { ConfirmDelete } from '../shared/confirm-delete'
+import { ConfirmDialog } from '../shared/confirm-dialog'
 import { DataTablePagination } from '../shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '../shared/empty-state'
 import { ErrorState } from '../shared/error-state'
@@ -306,6 +311,24 @@ export function QuotationsView() {
   const defaultTermsLoaded = useRef(false)
   const [savingTerms, setSavingTerms] = useState(false)
 
+  // ---- Terms & Conditions list editor (mirrors form.terms, stored as JSON) ----
+  const [termsItems, setTermsItems] = useState<TermItem[]>([])
+  function applyTerms(items: TermItem[]) {
+    setTermsItems(items)
+    setForm((f) => ({ ...f, terms: serializeTerms(items) }))
+  }
+
+  // ---- working-hours sanity: quotations saved with < 100 hrs/month ----
+  type LowHoursQuote = {
+    id: string
+    quoteNumber: string
+    clientName: string
+    status: string
+    items: { sr: number; description: string; hoursPerMonth: number }[]
+  }
+  const [lowHoursQuotes, setLowHoursQuotes] = useState<LowHoursQuote[] | null>(null)
+  const [hoursWarning, setHoursWarning] = useState<{ lines: string[]; lowest: number } | null>(null)
+
   // ---- letterhead manager ----
   const [letterheadOpen, setLetterheadOpen] = useState(false)
   // company letterhead config — printed documents read it from here
@@ -424,6 +447,20 @@ export function QuotationsView() {
     }
   }, [])
 
+  /** Quotations whose hourly items fall below 100 hrs/month — the boss
+   *  fixes them by hand (we never touch saved quotations automatically). */
+  const loadLowHours = useCallback(async () => {
+    try {
+      const res = await api.get<{ quotations: LowHoursQuote[] }>('/api/quotations?lowHours=1')
+      setLowHoursQuotes(res.quotations ?? [])
+    } catch {
+      setLowHoursQuotes([])
+    }
+  }, [])
+  useEffect(() => {
+    void loadLowHours()
+  }, [loadLowHours])
+
   /** Predict the number a NEW quotation will receive (server generator). */
   const fetchNextNumber = useCallback(async (prefix: string, year: number): Promise<string> => {
     const key = `${prefix}-${year}`
@@ -448,7 +485,15 @@ export function QuotationsView() {
     // auto-fill Terms & Conditions from the saved default (if any)
     const terms = await getDefaultTerms()
     const f = emptyForm(defaultVatPercent)
-    if (terms) f.terms = terms
+    if (terms) {
+      const items = parseTerms(terms)
+      if (items.length > 0) {
+        f.terms = serializeTerms(items)
+        setTermsItems(items)
+      }
+    } else {
+      setTermsItems([])
+    }
     setForm(f)
     setDialogOpen(true)
     void loadClients()
@@ -515,6 +560,7 @@ export function QuotationsView() {
         }),
         assets: full.assets ?? [],
       })
+      setTermsItems(parseTerms(full.terms))
       setDialogOpen(true)
       void loadClients()
       void getDefaultTerms()
@@ -648,6 +694,56 @@ export function QuotationsView() {
       return
     }
 
+    // working-hours basis: hours/day 1–24, days/month 1–31
+    for (const it of form.items) {
+      const hpd = parseNum(it.hoursPerDay)
+      if (hpd != null && (hpd < 1 || hpd > 24)) {
+        toast.error('Hours per day must be between 1 and 24')
+        return
+      }
+      const dpm = parseNum(it.daysPerMonth)
+      if (dpm != null && (dpm < 1 || dpm > 31)) {
+        toast.error('Days per month must be between 1 and 31')
+        return
+      }
+    }
+
+    // hours per month below 100 → confirm before saving
+    const low = form.items
+      .map((it) => ({ it, hpm: itemFormHours(it) }))
+      .filter((x) => x.hpm > 0 && x.hpm < 100)
+    if (low.length > 0) {
+      setHoursWarning({
+        lines: low.map(
+          (x) => `${x.it.description.trim() || 'Item'}: ${formatNumber(x.hpm)} hrs/month`
+        ),
+        lowest: Math.min(...low.map((x) => x.hpm)),
+      })
+      return
+    }
+
+    await doSubmit(items, clientName, rawDiscount)
+  }
+
+  /** Actual POST/PUT — validations (incl. the hours warning) already ran. */
+  async function doSubmit(
+    items: {
+      description: string
+      unit: string | null
+      quantity: number
+      unitPrice: number
+      discount: number
+      lineTotal: number
+      subText: string | null
+      ratePerHour: number | null
+      hoursPerMonth: number | null
+      hoursPerDay: number | null
+      daysPerMonth: number | null
+      index: number
+    }[],
+    clientName: string,
+    rawDiscount: number
+  ) {
     const body = {
       clientId: form.clientId || null,
       clientName,
@@ -703,6 +799,7 @@ export function QuotationsView() {
       setDialogOpen(false)
       nextNumberCache.current.clear() // predictions are stale after a create
       void load()
+      void loadLowHours()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the quotation')
     } finally {
@@ -736,20 +833,25 @@ export function QuotationsView() {
     }
   }
 
-  /** Save the current Terms text as the default for future quotations. */
+  /** Save the current Terms list as the default for future quotations. */
   async function handleSaveDefaultTerms() {
-    const content = form.terms.trim()
-    if (!content) {
-      toast.error('Write the terms first, then save them as the default')
+    if (termsItems.length === 0) {
+      toast.error('Add at least one term, then save it as the default')
       return
     }
+    const err = validateTerms(termsItems)
+    if (err) {
+      toast.error(err)
+      return
+    }
+    const content = serializeTerms(termsItems)
     if (savingTerms) return
     setSavingTerms(true)
     try {
       await api.put('/api/default-terms', { content })
       defaultTermsRef.current = content
       setDefaultTerms(content)
-      toast.success('Saved — new quotations will start with these terms')
+      toast.success('Saved — new quotations will start with this list')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the default terms')
     } finally {
@@ -952,6 +1054,60 @@ export function QuotationsView() {
           </Button>
         ) : null}
       </PageHeader>
+
+      {/* ---- working-hours sanity banner (quotations < 100 hrs/month) ---- */}
+      {lowHoursQuotes && lowHoursQuotes.length > 0 ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Working hours below 100 hrs/month
+          </p>
+          <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/70">
+            These quotations have hourly items with less than 100 hours per month, so the printed
+            amounts are probably wrong. The standard basis is 10 hrs/day × 26 days/month = 260 hrs.
+            Open each one and fix the working hours.
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {lowHoursQuotes.map((q) => (
+              <li
+                key={q.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-white/70 px-2.5 py-1.5 text-xs dark:border-amber-500/30 dark:bg-transparent"
+              >
+                <span className="min-w-0">
+                  <span className="font-mono font-semibold">{q.quoteNumber}</span>
+                  <span className="mx-1.5 text-amber-700/60 dark:text-amber-300/50">·</span>
+                  <span className="text-muted-foreground">{q.clientName}</span>
+                  <span className="mx-1.5 text-amber-700/60 dark:text-amber-300/50">·</span>
+                  {q.items.map((it) => (
+                    <span key={it.sr} className="tabular-nums">
+                      {it.description}: {formatNumber(it.hoursPerMonth)} hrs/mo
+                      {q.items.indexOf(it) < q.items.length - 1 ? ' · ' : ''}
+                    </span>
+                  ))}
+                </span>
+                {canEdit ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 border-amber-300 text-amber-900 hover:bg-amber-100 dark:text-amber-200"
+                    onClick={() =>
+                      void openEdit({
+                        id: q.id,
+                        quoteNumber: q.quoteNumber,
+                        clientName: q.clientName,
+                        status: q.status,
+                      } as unknown as QuotationRow)
+                    }
+                  >
+                    <Pencil className="mr-1 h-3 w-3" />
+                    Fix
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {canCreate ? <MobileFab label="Add Quotation" onClick={() => void openAdd()} icon={Plus} /> : null}
 
@@ -1617,7 +1773,8 @@ export function QuotationsView() {
                       <Label className="text-[11px] text-muted-foreground">Hours / Day</Label>
                       <Input
                         type="number"
-                        min={0}
+                        min={1}
+                        max={24}
                         step="any"
                         value={it.hoursPerDay}
                         onChange={(e) => setItemField(it.key, 'hoursPerDay', e.target.value)}
@@ -1630,7 +1787,7 @@ export function QuotationsView() {
                       <Label className="text-[11px] text-muted-foreground">Days / Month</Label>
                       <Input
                         type="number"
-                        min={0}
+                        min={1}
                         max={31}
                         step="any"
                         value={it.daysPerMonth}
@@ -1751,7 +1908,7 @@ export function QuotationsView() {
                     size="sm"
                     className="h-7 px-2 text-[11px] text-muted-foreground"
                     disabled={!defaultTerms || savingTerms}
-                    onClick={() => defaultTerms && setField('terms', defaultTerms)}
+                    onClick={() => defaultTerms && applyTerms(parseTerms(defaultTerms))}
                     title="Replace with the saved default terms"
                   >
                     <Undo2 className="mr-1 h-3 w-3" />
@@ -1765,7 +1922,7 @@ export function QuotationsView() {
                       className="h-7 px-2 text-[11px] text-emerald-600 hover:text-emerald-700"
                       disabled={savingTerms}
                       onClick={() => void handleSaveDefaultTerms()}
-                      title="Save the current text as the default for new quotations"
+                      title="Save the current list as the default for new quotations"
                     >
                       <BookmarkPlus className="mr-1 h-3 w-3" />
                       {savingTerms ? 'Saving…' : 'Save as default'}
@@ -1773,13 +1930,104 @@ export function QuotationsView() {
                   ) : null}
                 </span>
               </div>
-              <Textarea
-                id="quote-terms"
-                value={form.terms}
-                onChange={(e) => setField('terms', e.target.value)}
-                placeholder="e.g. 50% advance, balance on delivery"
-                rows={3}
-              />
+              {/* numbered list editor — copied from the saved default on new
+                  quotations; editable per quotation only */}
+              <div id="quote-terms" className="space-y-2">
+                {termsItems.length === 0 ? (
+                  <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                    No terms yet — click “Load default”, or add items. Printed as the TERMS
+                    &amp; CONDITIONS box on the quotation.
+                  </p>
+                ) : null}
+                {termsItems.map((t, ti) => (
+                  <div key={ti} className="flex items-start gap-2">
+                    <p className="w-5 pt-[9px] text-right text-xs font-semibold tabular-nums text-muted-foreground">
+                      {ti + 1}.
+                    </p>
+                    <div className="grid flex-1 gap-1.5 sm:grid-cols-[minmax(0,200px)_1fr]">
+                      <Input
+                        value={t.title ?? ''}
+                        onChange={(e) => {
+                          const next = [...termsItems]
+                          next[ti] = { ...t, title: e.target.value }
+                          applyTerms(next)
+                        }}
+                        placeholder="Bold title (optional)"
+                        className="h-8"
+                        aria-label={`Term ${ti + 1} bold title`}
+                      />
+                      <Input
+                        value={t.text}
+                        onChange={(e) => {
+                          const next = [...termsItems]
+                          next[ti] = { ...t, text: e.target.value }
+                          applyTerms(next)
+                        }}
+                        placeholder="Term text printed on the quotation"
+                        className="h-8"
+                        aria-label={`Term ${ti + 1} text`}
+                      />
+                    </div>
+                    <div className="flex items-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={ti === 0}
+                        onClick={() => {
+                          if (ti === 0) return
+                          const next = [...termsItems]
+                          const tmp = next[ti - 1]
+                          next[ti - 1] = next[ti]
+                          next[ti] = tmp
+                          applyTerms(next)
+                        }}
+                        aria-label="Move term up"
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={ti === termsItems.length - 1}
+                        onClick={() => {
+                          if (ti === termsItems.length - 1) return
+                          const next = [...termsItems]
+                          const tmp = next[ti + 1]
+                          next[ti + 1] = next[ti]
+                          next[ti] = tmp
+                          applyTerms(next)
+                        }}
+                        aria-label="Move term down"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => applyTerms(termsItems.filter((_, idx) => idx !== ti))}
+                        aria-label="Remove term"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => applyTerms([...termsItems, { title: '', text: '' }])}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Add term
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -1851,6 +2099,48 @@ export function QuotationsView() {
           letterheadLoaded.current = true
           setLetterhead(cfg)
         }}
+      />
+
+      {/* ---- hours per month below 100 — confirm before saving ---- */}
+      <ConfirmDialog
+        open={hoursWarning != null}
+        onOpenChange={(o) => {
+          if (!o) setHoursWarning(null)
+        }}
+        onConfirm={async () => {
+          setHoursWarning(null)
+          await doSubmit(
+            form.items.map((it, i) => {
+              const quantity = Math.max(0, parseNum(it.quantity) ?? 0)
+              const unitPrice = Math.max(0, parseNum(it.unitPrice) ?? 0)
+              const lineDiscount = Math.max(0, parseNum(it.discount) ?? 0)
+              return {
+                description: it.description.trim(),
+                unit: it.unit.trim() || null,
+                quantity,
+                unitPrice,
+                discount: round2(lineDiscount),
+                lineTotal: round2(quantity * unitPrice - lineDiscount),
+                subText: it.subText.trim() || null,
+                ratePerHour: parseNum(it.ratePerHour),
+                hoursPerMonth: parseNum(it.hoursPerMonth),
+                hoursPerDay: parseNum(it.hoursPerDay),
+                daysPerMonth: parseNum(it.daysPerMonth),
+                index: i + 1,
+              }
+            }),
+            form.clientName.trim(),
+            Math.max(0, parseNum(form.discount) ?? 0)
+          )
+        }}
+        title="Hours per month is very low"
+        item={hoursWarning?.lines.join(' · ')}
+        description={
+          hoursWarning
+            ? `Hours per month is only ${formatNumber(hoursWarning.lowest)}. Is this correct? Confirm to save anyway, or Cancel to go back and fix the working hours (10 hrs × 26 days = 260 hrs is the standard basis).`
+            : undefined
+        }
+        confirmLabel="Save anyway"
       />
 
       {/* ---- Print / preview dialog (saved documents + live drafts) ---- */}

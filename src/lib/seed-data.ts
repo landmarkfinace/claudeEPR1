@@ -4,6 +4,7 @@
 import { PrismaClient, Project, Staff, StaffCategory, TransactionCategory, Client } from '@prisma/client'
 import { randomBytes, scrypt as _scrypt } from 'crypto'
 import { promisify } from 'util'
+import { DEFAULT_QUOTATION_TERMS } from './quotation-terms'
 
 const scrypt = promisify(_scrypt) as (p: string, s: string, k: number) => Promise<Buffer>
 
@@ -135,6 +136,12 @@ export async function runSeed(db: PrismaClient): Promise<SeedSummary> {
   for (const [key, value] of Object.entries(settings)) {
     await db.setting.create({ data: { key, value } })
   }
+
+  // ---------- Default quotation Terms & Conditions (single row) ----------
+  // Copied into every NEW quotation; edited per quotation afterwards.
+  await db.defaultTerms.create({
+    data: { content: JSON.stringify(DEFAULT_QUOTATION_TERMS) },
+  })
 
   // ---------- Clients (companies we supply workforce to) ----------
   const clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>[] = [

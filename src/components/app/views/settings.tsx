@@ -24,6 +24,8 @@ import {
 import { AiSettingsSection } from '@/components/app/settings/ai-settings'
 import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
+import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
+import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -612,6 +614,12 @@ export function SettingsView() {
             </span>
           </div>
         </SectionCard>
+
+        {/* ---- People who approve documents (quotation APPROVED BY box) ---- */}
+        <SignatoriesSettingsSection canEdit={canEdit} />
+
+        {/* ---- Quotation default Terms & Conditions ---- */}
+        <QuotationTermsSettingsSection canEdit={canEdit} />
 
         {/* ---- E-Invoice print template + translation provider ---- */}
         <EInvoiceSettingsSection />

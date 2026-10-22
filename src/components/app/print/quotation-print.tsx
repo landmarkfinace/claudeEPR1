@@ -1,47 +1,39 @@
 'use client'
 
-// Quotation print preview — the boss's "Quotation Mirror" A4 portrait template
-// (upload/Quotation_Mirror (1).png), the same design family as the E-Invoice
-// Mirror document:
+// Quotation print preview — A4 portrait, one compact page per the boss's
+// approved layout (upload/Quotation-QTN-2026-0002_New_Layout.pdf):
 //
-//   • Striped letterhead placeholder zones (top 35mm / bottom 22mm, bilingual
-//     captions) — replaced by the uploaded letterhead artwork when configured.
-//   • 3-part title row: QUOTATION + gold subject subtitle left · navy pill
-//     badge with a gold ring holding the quotation number centre · "Prepared
-//     for" + client name right.
-//   • Gold rule broken by a centre diamond.
-//   • Cream date & currency bar (Date · Valid Until · Your Reference ·
-//     Currency) with bilingual labels.
-//   • FROM ◆ | TO ◆ cards (cream headers, white bodies, dotted field rows).
-//   • Cream project info strip (Project/Site · Mobilization · Contract
-//     Period · Working Hours).
-//   • Centred quotation heading + polite intro, then the items table — navy
-//     header with white English over gold Arabic two-line headers, gold-ring
-//     index circles, horizontal-only row separators, subtle zebra. Hourly
-//     manpower quotes use the mirror's 5-column set (# · Trade/Category ·
-//     No. of Workers · Hourly Rate · Amount) with the workers/amount total
-//     row and the "Amount = Workers × Rate × hours" note; generic quotes
-//     fall back to Description/Qty/Unit/Unit Price/Line Total.
-//   • SCOPE & TERMS ◆ card (Included in rates | Not included sub-columns +
-//     auto-numbered terms) beside the FINANCIAL SUMMARY box (navy TOTAL row
-//     with a gold amount + Contract Value), with the bilingual amount-in-
-//     words line under the split.
-//   • APPROVED BY | ACCEPTED BY signature boxes with dashed gold stamp
-//     circles, and a "Page X of Y | صفحة X من Y" footer on every page.
+//   • Letterhead artwork zones (unchanged) with the 3-zone header row:
+//     QUOTATION + gold subject left · navy pill badge with the quotation
+//     number centre · Prepared-for + client right, then the gold rule.
+//   • ONE info bar, 5 cells — Date | Valid Until | Your Reference |
+//     Currency | Project/Site (wider; name + location on 2 lines). English
+//     label on top, Arabic below, then the value.
+//   • Full-width TO box (title bar "TO ◆ إلى", no FROM box — the letterhead
+//     already carries our company block): left column = client name (bold),
+//     Attention, Contact; right column = Address, VAT/C.R. Tight rows, no
+//     dashed separators.
+//   • Centred title line, then the items table — 6 columns for hourly
+//     manpower quotes (# · Trade/Category with inline Arabic trade name ·
+//     No. of Workers · Hourly Rate · Hours/Month · Amount), rows only as
+//     tall as the text (~2mm padding), the workers/amount TOTAL row and the
+//     "Amount = Workers × Rate × Hours per Month" footnote.
+//   • AMOUNT IN WORDS box (left) beside the totals box (right).
+//   • TERMS & CONDITIONS ◆ الشروط والأحكام — full width, 2 columns, 7.5pt,
+//     bold item titles (replaces the old Scope & Terms card).
+//   • APPROVED BY | ACCEPTED BY signature boxes — the approved-by name and
+//     designation come from Settings › Signatories (empty line when unset).
+//   • Bottom line (every page): computer-generated note + Page X of Y in
+//     ONE line between the signature boxes and the letterhead footer,
+//     with ≥3mm clear above and below.
 //
-// Pagination keeps the proven FLOW-FILL model: EXPLICIT A4 pages (210 ×
-// 296.5mm — the 0.5mm slack prevents blank interleaved pages in Chrome's
-// print pipeline), a conservative row-height estimator chunks items across
-// pages, the thead repeats on every page, the tail (scope/summary split →
-// signatures) flows block-by-block onto the last items page while it fits
-// and continues on a fresh page from the TOP (signatures are never stranded
-// alone), and each page's leftover room is handed back to its item rows so
-// short documents fill the A4 nicely. The APPROVED BY | ACCEPTED BY boxes
-// are ALWAYS pinned to the very bottom of their page (mt-auto) — any
-// leftover space lands between the content and the boxes, so the boxes sit
-// at the foot of the letter on every page. Uploaded signature/stamp artwork
-// is anchored INTO the "Approved By" box: the signature sits exactly on its
-// line and the stamp inside the dashed circle.
+// Pagination: EXPLICIT A4 pages (210 × 296.5mm), a conservative estimator
+// chunks items across pages, the tail flows block-by-block — words+totals
+// after the table, then TERMS & CONDITIONS + signatures placed TOGETHER
+// (they move to a fresh page as a pair; a single T&C item is never split
+// and the signatures are never stranded alone). Item rows are NEVER
+// stretched — each row is exactly as tall as its text.
+import { useEffect, useState } from 'react'
 import { Printer, FileDown, FileSpreadsheet, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -55,7 +47,9 @@ import { usePageRule } from '@/components/app/print/print-page-rule'
 import { amountInWordsBoth } from '@/lib/arabic-words'
 import { formatMoney, formatNumber, round2 } from '@/lib/format'
 import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
+import { api } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
+import { parseTerms, type TermItem } from '@/lib/quotation-terms'
 import type {
   AppSettings,
   DocItemRow,
@@ -78,6 +72,9 @@ export type QuotationDetail = QuotationRow & {
     vatNumber: string | null
   } | null
 }
+
+/** Approved-by signatory printed from Settings › Signatories. */
+export type ApprovedBy = { name: string; designation: string } | null
 
 const DEFAULT_LETTERHEAD: LetterheadConfig = {
   mode: 'none',
@@ -103,9 +100,9 @@ const ROW_SEP = '#E8ECF2'
 const MUTED = '#6B7488'
 // print-spec ink: field values / table body
 const INK = '#1D2433'
-// print-spec soft ink: field labels, notes, footnotes (darker than the #6B7488 floor)
+// print-spec soft ink: field labels, notes, footnotes
 const INK_SOFT = '#4A5468'
-// warm cream — the template's soft beige for bars and card headers
+// warm cream — bars and card headers
 const CREAM = '#FBF9F3'
 // striped letterhead placeholder hatching + caption tone
 const STRIPE_A = '#F3F5F8'
@@ -117,24 +114,14 @@ const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arab
 const PAGE_W_MM = 210
 const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see header comment)
 const SIDE_PAD_MM = 14
-const FOOTER_MM = 4 // page footer strip reserved above the bottom letterhead band
+// reserved at the foot of every page for the note line + its ≥3mm gaps
+const FOOTER_MM = 4
 // "continued" strip reserved at the top of every page ≥ 2
 const CONT_HEADER_MM = 8
-// head-room required before a tail block may join the last items page
-const PLACE_BUFFER_MM = 7
-// slack kept in reserve when stretching rows (estimator safety)
-const STRETCH_SAFE_MM = 8
-// per-row stretch cap — keeps the stretched table tasteful
-const MAX_ROW_STRETCH = 6.5
-// items-table TOTAL row height
-const TOTAL_ROW_MM = 6
-// final-page slack tiers above which the tail breathes more
-const ROOMY_SLACK_MM = 30 // tier 1 — roomier paddings/lines
-const EXPANSIVE_SLACK_MM = 70 // tier 2 — grand signature area for sparse pages
-// extra tail height per tier (over-estimate keeps row-stretch math safe)
-const ROOMY_TAIL_DELTA = [0, 10, 26] as const
+// buffer before a tail block may join the current page
+const PLACE_BUFFER_MM = 3
 
-/** Arabic names for the currency cell of the date & currency bar. */
+/** Arabic names for the currency cell of the info bar. */
 const CURRENCY_AR: Record<string, string> = {
   SAR: 'ريال سعودي',
   USD: 'دولار أمريكي',
@@ -143,7 +130,37 @@ const CURRENCY_AR: Record<string, string> = {
   AED: 'درهم إماراتي',
 }
 
-/** DD / MM / YYYY — the mirror template's date format. */
+/** Inline Arabic trade names for the items table (best-effort, exact match). */
+const TRADE_AR: Record<string, string> = {
+  HELPER: 'مساعد',
+  'HELPER 1': 'مساعد',
+  CARPENTER: 'نجار',
+  WELDER: 'لحام',
+  ELECTRICIAN: 'كهربائي',
+  PLUMBER: 'سباك',
+  PAINTER: 'دهان',
+  MASON: 'بناء',
+  'STEEL FIXER': 'حداد مسلح',
+  'STEEL FIXERS': 'حداد مسلح',
+  DRIVER: 'سائق',
+  FOREMAN: 'مراقب',
+  SURVEYOR: 'مساح',
+  LABOURER: 'عامل',
+  LABORER: 'عامل',
+  CLEANER: 'عامل نظافة',
+  MECHANIC: 'ميكانيكي',
+  TECHNICIAN: 'فني',
+  OPERATOR: 'مشغل',
+  RIGGER: 'عامل رفع',
+  SCAFFOLDER: 'عامل سقالات',
+  'STORE KEEPER': 'أمين مستودع',
+  'SAFETY OFFICER': 'ضابط سلامة',
+  ACCOUNTANT: 'محاسب',
+  'ADMIN CLERK': 'كاتب إداري',
+  'QA/QC': 'مراقب جودة',
+}
+
+/** DD / MM / YYYY — the template's date format. */
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—'
   const date = new Date(d)
@@ -160,59 +177,53 @@ function estLines(text: string | null | undefined, charsPerLine: number): number
     .reduce((n, line) => n + Math.max(1, Math.ceil(line.trim().length / charsPerLine)), 0)
 }
 
-/** Conservative table-row height estimate in mm (over-estimate = safe page breaks). */
-function rowHeightMm(it: DocItemRow): number {
-  // Trade / Description column ≈ 40% × 182mm ≈ 73mm ≈ 38 latin chars at
-  // 10pt bold — 40/46 keeps a safety margin against wrap drift. Mirror rows
-  // at the print spec: 10pt bold trade line + 8pt grey sub-line ≈ 6.5mm.
-  const lines = Math.max(1, Math.ceil(it.description.length / 40))
-  const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / 46)) : 0
-  return 5.6 + 3.0 * (lines - 1) + 2.6 * subLines
-}
-
-/** Split a bullet-list text into trimmed non-empty lines. */
-function bulletLines(text: string | null | undefined): string[] {
-  if (!text) return []
-  return text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-}
-
 /**
- * Terms lines with automatic numbering — lines that already start with
- * "1." / "2)" keep their own number, plain lines get one assigned.
+ * Conservative table-row height estimate in mm (calibrated against real
+ * Chrome A4 renders). Rows are exactly as tall as their text: ~7.5mm pitch
+ * (1.4mm padding top/bottom + a 4.1mm bilingual line box); wrapped
+ * description / sub-text lines add their share.
  */
-function numberedTerms(terms: string): Array<{ n: string; text: string }> {
-  const lines = terms
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-  let auto = 0
-  return lines.map((l) => {
-    const m = /^(\d{1,2})[.)]\s*(.+)$/.exec(l)
-    if (m) return { n: `${m[1]}.`, text: m[2] }
-    auto += 1
-    return { n: `${auto}.`, text: l }
-  })
+function rowHeightMm(it: DocItemRow): number {
+  const lines = Math.max(1, Math.ceil(it.description.length / 38))
+  const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / 48)) : 0
+  return 7.5 + 4.4 * (lines - 1) + 3.8 * subLines
 }
 
-/** Bilingual label: English + '|' + Arabic on one line; when the cell is
- *  narrow the Arabic (with its pipe) wraps onto a second line — the label
- *  is NEVER clipped and both languages stay fully visible. */
-function BiLabel({ en, ar, center }: { en: string; ar: string; center?: boolean }) {
-  return (
-    <span
-      className={`flex flex-wrap gap-x-1.5 gap-y-[0.3mm] text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt] ${center ? 'justify-center' : ''}`}
-      style={{ color: INK_SOFT }}
-    >
-      <span className="break-words">{en}</span>
-      <span style={{ color: MUTED }}>|</span>
-      <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-        {ar}
-      </span>
-    </span>
+/** TO box height estimate (data-adaptive — wrapping client fields).
+ * Title bar 5.2 + content padding 2 + the TALLER inner column + borders.
+ * Each label+value line renders ~3.8mm (fixed leading); fields wrap at
+ * ~40 chars per line in the ~82mm column. */
+function toHeightMm(q: QuotationDetail): number {
+  const client = q.client
+  const wrap = (label: string, value: string | null | undefined) =>
+    Math.max(1, Math.ceil((label.length + (value ?? '').trim().length) / 40))
+  const contact = client?.phone || client?.email ? [client?.phone, client?.email].filter(Boolean).join(' · ') : '—'
+  const address = [client?.address, client?.city].filter(Boolean).join(', ')
+  const vatCr = [client?.vatNumber, client?.crNumber].filter(Boolean).join(' · ')
+  const leftLines =
+    1 + wrap('Attention عناية: ', client?.contactPerson) + wrap('Contact التواصل: ', contact)
+  const rightLines = wrap('Address العنوان: ', address) + wrap('VAT / C.R. الرقم الضريبي / السجل: ', vatCr)
+  const colLines = Math.max(leftLines, rightLines)
+  return 10 + colLines * 3.8 + 1.4
+}
+
+/** TERMS & CONDITIONS box height estimate (2 columns, 7.5pt, bold titles).
+ *  Calibrated against a real Chrome render of the 10 standard items
+ *  (measured 52.7mm; the formula reproduces it within 0.5mm). */
+function termsHeightMm(items: TermItem[]): number {
+  if (items.length === 0) return 19 // mt + title bar + fallback line
+  const cpl = 58 // ~85mm column at 7.5pt (measured wrap rate)
+  const lineCount = (t: TermItem) =>
+    Math.max(1, Math.ceil(((t.title?.length ?? 0) + 2 + t.text.length) / cpl))
+  const half = Math.ceil(items.length / 2)
+  const cols = [items.slice(0, half), items.slice(half)]
+  const colH = Math.max(
+    ...cols.map(
+      (c) => c.reduce((s, t) => s + lineCount(t), 0) * 3.2 + Math.max(0, c.length - 1) * 0.4
+    )
   )
+  // mt 2 + title bar 5 + content py 2.4 + lines + 2.5 aggregate safety
+  return 2 + 5 + 2.4 + colH + 2.5
 }
 
 /** Small solid gold diamond — the template's recurring ornament. */
@@ -250,38 +261,51 @@ function StatusStamp({ status }: { status: string }) {
 // ── Flow-fill pagination ────────────────────────────────────────────────────
 
 /** Tail sections that flow after the items table, in document order. */
-type TailBlock = 'scopeSummary' | 'signatures'
+type TailBlock = 'wordsTotals' | 'terms' | 'signatures'
 
-/** One explicit A4 page: its item chunk, stretched row height and tail blocks. */
+/** One explicit A4 page: its item chunk and the tail blocks rendered on it. */
 type PagePlan = {
   items: DocItemRow[]
-  /** extra mm given to every item row on this page (fills the A4 nicely) */
-  rowExtraMm: number
-  /** tail blocks rendered on this page, in order */
   blocks: TailBlock[]
-  /** final-page roominess tier: 0 compact · 1 roomy · 2 expansive */
-  roomyTier: 0 | 1 | 2
 }
+
+/** Fixed mm on page 1 above the first item row (header row + rule + info
+ *  bar + TO box + title line + thead). The TO box is data-adaptive; the
+ *  rest is calibrated against real Chrome A4 renders. */
+function page1FixedMm(toMm: number): number {
+  // header row + rule 12.2 · info bar 15.2 · title 5.6 (incl. margins) ·
+  // table mt 1.5 · thead 8.6 — calibrated against real Chrome A4 renders
+  return 12.2 + 15.2 + toMm + 5.6 + 1.5 + 8.6
+}
+const TOTAL_ROW_MM = 6.5
+const FOOTNOTE_MM = 4.2
+// words+totals row incl. its 2mm top margin
+const WORDS_TOTALS_MM = 34.5
+// signature boxes + ≥3mm gap + note line
+const SIG_NOTE_MM = 29
+// the T&C + signature pair may ride into the 4mm foot reserve — the note
+// line still clears the letterhead artwork by ≥6mm (never touches it)
+const PAIR_TOLERANCE_MM = 4 // small placement headroom (wrap variance)
 
 /**
  * Flow-fill pagination:
- *   1. chunk items across pages (conservative row estimates → safe breaks);
- *   2. flow the tail blocks, in order, onto the last items page while they
- *      fit (with a placement buffer); the rest continues on a fresh page
- *      that starts at the TOP — signatures never strand alone on a page;
- *   3. hand each page's leftover room back to its item rows (capped), so
- *      pages fill nicely instead of ending two-thirds down;
- *   4. flag a sparse final page so the bottom sections can breathe.
+ *   1. chunk items across pages (conservative row estimates → safe breaks;
+ *      the thead repeats on every page);
+ *   2. place the words+totals row after the last items chunk while it fits;
+ *   3. place TERMS & CONDITIONS + the signature boxes TOGETHER — both fit on
+ *      the current page, or both move to a fresh page (a T&C item is never
+ *      split across pages; the signatures are never stranded alone).
  */
 function planPages(
   items: DocItemRow[],
   topMm: number,
   bottomMm: number,
-  page1FixedMm: number,
-  blockH: Record<TailBlock, number>
+  termsMm: number,
+  toMm: number
 ): PagePlan[] {
-  const availFirst = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - page1FixedMm
-  const availRest = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM) - CONT_HEADER_MM
+  const avail = PAGE_H_MM - topMm - (bottomMm + FOOTER_MM)
+  const availFirst = avail - page1FixedMm(toMm)
+  const availRest = avail - CONT_HEADER_MM - 9 // continued strip + repeated thead
 
   // 1) chunk items
   const chunks: DocItemRow[][] = []
@@ -301,67 +325,51 @@ function planPages(
   }
   chunks.push(cur)
 
-  // 2) flow tail blocks onto the last items page while they fit
+  // 2) + 3) flow the tail onto the last items page
   const cap = chunks.length === 1 ? availFirst : availRest
-  const order: TailBlock[] = ['scopeSummary', 'signatures']
+  const lastRows = chunks[chunks.length - 1].reduce((s, it) => s + rowHeightMm(it), 0)
+  let tailUsed = lastRows + (chunks[chunks.length - 1].length > 0 ? TOTAL_ROW_MM + FOOTNOTE_MM : 0)
+
   const blocks: TailBlock[] = []
   const deferred: TailBlock[] = []
-  let flowing = true
-  for (const b of order) {
-    if (flowing && used + TOTAL_ROW_MM + blockH[b] + PLACE_BUFFER_MM <= cap) {
-      blocks.push(b)
-      used += blockH[b]
-    } else {
-      flowing = false
-      deferred.push(b)
-    }
+  // When the table itself continues past page 1, the boss's rule is "keep
+  // totals + signatures together on the last page" — so the words+totals row
+  // travels WITH the T&C + signature pair. On a single-chunk table it may
+  // stay on the items page while the pair flows on.
+  const singleChunk = chunks.length === 1
+  if (singleChunk && tailUsed + WORDS_TOTALS_MM <= cap) {
+    blocks.push('wordsTotals')
+    tailUsed += WORDS_TOTALS_MM
+  } else if (!singleChunk) {
+    // handled together with the pair below
+  } else {
+    deferred.push('wordsTotals')
   }
-  // signatures should not be stranded alone on a fresh page
-  if (deferred.length === 1 && deferred[0] === 'signatures' && blocks.length > 0) {
-    deferred.unshift(blocks.pop() as TailBlock)
+  // TERMS & CONDITIONS + signatures move together as a pair (both heights
+  // include their own margins). On multi-chunk tables the words+totals row
+  // is placed with them — all three, or none.
+  const wordsCost = singleChunk ? 0 : WORDS_TOTALS_MM
+  if (tailUsed + wordsCost + termsMm + SIG_NOTE_MM <= cap + PAIR_TOLERANCE_MM) {
+    if (wordsCost) blocks.push('wordsTotals')
+    blocks.push('terms', 'signatures')
+  } else {
+    if (!singleChunk) deferred.push('wordsTotals')
+    deferred.push('terms', 'signatures')
   }
 
-  const pages: PagePlan[] = chunks.map((c) => ({
-    items: c,
-    rowExtraMm: 0,
-    blocks: [] as TailBlock[],
-    roomyTier: 0 as const,
-  }))
+  const pages: PagePlan[] = chunks.map((c) => ({ items: c, blocks: [] as TailBlock[] }))
   pages[pages.length - 1].blocks = blocks
   if (deferred.length > 0) {
-    pages.push({ items: [], rowExtraMm: 0, blocks: deferred, roomyTier: 0 })
+    // a fresh page starting at the TOP: words+totals (when deferred), then
+    // the T&C box, then the signatures — never split, never stranded.
+    pages.push({ items: [], blocks: deferred })
   }
-
-  // 3) sparse final page → roomier tail tier (only when the extra height fits)
-  const fin = pages[pages.length - 1]
-  const finCap = pages.length === 1 ? availFirst : availRest
-  const finRows =
-    fin.items.reduce((s, it) => s + rowHeightMm(it), 0) + (fin.items.length ? TOTAL_ROW_MM : 0)
-  const finBlocks = fin.blocks.reduce((s, b) => s + blockH[b], 0)
-  const finSlack = finCap - finRows - finBlocks
-  fin.roomyTier = finSlack > EXPANSIVE_SLACK_MM ? 2 : finSlack > ROOMY_SLACK_MM ? 1 : 0
-  const tailDelta = ROOMY_TAIL_DELTA[fin.roomyTier]
-
-  // 4) give leftover room back to the rows (fills the A4 nicely)
-  for (let i = 0; i < pages.length; i++) {
-    const p = pages[i]
-    if (p.items.length === 0) continue
-    const pageCap = i === 0 ? availFirst : availRest
-    const rowsMm = p.items.reduce((s, it) => s + rowHeightMm(it), 0) + TOTAL_ROW_MM
-    const blocksMm =
-      p.blocks.reduce((s, b) => s + blockH[b], 0) + (p === fin ? tailDelta : 0)
-    const slack = pageCap - rowsMm - blocksMm
-    if (slack > STRETCH_SAFE_MM) {
-      p.rowExtraMm = Math.min((slack - STRETCH_SAFE_MM) / p.items.length, MAX_ROW_STRETCH)
-    }
-  }
-
   return pages
 }
 
 // ── Letterhead geometry ─────────────────────────────────────────────────────
-// 'none' (default) renders the mirror template's striped placeholder zones at
-// the full 35/22mm; artwork modes honour the configured heights instead.
+// 'none' (default) renders the striped placeholder zones at the full
+// 35/22mm; artwork modes honour the configured heights instead.
 function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: number } {
   const hasFull = letterhead.mode === 'full' && letterhead.fullPageImage
   const hasHeader =
@@ -380,15 +388,15 @@ function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: n
   if (hasHeader) {
     return { topMm: letterhead.headerHeightMm + 3, bottomMm: 12 }
   }
-  // 'none' — the boss's mockup: striped zones, top 35mm / bottom 22mm
+  // 'none' — striped zones: top 35mm / bottom 22mm
   return { topMm: 35, bottomMm: 22 }
 }
 
 /**
- * Full-screen dialog rendering the paginated A4 quotation.
- * Purely presentational — the parent supplies the company letterhead config
- * (fetched in its open/preview event handlers) and the quotation document.
- * Print button renders the server PDF (vector, headless Chromium) and prints that.
+ * Full-screen dialog rendering the paginated A4 quotation. Purely
+ * presentational apart from fetching the letterhead-approved signatory.
+ * Print button renders the server PDF (vector, headless Chromium) and prints
+ * that.
  */
 export function QuotationPrintDialog({
   quotation,
@@ -403,8 +411,31 @@ export function QuotationPrintDialog({
 }) {
   const settings = useAppStore((s) => s.settings)
   const user = useAppStore((s) => s.user)
+  const [approvedBy, setApprovedBy] = useState<ApprovedBy>(null)
 
   usePageRule(open, 'size: A4 portrait; margin: 0;')
+
+  // Settings › Signatories → the name + designation printed in APPROVED BY.
+  // No signatory configured → null → the name line stays empty.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api.get<{ signatories: { name: string; designation: string; isDefault: boolean }[] }>(
+          '/api/signatories'
+        )
+        if (cancelled) return
+        const def = res.signatories.find((s) => s.isDefault) ?? null
+        setApprovedBy(def ? { name: def.name, designation: def.designation ?? '' } : null)
+      } catch {
+        if (!cancelled) setApprovedBy(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open, quotation?.id])
 
   const isDraft = !quotation || quotation.id === 'draft'
 
@@ -416,7 +447,7 @@ export function QuotationPrintDialog({
       >
         <DialogTitle className="sr-only">Quotation print preview</DialogTitle>
         <DialogDescription className="sr-only">
-          Printable A4 quotation with letterhead zones, mirror title row, party cards, line items, scope and terms, financial summary, signature and stamp boxes.
+          Printable A4 quotation with letterhead zones, header row, info bar, TO box, line items, amount in words, totals, terms and conditions, and signature boxes.
         </DialogDescription>
 
         {/* Top button bar — hidden when printing */}
@@ -431,7 +462,7 @@ export function QuotationPrintDialog({
               ) : null}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              A4 · Mirror template · EN/AR labels
+              A4 · Compact one-page layout · EN/AR labels
               {quotation
                 ? ` · ${quotation.clientName} · ${formatMoney(quotation.total, settings.currency || 'SAR')}`
                 : ''}
@@ -478,7 +509,7 @@ export function QuotationPrintDialog({
               quotation={quotation}
               letterhead={letterhead ?? DEFAULT_LETTERHEAD}
               settings={settings}
-              preparedBy={user?.name ?? ''}
+              approvedBy={approvedBy}
             />
           ) : (
             <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
@@ -497,12 +528,13 @@ export function QuotationDocument({
   quotation,
   letterhead,
   settings,
-  preparedBy,
+  approvedBy,
 }: {
   quotation: QuotationDetail
   letterhead: LetterheadConfig
   settings: AppSettings
-  preparedBy: string
+  /** Default signatory from Settings › Signatories (null → empty name line). */
+  approvedBy?: ApprovedBy
 }) {
   const currency = settings.currency || 'SAR'
   const q = quotation
@@ -511,22 +543,19 @@ export function QuotationDocument({
   const vatPercent = Math.round(q.vatRate * 100)
   const items = q.items ?? []
   // Visible signature/stamp artwork — anchored INTO the "Approved By" box
-  // (signature sits exactly on its line, stamp inside the dashed circle), so
-  // the artwork always lands at the end of the letter, wherever that box flows.
+  // (signature sits exactly on its line, stamp beside the name/date block).
   const assets = (q.assets ?? []).filter((a) => a.visible)
   const signatureAsset = assets.find((a) => a.type === 'signature') ?? null
   const stampAsset = assets.find((a) => a.type === 'stamp') ?? null
   const netTotal = round2(q.subtotal - q.discount)
-  const money = (n: number) => formatNumber(n) // template style: plain numbers — SAR lives in headers only
+  const money = (n: number) => formatNumber(n) // plain numbers — SAR lives in headers only
   const geo = geometryFor(letterhead)
 
-  // Hourly manpower quotes get the mirror's 5-column card, others go generic
+  // Hourly manpower quotes get the 6-column table, others go generic
   const hasRateBasis = items.some((it) => it.ratePerHour != null || it.hoursPerMonth != null)
   const showDiscountCol = items.some((it) => (it.discount ?? 0) > 0) || q.discount > 0
   const totalWorkers = round2(items.reduce((s, it) => s + (hasRateBasis ? it.quantity : 0), 0))
-  const inclusions = bulletLines(q.inclusions)
-  const exclusions = bulletLines(q.exclusions)
-  const terms = q.terms ? numberedTerms(q.terms) : []
+  const terms = parseTerms(q.terms)
   const contractMonths = q.contractMonths && q.contractMonths > 0 ? q.contractMonths : null
   const contractValue = contractMonths ? round2(q.total * contractMonths) : null
   const subjectLine = (q.subject || 'Manpower Supply Proposal').toUpperCase()
@@ -538,8 +567,7 @@ export function QuotationDocument({
   const printedAt = new Date()
 
   // uniform working-hours basis across hourly lines → drives the
-  // working-hours cell and the "Amount = …" calculation note under the table.
-  // Preferred form: hours/day × days/month = hours/month (10 × 26 = 260).
+  // "(10 hrs × 26 days = 260 hrs)" note under the items table.
   const hoursVals = items
     .map((it) => it.hoursPerMonth)
     .filter((h): h is number => h != null && h > 0)
@@ -557,76 +585,25 @@ export function QuotationDocument({
     dpmVals.length > 0 && dpmVals.every((d) => d === dpmVals[0]) ? dpmVals[0] : null
   const dayBasis =
     uniformHpd != null && uniformDpm != null ? round2(uniformHpd * uniformDpm) : null
-  const workingHoursLabel = dayBasis
-    ? `${uniformHpd} hrs × ${uniformDpm} days = ${dayBasis} hrs / month`
-    : uniformHours
-      ? `${uniformHours} hrs / month`
-      : hoursVals.length > 0
-        ? 'As per trade'
-        : '—'
-  const contractPeriodLabel =
-    q.contractPeriod || (contractMonths ? `${contractMonths} Months` : '—')
+  const footnoteBasis =
+    dayBasis != null
+      ? ` (${uniformHpd} hrs × ${uniformDpm} days = ${dayBasis} hrs)`
+      : uniformHours != null
+        ? ` (${uniformHours} hrs / month)`
+        : ''
+
+  // TO box field values (client snapshot + registered-client record)
+  const toAddress = [client?.address, client?.city].filter(Boolean).join(', ')
+  const toContact =
+    client?.phone || client?.email ? [client?.phone, client?.email].filter(Boolean).join(' · ') : '—'
+  const toVatCr = [client?.vatNumber, client?.crNumber].filter(Boolean).join(' · ') || '—'
 
   // ── pagination ──
-  // Page-1 fixed sections (title row + rule + date bar + cards + project
-  // strip + heading + thead + gaps), calibrated against real Chrome A4
-  // renders of the compacted mirror layout. The two party cards sit
-  // side-by-side → only the TALLER card's wraps count.
-  const fromAddress = settings.address || ''
-  const toAddress = [client?.address, client?.city].filter(Boolean).join(', ')
-  // card base ≈ 26.5mm (header + name + AR name + first line of each field);
-  // each ADDITIONAL wrapped address line adds ~2.4mm; the TO card's Attention
-  // row counts as one extra line. Only the TALLER card's wraps matter.
-  const fromExtra = Math.max(0, estLines(fromAddress, 44) - 1)
-  const toExtra = Math.max(0, estLines(toAddress, 44) - 1) + (client?.contactPerson ? 1 : 0)
-  const cardsMm = 34 + 3.4 * Math.max(fromExtra, toExtra)
-  const projectBarMm =
-    15 +
-    3.0 *
-      Math.max(
-        estLines(q.projectName, 18),
-        estLines(q.projectLocation, 22),
-        estLines(q.mobilization, 18),
-        estLines(contractPeriodLabel, 18),
-        estLines(workingHoursLabel, 18)
-      )
-  const page1FixedMm =
-    12 + // title row (16pt QUOTATION + 7.5pt subtitle)
-    4 + // gold rule
-    15 + // date & currency bar (labels may wrap to two lines)
-    cardsMm +
-    projectBarMm +
-    (hasRateBasis ? 9 : 7) + // centred heading + intro line
-    9 + // two-line bilingual thead (8pt EN + 8pt AR)
-    4 + // calculation note
-    7 // inter-section margins
-
-  // Tail block heights (over-estimate = safe breaks)
-  const termsLines = terms.reduce((n, t) => n + estLines(t.text, 52), 0)
-  const notesLines = estLines(q.notes, 52)
-  const incLines = inclusions.reduce((n, l) => n + estLines(l, 26), 0)
-  const excLines = exclusions.reduce((n, l) => n + estLines(l, 26), 0)
-  const scopeMm =
-    5.5 + // cream header (10pt)
-    3.5 + // included/not-included sub-headers (8.5pt)
-    Math.max(incLines, excLines) * 3.6 +
-    3 + // dotted divider + padding
-    termsLines * 4.0 +
-    4 +
-    (q.notes ? 4.5 + notesLines * 4.0 : 0) +
-    3
-  const summaryMm =
-    (2 + (q.discount > 0 ? 2 : 0)) * 7 + // subtotal (+ discount + net)
-    12 + // navy TOTAL / MONTH row (11pt label + 14pt amount)
-    (contractMonths ? 9.5 : 0) + // contract value row + sub-line
-    6
-  const blockH: Record<TailBlock, number> = {
-    scopeSummary: Math.max(scopeMm, summaryMm) + 3 + 5, // + gap + words line (8pt)
-    signatures: 36,
-  }
-
-  const plans = planPages(items, geo.topMm, geo.bottomMm, page1FixedMm, blockH)
-  // The last page that actually carries items — the table's TOTAL row goes there
+  const termsMm = termsHeightMm(terms)
+  const toMm = toHeightMm(q)
+  const plans = planPages(items, geo.topMm, geo.bottomMm, termsMm, toMm)
+  // The last page that actually carries items — the table's TOTAL row + the
+  // calculation footnote go there.
   const lastItemsPageIdx = plans.reduce((acc, p, i) => (p.items.length > 0 ? i : acc), 0)
 
   // letterhead artwork layers (per the configured mode)
@@ -635,11 +612,40 @@ export function QuotationDocument({
     (letterhead.mode === 'header' || letterhead.mode === 'header_footer') && letterhead.headerImage
   const hasFooterArt = letterhead.mode === 'header_footer' && letterhead.footerImage
 
-  // table cell styles — mirror table: navy header (white EN over gold AR),
-  // horizontal-only row separators, no vertical body lines.
-  const th = 'px-1 py-[2.5px] text-center align-middle leading-[1.25]'
-  const td = 'px-1 py-[2px] align-top text-[9pt] leading-[1.3] text-[#1D2433]'
+  // table cell styles — navy header (white EN over gold AR), horizontal-only
+  // row separators, rows exactly as tall as the text: fixed-mm line heights
+  // (Calibrated against real Chrome renders — Arabic spans in Cairo inflate
+  // natural line boxes, so explicit mm leading keeps rows at spec pitch).
+  const th = 'px-1 py-[2px] text-center align-middle leading-[3.6mm]'
+  const td = 'px-1 py-[1.4mm] align-top text-[9pt] leading-[4.1mm] text-[#1D2433]'
   const tdR = `${td} text-right tabular-nums`
+  // TOTAL row cells — 1mm vertical padding keeps the row at ~6.5mm
+  const tdT = 'px-1 py-[1mm] align-middle text-[9.5pt] leading-[4.4mm] text-[#1D2433]'
+
+  /** The bottom note line — computer-generated note + Page X of Y in ONE
+   *  line, ≥3mm clear of the signature boxes above and the letterhead
+   *  footer below. Rendered at the foot of every page. */
+  const noteLine = (pageIdx: number, plan: PagePlan) => (
+    <p
+      className={`break-words text-center text-[7.5pt] leading-snug ${
+        plan.blocks.includes('signatures') ? 'mt-[3mm]' : 'mt-auto'
+      }`}
+      style={{ color: INK_SOFT }}
+    >
+      Computer-generated quotation · {companyName}
+      {' · '}
+      <span className="font-mono">{q.quoteNumber}</span>
+      {' · '}
+      Page {pageIdx + 1} of {plans.length}{' '}
+      <span className="mx-0.5" style={{ color: MUTED }}>
+        |
+      </span>{' '}
+      <span lang="ar" dir="rtl">
+        صفحة {pageIdx + 1} من {plans.length}
+      </span>{' '}
+      · Printed {fmtDate(printedAt.toISOString())}
+    </p>
+  )
 
   return (
     <div
@@ -775,8 +781,7 @@ export function QuotationDocument({
               {pageIdx === 0 ? (
                 <>
                   {/* 1 ─ title row: QUOTATION + subject (left, ≤35%) · number
-                      capsule (centre) · prepared-for (right, ≤35%, wraps).
-                      Grid columns keep the three zones from ever overlapping. */}
+                      capsule (centre) · prepared-for (right, ≤35%, wraps). */}
                   <div className="grid grid-cols-[minmax(0,35fr)_auto_minmax(0,35fr)] items-center gap-3">
                     <div className="min-w-0">
                       <h1
@@ -786,7 +791,7 @@ export function QuotationDocument({
                         Quotation
                       </h1>
                       <p
-                        className="mt-[1mm] break-words text-[7.5pt] font-bold uppercase leading-snug tracking-[0.3pt]"
+                        className="mt-[0.5mm] break-words text-[7.5pt] font-bold uppercase leading-snug tracking-[0.3pt]"
                         style={{ color: DARK_GOLD }}
                       >
                         {subjectLine}
@@ -795,7 +800,7 @@ export function QuotationDocument({
                     {/* pill badge — gold ring outside, navy fill inside */}
                     <div className="shrink-0 rounded-full p-[2px]" style={{ background: GOLD }}>
                       <div
-                        className="rounded-full px-4 text-center py-[4px]"
+                        className="rounded-full px-4 text-center py-[3px]"
                         style={{ background: NAVY }}
                       >
                         <p
@@ -813,7 +818,10 @@ export function QuotationDocument({
                       </div>
                     </div>
                     <div className="min-w-0 text-right">
-                      <p className="break-words text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt]" style={{ color: INK_SOFT }}>
+                      <p
+                        className="break-words text-[7.5pt] font-semibold uppercase leading-snug tracking-[0.3pt]"
+                        style={{ color: INK_SOFT }}
+                      >
                         Prepared for{' '}
                         <span className="mx-0.5" style={{ color: MUTED }}>|</span>{' '}
                         <span lang="ar" dir="rtl" className="normal-case tracking-normal">
@@ -836,10 +844,11 @@ export function QuotationDocument({
                     <div className="h-[2px] flex-1 rounded-full" style={{ background: GOLD }} />
                   </div>
 
-                  {/* 3 ─ date & currency bar (cream, rounded, 4 cells) — no
-                      fixed height, no overflow clip: cells grow with content */}
+                  {/* 3 ─ ONE info bar, 5 cells (Date | Valid Until | Your
+                      Reference | Currency | Project/Site wider). English
+                      label on top, Arabic below, then the value. */}
                   <div
-                    className="mt-[5px] grid grid-cols-4 rounded-lg border"
+                    className="mt-[1mm] grid grid-cols-[18fr_18fr_18fr_18fr_28fr] rounded-lg border"
                     style={{ borderColor: BORDER, background: CREAM }}
                   >
                     {(
@@ -856,251 +865,148 @@ export function QuotationDocument({
                     ).map(([en, ar, value]) => (
                       <div
                         key={en}
-                        className="border-r px-1.5 py-[5px] text-center last:border-r-0"
+                        className="border-r px-1.5 py-[3px] text-center"
                         style={{ borderColor: BORDER }}
                       >
-                        <BiLabel en={en} ar={ar} center />
                         <p
-                          className="mt-[1px] break-words text-[9pt] font-bold tabular-nums leading-snug"
+                          className="text-[7pt] font-semibold uppercase leading-tight tracking-[0.2pt]"
+                          style={{ color: INK_SOFT }}
+                        >
+                          {en}
+                        </p>
+                        <p lang="ar" dir="rtl" className="text-[7pt] leading-[2.8mm]" style={{ color: MUTED }}>
+                          {ar}
+                        </p>
+                        <p
+                          className="mt-[1px] break-words text-[9pt] font-bold tabular-nums leading-[3.6mm]"
                           style={{ color: NAVY }}
                         >
                           {value}
                         </p>
                       </div>
                     ))}
-                  </div>
-
-                  {/* 4 ─ FROM ◆ | TO ◆ cards (cream header, dotted field rows) */}
-                  <div className="mt-[5px] grid grid-cols-2 gap-2.5">
-                    {/* FROM — the company (supplier) */}
-                    <div
-                      className="rounded-lg border"
-                      style={{ borderColor: BORDER, background: 'white' }}
-                    >
-                      <div
-                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
-                        style={{ borderColor: BORDER, background: CREAM }}
-                      >
-                        <p
-                          className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
-                          style={{ color: DARK_GOLD }}
-                        >
-                          From
-                        </p>
-                        <GoldDiamond size={5} />
-                        <p
-                          lang="ar"
-                          dir="rtl"
-                          className="text-[8.5pt] font-bold leading-none"
-                          style={{ color: DARK_GOLD }}
-                        >
-                          من
-                        </p>
-                      </div>
-                      <div className="px-2.5 space-y-[4px] py-[6px]">
-                        <p className="break-words text-[9pt] font-bold leading-snug" style={{ color: INK }}>
-                          {companyName}
-                        </p>
-                        {settings.companyNameAr ? (
-                          <p
-                            lang="ar"
-                            dir="rtl"
-                            className="break-words text-[9pt] font-semibold leading-snug"
-                            style={{ color: INK }}
-                          >
-                            {settings.companyNameAr}
-                          </p>
-                        ) : null}
-                        <div
-                          className="border-t border-dotted pt-[3px] space-y-[4px] leading-[1.45]"
-                          style={{ borderColor: '#C7CFDC' }}
-                        >
-                          <p className="break-words">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                              Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
-                            </span>
-                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
-                              {fromAddress || '—'}
-                            </span>
-                          </p>
-                          <p className="break-words">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                              VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
-                            </span>
-                            <span className="font-mono text-[9pt] font-semibold" style={{ color: INK }}>
-                              {settings.vatNumber || '—'}
-                              {settings.vatNumber && settings.crNumber ? ' · ' : ''}
-                              {settings.crNumber || ''}
-                            </span>
-                          </p>
-                          <p className="break-words">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                              Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
-                            </span>
-                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
-                              {settings.phone || settings.email
-                                ? [settings.phone, settings.email].filter(Boolean).join(' · ')
-                                : '—'}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* TO — the client (customer) */}
-                    <div
-                      className="rounded-lg border"
-                      style={{ borderColor: BORDER, background: 'white' }}
-                    >
-                      <div
-                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
-                        style={{ borderColor: BORDER, background: CREAM }}
-                      >
-                        <p
-                          className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
-                          style={{ color: DARK_GOLD }}
-                        >
-                          To
-                        </p>
-                        <GoldDiamond size={5} />
-                        <p
-                          lang="ar"
-                          dir="rtl"
-                          className="text-[8.5pt] font-bold leading-none"
-                          style={{ color: DARK_GOLD }}
-                        >
-                          إلى
-                        </p>
-                      </div>
-                      <div className="px-2.5 space-y-[4px] py-[6px]">
-                        <p className="break-words text-[9pt] font-bold leading-snug" style={{ color: INK }}>
-                          {q.clientName}
-                        </p>
-                        <div
-                          className="border-t border-dotted pt-[3px] space-y-[4px] leading-[1.45]"
-                          style={{ borderColor: '#C7CFDC' }}
-                        >
-                          {client?.contactPerson ? (
-                            <p className="break-words">
-                              <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                                Attention <span lang="ar" dir="rtl">عناية</span>:{' '}
-                              </span>
-                              <span className="text-[9pt] font-semibold" style={{ color: INK }}>
-                                {client.contactPerson}
-                              </span>
-                            </p>
-                          ) : null}
-                          <p className="break-words">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                              Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
-                            </span>
-                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
-                              {toAddress || '—'}
-                            </span>
-                          </p>
-                          <p className="break-words">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                              Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
-                            </span>
-                            <span className="text-[9pt] font-semibold" style={{ color: INK }}>
-                              {client?.phone || client?.email
-                                ? [client?.phone, client?.email].filter(Boolean).join(' · ')
-                                : '—'}
-                            </span>
-                          </p>
-                          {client?.vatNumber || client?.crNumber ? (
-                            <p className="break-words">
-                              <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
-                                VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
-                              </span>
-                              <span className="font-mono text-[9pt] font-semibold" style={{ color: INK }}>
-                                {client.vatNumber || ''}
-                                {client.vatNumber && client.crNumber ? ' · ' : ''}
-                                {client.crNumber || ''}
-                              </span>
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 5 ─ project info strip (cream, 4 cells) — grows with content */}
-                  <div
-                    className="mt-[5px] grid grid-cols-4 rounded-lg border"
-                    style={{ borderColor: BORDER, background: CREAM }}
-                  >
-                    <div
-                      className="border-r px-1.5 py-[5px] text-center"
-                      style={{ borderColor: BORDER }}
-                    >
-                      <BiLabel en="Project / Site" ar="المشروع / الموقع" center />
+                    {/* Project / Site — wider cell, 2 value lines */}
+                    <div className="px-1.5 py-[3px] text-center">
                       <p
-                        className="mt-[1px] break-words text-[9pt] font-bold leading-snug"
+                        className="text-[7pt] font-semibold uppercase leading-[2.8mm] tracking-[0.2pt]"
+                        style={{ color: INK_SOFT }}
+                      >
+                        Project / Site
+                      </p>
+                      <p lang="ar" dir="rtl" className="text-[7pt] leading-[2.8mm]" style={{ color: MUTED }}>
+                        المشروع / الموقع
+                      </p>
+                      <p
+                        className="mt-[1px] break-words text-[9pt] font-bold leading-[3.6mm]"
                         style={{ color: NAVY }}
                       >
                         {q.projectName || '—'}
                       </p>
                       {q.projectLocation ? (
-                        <p className="break-words text-[7.5pt] leading-snug" style={{ color: INK_SOFT }}>
+                        <p className="break-words text-[7.5pt] leading-[3.4mm]" style={{ color: INK_SOFT }}>
                           {q.projectLocation}
                         </p>
                       ) : null}
                     </div>
+                  </div>
+
+                  {/* 4 ─ full-width TO box (no FROM box — the letterhead
+                      already carries the company block). Two inner columns,
+                      tight rows, no dashed separators. */}
+                  <div
+                    className="mt-[1mm] rounded-lg border"
+                    style={{ borderColor: BORDER, background: 'white' }}
+                  >
                     <div
-                      className="border-r px-1.5 py-[5px] text-center"
-                      style={{ borderColor: BORDER }}
+                      className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-[3mm] py-[2px]"
+                      style={{ borderColor: BORDER, background: CREAM }}
                     >
-                      <BiLabel en="Mobilization" ar="التجهيز" center />
                       <p
-                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
-                        style={{ color: NAVY }}
+                        className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
+                        style={{ color: DARK_GOLD }}
                       >
-                        {q.mobilization || '—'}
+                        To
+                      </p>
+                      <GoldDiamond size={5} />
+                      <p
+                        lang="ar"
+                        dir="rtl"
+                        className="text-[8.5pt] font-bold leading-none"
+                        style={{ color: DARK_GOLD }}
+                      >
+                        إلى
                       </p>
                     </div>
-                    <div
-                      className="border-r px-1.5 py-[5px] text-center"
-                      style={{ borderColor: BORDER }}
-                    >
-                      <BiLabel en="Contract Period" ar="مدة العقد" center />
-                      <p
-                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
-                        style={{ color: NAVY }}
+                    <div className="grid grid-cols-2 px-[3mm] py-[0.8mm]">
+                      {/* left — client name (bold), Attention, Contact */}
+                      <div className="min-w-0 space-y-[0.6mm] pr-[3mm]">
+                        <p
+                          className="break-words text-[9.5pt] font-bold leading-[3.6mm]"
+                          style={{ color: INK }}
+                        >
+                          {q.clientName}
+                        </p>
+                        <p className="break-words leading-[3.6mm]">
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            Attention <span lang="ar" dir="rtl">عناية</span>:{' '}
+                          </span>
+                          <span className="text-[9pt] font-semibold" style={{ color: INK }}>
+                            {client?.contactPerson || '—'}
+                          </span>
+                        </p>
+                        <p className="break-words leading-[3.6mm]">
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            Contact <span lang="ar" dir="rtl">التواصل</span>:{' '}
+                          </span>
+                          <span className="text-[9pt] font-semibold" style={{ color: INK }}>
+                            {toContact}
+                          </span>
+                        </p>
+                      </div>
+                      {/* right — Address, VAT / C.R. */}
+                      <div
+                        className="min-w-0 space-y-[0.6mm] border-l pl-[3mm]"
+                        style={{ borderColor: BORDER }}
                       >
-                        {contractPeriodLabel}
-                      </p>
-                    </div>
-                    <div className="px-1.5 py-[5px] text-center">
-                      <BiLabel en="Working Hours" ar="ساعات العمل" center />
-                      <p
-                        className="mt-[1px] break-words text-[9pt] font-semibold leading-snug"
-                        style={{ color: NAVY }}
-                      >
-                        {workingHoursLabel}
-                      </p>
+                        <p className="break-words leading-[3.6mm]">
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            Address <span lang="ar" dir="rtl">العنوان</span>:{' '}
+                          </span>
+                          <span className="text-[9pt] font-semibold" style={{ color: INK }}>
+                            {toAddress || '—'}
+                          </span>
+                        </p>
+                        <p className="break-words leading-[3.6mm]">
+                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                            VAT / C.R. <span lang="ar" dir="rtl">الرقم الضريبي / السجل</span>:{' '}
+                          </span>
+                          <span className="font-mono text-[9pt] font-semibold" style={{ color: INK }}>
+                            {toVatCr}
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* 6 ─ centred quotation heading + polite intro (mirror) */}
-                  <div className="mt-[1.6mm] text-center">
+                  {/* 5 ─ centred quotation title line */}
+                  <div className="mt-[1.2mm] text-center">
                     <p className="text-[11pt] font-extrabold leading-tight" style={{ color: NAVY }}>
                       {hasRateBasis
                         ? 'Quotation for Supply of Skilled & Unskilled Manpower'
                         : 'Quotation Details'}
                     </p>
-                    {hasRateBasis ? (
-                      <p className="mt-[0.8mm] text-[8pt] italic leading-snug" style={{ color: INK_SOFT }}>
-                        Dear Sir, we are pleased to submit our most competitive rates. All workers
-                        are experienced, medically fit and hold valid Iqama.
-                      </p>
-                    ) : null}
                   </div>
                 </>
               ) : (
                 /* continuation header on EVERY later page (items or tail-only) */
-                <div className="flex flex-wrap items-baseline justify-between gap-x-2 border-b pb-[3px]" style={{ borderColor: BORDER }}>
-                  <p className="break-words text-[8.5pt] font-bold uppercase tracking-[0.3pt]" style={{ color: NAVY }}>
+                <div
+                  className="flex flex-wrap items-baseline justify-between gap-x-2 border-b pb-[3px]"
+                  style={{ borderColor: BORDER }}
+                >
+                  <p
+                    className="break-words text-[8.5pt] font-bold uppercase tracking-[0.3pt]"
+                    style={{ color: NAVY }}
+                  >
                     {companyName} — Quotation <span className="font-mono">{q.quoteNumber}</span>
                   </p>
                   <p className="shrink-0 text-[7.5pt] italic" style={{ color: INK_SOFT }}>
@@ -1109,20 +1015,21 @@ export function QuotationDocument({
                 </div>
               )}
 
-              {/* 7 ─ items chunk — mirror table (thead repeats; tail-only pages skip) */}
+              {/* 6 ─ items chunk (thead repeats; tail-only pages skip) */}
               {chunk.length > 0 || pageIdx === 0 ? (
                 <div
-                  className="mt-[1.8mm] rounded-lg border"
+                  className="mt-[1.5mm] rounded-lg border"
                   style={{ borderColor: BORDER, background: 'white' }}
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
                     {hasRateBasis ? (
                       <colgroup>
-                        <col style={{ width: '6%' }} />
-                        <col style={{ width: '44%' }} />
-                        <col style={{ width: '14%' }} />
+                        <col style={{ width: '5%' }} />
+                        <col style={{ width: '34%' }} />
+                        <col style={{ width: '13%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '15%' }} />
                         <col style={{ width: '17%' }} />
-                        <col style={{ width: '19%' }} />
                       </colgroup>
                     ) : (
                       <colgroup>
@@ -1157,6 +1064,12 @@ export function QuotationDocument({
                             <p className="text-[8pt] font-bold text-white">Hourly Rate (SAR)</p>
                             <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
                               السعر بالساعة
+                            </p>
+                          </th>
+                          <th className={th}>
+                            <p className="text-[8pt] font-bold text-white">Hours / Month</p>
+                            <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
+                              ساعات الشهر
                             </p>
                           </th>
                           <th className={th}>
@@ -1217,79 +1130,91 @@ export function QuotationDocument({
                         <tr>
                           <td
                             className={`${td} border-b py-2 text-center text-[#4A5468]`}
-                            colSpan={hasRateBasis ? 5 : showDiscountCol ? 7 : 6}
+                            colSpan={hasRateBasis ? 6 : showDiscountCol ? 7 : 6}
                             style={{ borderColor: ROW_SEP }}
                           >
                             No line items yet
                           </td>
                         </tr>
                       ) : (
-                        chunk.map((it, i) => (
-                          <tr
-                            key={it.id ?? `${it.sr}-${i}`}
-                            className="break-inside-avoid"
-                            style={{
-                              background: i % 2 === 1 ? '#FAFBFD' : 'white',
-                              borderBottom: `0.3mm solid ${ROW_SEP}`,
-                              // flow-fill: leftover page room → taller, airier rows
-                              ...(plan.rowExtraMm > 0.4
-                                ? { height: `${rowHeightMm(it) + plan.rowExtraMm}mm` }
-                                : null),
-                            }}
-                          >
-                            <td className={`${td} text-center`}>
-                              {/* index inside a thin gold ring — the template's touch */}
-                              <span
-                                className="inline-flex h-[17px] w-[17px] items-center justify-center rounded-full border-[1.5px] text-[8pt] font-bold tabular-nums"
-                                style={{ borderColor: GOLD, color: NAVY }}
-                              >
-                                {it.sr}
-                              </span>
-                            </td>
-                            <td className={td}>
-                              <p className="break-words text-[9pt] font-bold leading-[1.15]" style={{ color: INK }}>
-                                {it.description}
-                              </p>
-                              {it.subText ? (
-                                <p className="break-words text-[8pt] italic leading-[1.15]" style={{ color: INK_SOFT }}>
-                                  {it.subText}
+                        chunk.map((it, i) => {
+                          const tradeAr = TRADE_AR[it.description.trim().toUpperCase()] ?? null
+                          return (
+                            <tr
+                              key={it.id ?? `${it.sr}-${i}`}
+                              className="break-inside-avoid"
+                              style={{ borderBottom: `0.3mm solid ${ROW_SEP}` }}
+                            >
+                              <td className={`${td} text-center`}>
+                                {/* index inside a thin gold ring — the template's touch */}
+                                <span
+                                  className="inline-flex h-[17px] w-[17px] items-center justify-center rounded-full border-[1.5px] text-[8pt] font-bold tabular-nums"
+                                  style={{ borderColor: GOLD, color: NAVY }}
+                                >
+                                  {it.sr}
+                                </span>
+                              </td>
+                              <td className={td}>
+                                <p className="break-words text-[9pt] font-bold leading-[1.15]" style={{ color: INK }}>
+                                  {it.description}
+                                  {tradeAr ? (
+                                    <>
+                                      {' '}
+                                      <span
+                                        lang="ar"
+                                        dir="rtl"
+                                        className="text-[8pt] font-semibold"
+                                        style={{ color: MUTED }}
+                                      >
+                                        {tradeAr}
+                                      </span>
+                                    </>
+                                  ) : null}
                                 </p>
-                              ) : null}
-                            </td>
-                            {hasRateBasis ? (
-                              <>
-                                <td className={`${td} text-center font-semibold tabular-nums`}>
-                                  {it.quantity.toLocaleString('en-US')}
-                                </td>
-                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                  {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
-                                </td>
-                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                  {money(it.lineTotal)}
-                                </td>
-                              </>
-                            ) : (
-                              <>
-                                <td className={`${td} text-center font-semibold tabular-nums`}>
-                                  {it.quantity.toLocaleString('en-US')}
-                                </td>
-                                <td className={`${td} text-center`}>{it.unit ?? '—'}</td>
-                                <td className={tdR}>{money(it.unitPrice)}</td>
-                                {showDiscountCol ? (
-                                  <td className={tdR}>
-                                    {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
-                                  </td>
+                                {it.subText ? (
+                                  <p className="break-words text-[8pt] italic leading-[1.15]" style={{ color: INK_SOFT }}>
+                                    {it.subText}
+                                  </p>
                                 ) : null}
-                                <td className={`${tdR} font-bold`} style={{ color: INK }}>
-                                  {money(it.lineTotal)}
-                                </td>
-                              </>
-                            )}
-                          </tr>
-                        ))
+                              </td>
+                              {hasRateBasis ? (
+                                <>
+                                  <td className={`${td} text-center font-semibold tabular-nums`}>
+                                    {it.quantity.toLocaleString('en-US')}
+                                  </td>
+                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                    {it.ratePerHour != null ? money(it.ratePerHour) : '—'}
+                                  </td>
+                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                    {it.hoursPerMonth != null ? money(it.hoursPerMonth) : '—'}
+                                  </td>
+                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                    {money(it.lineTotal)}
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className={`${td} text-center font-semibold tabular-nums`}>
+                                    {it.quantity.toLocaleString('en-US')}
+                                  </td>
+                                  <td className={`${td} text-center`}>{it.unit ?? '—'}</td>
+                                  <td className={tdR}>{money(it.unitPrice)}</td>
+                                  {showDiscountCol ? (
+                                    <td className={tdR}>
+                                      {(it.discount ?? 0) > 0 ? `-${money(it.discount ?? 0)}` : '—'}
+                                    </td>
+                                  ) : null}
+                                  <td className={`${tdR} font-bold`} style={{ color: INK }}>
+                                    {money(it.lineTotal)}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          )
+                        })
                       )}
                       {/* total row on the last items chunk — hourly quotes
-                          total the workers and amount columns (mirror) */}
+                          total the workers and amount columns */}
                       {chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
                         <tr
                           className="break-inside-avoid"
@@ -1299,20 +1224,21 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]`}
+                                className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
                                 style={{ color: NAVY }}
                               >
                                 Total <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
                               </td>
                               <td
-                                className={`${td} text-center text-[9.5pt] font-extrabold tabular-nums`}
+                                className={`${tdT} text-center font-extrabold tabular-nums`}
                                 style={{ color: NAVY }}
                               >
                                 {totalWorkers.toLocaleString('en-US')}
                               </td>
                               <td className={td} />
+                              <td className={td} />
                               <td
-                                className={`${tdR} text-[9.5pt] font-extrabold`}
+                                className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1322,7 +1248,7 @@ export function QuotationDocument({
                             <>
                               <td className={td} />
                               <td
-                                className={`${td} text-[9.5pt] font-extrabold uppercase tracking-[0.3pt]`}
+                                className={`${tdT} font-extrabold uppercase tracking-[0.3pt]`}
                                 style={{ color: NAVY }}
                               >
                                 Total Amount <span lang="ar" dir="rtl" className="normal-case">الإجمالي</span>
@@ -1331,7 +1257,7 @@ export function QuotationDocument({
                               <td className={td} />
                               {showDiscountCol ? <td className={td} /> : null}
                               <td
-                                className={`${tdR} text-[9.5pt] font-extrabold`}
+                                className={`${tdT.replace('text-[9.5pt]', 'text-[11pt]')} text-right font-extrabold tabular-nums`}
                                 style={{ color: NAVY }}
                               >
                                 {money(q.subtotal)}
@@ -1346,268 +1272,228 @@ export function QuotationDocument({
               ) : null}
 
               {/* calculation note under the items table (hourly quotes) */}
-              {hasRateBasis && chunk.length > 0 ? (
-                <p className="text-right text-[8pt] italic mt-[1mm]" style={{ color: INK_SOFT }}>
-                  * Amount = No. of Workers × Hourly Rate × Hours per Month
-                  {workingHoursLabel !== '—' ? ` — ${workingHoursLabel}` : ''}
+              {hasRateBasis && chunk.length > 0 && pageIdx === lastItemsPageIdx ? (
+                <p className="text-right text-[8pt] italic mt-[0.8mm]" style={{ color: INK_SOFT }}>
+                  * Amount = No. of Workers × Hourly Rate × Hours per Month{footnoteBasis}
                 </p>
               ) : null}
 
               {/* ── tail blocks — flow after the items table, page by page ── */}
-              {plan.blocks.includes('scopeSummary') ? (
-                <section
-                  className={`mt-[1.5mm] grid grid-cols-[1fr_78mm] items-start gap-[2.5mm] break-inside-avoid`}
-                >
-                  {/* ── SCOPE & TERMS ◆ card (mirror left column) ── */}
+              {plan.blocks.includes('wordsTotals') ? (
+                /* AMOUNT IN WORDS (left) beside the totals box (right) */
+                <section className="mt-[1.5mm] grid grid-cols-[1fr_76mm] items-start gap-[2.5mm]">
                   <div
-                    className="rounded-lg border"
+                    className="rounded-lg border px-[3mm] py-[2mm]"
                     style={{ borderColor: BORDER, background: 'white' }}
                   >
-                    <div
-                      className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
-                      style={{ borderColor: BORDER, background: CREAM }}
+                    <p
+                      className="text-[7.5pt] font-bold uppercase leading-[3.8mm] tracking-[0.3pt]"
+                      style={{ color: DARK_GOLD }}
                     >
-                      <p
-                        className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
-                        style={{ color: DARK_GOLD }}
-                      >
-                        Scope &amp; Terms
-                      </p>
-                      <GoldDiamond size={5} />
-                      <p
-                        lang="ar"
-                        dir="rtl"
-                        className="text-[8.5pt] font-bold leading-none"
-                        style={{ color: DARK_GOLD }}
-                      >
-                        النطاق والشروط
-                      </p>
-                    </div>
-                    <div className="px-2.5 py-[5px]">
-                      {/* included | not included sub-columns (dotted divider) */}
-                      {inclusions.length > 0 || exclusions.length > 0 ? (
-                        <div className="grid grid-cols-2 gap-[3mm]">
-                          <div>
-                            <p
-                              className="break-words text-[8pt] font-extrabold uppercase tracking-[0.3pt]"
-                              style={{ color: DARK_GOLD }}
-                            >
-                              Included in rates{' '}
-                              <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-                                شامل في الأسعار
-                              </span>
-                            </p>
-                            <ul className="mt-[1mm] space-y-[0.7mm]">
-                              {inclusions.map((l) => (
-                                <li
-                                  key={l}
-                                  className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
-                                >
-                                  <span
-                                    className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
-                                    style={{ background: GOLD }}
-                                  />
-                                  <span className="break-words">{l}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div
-                            className="border-l border-dotted pl-[3mm]"
-                            style={{ borderColor: '#C7CFDC' }}
-                          >
-                            <p
-                              className="break-words text-[8pt] font-extrabold uppercase tracking-[0.3pt]"
-                              style={{ color: MUTED }}
-                            >
-                              Not included{' '}
-                              <span lang="ar" dir="rtl" className="normal-case tracking-normal">
-                                غير شامل
-                              </span>
-                            </p>
-                            <ul className="mt-[1mm] space-y-[0.7mm]">
-                              {exclusions.map((l) => (
-                                <li
-                                  key={l}
-                                  className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
-                                >
-                                  <span
-                                    className="mt-[0.9mm] h-[1.1mm] w-[1.1mm] shrink-0 rotate-45"
-                                    style={{ background: '#B7BFCB' }}
-                                  />
-                                  <span className="break-words">{l}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {/* numbered terms below a dotted divider */}
-                      <div
-                        className={`border-t border-dotted ${inclusions.length > 0 || exclusions.length > 0 ? 'mt-[1.5mm] pt-[1.2mm]' : ''}`}
-                        style={{ borderColor: '#C7CFDC' }}
-                      >
-                        {terms.length > 0 ? (
-                          <ol className="space-y-[0.7mm]">
-                            {terms.map((t) => (
-                              <li
-                                key={`${t.n}-${t.text.slice(0, 12)}`}
-                                className="flex gap-[1.5mm] text-[8pt] leading-snug text-[#1D2433]"
-                              >
-                                <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
-                                  {t.n}
-                                </span>
-                                <span className="break-words">{t.text}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        ) : (
-                          <p className="text-[8pt]" style={{ color: INK_SOFT }}>
-                            As mutually agreed between the parties.
-                          </p>
-                        )}
-                        {q.notes ? (
-                          <p className="mt-[1.2mm] whitespace-pre-line text-[8pt] italic leading-snug" style={{ color: INK_SOFT }}>
-                            {q.notes}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
+                      Amount in Words{' '}
+                      <span lang="ar" dir="rtl" className="normal-case tracking-normal">
+                        المبلغ كتابةً
+                      </span>
+                      :
+                    </p>
+                    <p className="mt-[0.8mm] break-words text-[9pt] font-semibold leading-[4mm]" style={{ color: INK }}>
+                      {words.en}
+                    </p>
+                    <p lang="ar" dir="rtl" className="mt-[0.5mm] break-words text-[9pt] leading-[4.2mm]" style={{ color: INK }}>
+                      {words.ar}
+                    </p>
                   </div>
 
-                  {/* ── FINANCIAL SUMMARY box (mirror right column) ── */}
+                  {/* totals box (right) */}
                   <div
                     className="rounded-lg border"
                     style={{ borderColor: BORDER, background: 'white' }}
                   >
                     <div
-                      className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[5px] text-[9.5pt]"
+                      className="flex flex-wrap items-baseline justify-between gap-x-2 rounded-t-[7px] border-b px-[3mm] py-[1mm]"
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                      <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
                         Monthly Subtotal{' '}
                         <span lang="ar" dir="rtl" className="text-[7.5pt]">
                           المجموع الشهري
                         </span>
                       </span>
-                      <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
                         {money(q.subtotal)}
                       </span>
                     </div>
-                    <p className="px-2.5 text-right text-[7.5pt]" style={{ color: INK_SOFT }}>
+                    <p className="px-[3mm] py-[0.2mm] text-right text-[7pt] leading-[3.2mm]" style={{ color: INK_SOFT }}>
                       excl. VAT · {currency}
                     </p>
                     {q.discount > 0 ? (
                       <>
                         <div
-                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[3.5px] text-[9.5pt]"
+                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1.5mm]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                          <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
                             Discount <span lang="ar" dir="rtl" className="text-[7.5pt]">الخصم</span>
                           </span>
-                          <span className="text-[9.5pt] font-semibold tabular-nums text-rose-700">
+                          <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.4mm] text-rose-700">
                             -{money(q.discount)}
                           </span>
                         </div>
                         <div
-                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[3.5px] text-[9.5pt]"
+                          className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1.5mm]"
                           style={{ borderColor: BORDER, background: 'white' }}
                         >
-                          <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                          <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
                             Net Amount <span lang="ar" dir="rtl" className="text-[7.5pt]">الصافي</span>
                           </span>
-                          <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                          <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
                             {money(netTotal)}
                           </span>
                         </div>
                       </>
                     ) : null}
                     <div
-                      className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-2.5 py-[5px] text-[9.5pt]"
+                      className="flex flex-wrap items-baseline justify-between gap-x-2 border-b px-[3mm] py-[1mm]"
                       style={{ borderColor: BORDER, background: LIGHT_BG }}
                     >
-                      <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                      <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
                         VAT ({vatPercent}%){' '}
                         <span lang="ar" dir="rtl" className="text-[7.5pt]">
                           ضريبة القيمة المضافة
                         </span>
                       </span>
-                      <span className="text-[9.5pt] font-semibold tabular-nums" style={{ color: NAVY }}>
+                      <span className="text-[9.5pt] font-semibold tabular-nums leading-[4.2mm]" style={{ color: NAVY }}>
                         {money(q.vatAmount)}
                       </span>
                     </div>
                     {/* TOTAL / MONTH — navy row, white label, gold amount */}
                     <div
-                      className="border-b px-2.5 py-[6px]"
+                      className="border-b px-[3mm] py-[1mm]"
                       style={{ borderColor: BORDER, background: DARK_NAVY }}
                     >
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-[0.3mm]">
-                        <span className="text-[9.5pt] font-extrabold uppercase tracking-[0.3pt] text-white">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                        <span className="text-[9.5pt] font-extrabold uppercase leading-[4.4mm] tracking-[0.3pt] text-white">
                           Total / Month{' '}
                           <span lang="ar" dir="rtl" className="normal-case tracking-normal">
                             الإجمالي شهرياً
                           </span>
                         </span>
                         <span
-                          className="text-[13pt] font-extrabold tabular-nums"
+                          className="text-[13pt] font-extrabold tabular-nums leading-[4.6mm]"
                           style={{ color: LIGHT_GOLD }}
                         >
                           {money(q.total)}
                         </span>
                       </div>
-                      <p className="text-right text-[7.5pt] font-semibold text-white">
+                      <p className="text-right text-[7.5pt] font-semibold leading-[3.2mm] text-white">
                         incl. VAT · {currency}
                       </p>
                     </div>
                     {contractMonths && contractValue != null ? (
                       <div
-                        className="flex flex-wrap items-baseline justify-between gap-x-2 px-2.5 py-[5px] text-[9.5pt]"
+                        className="flex flex-wrap items-baseline justify-between gap-x-2 px-[3mm] py-[1.5mm]"
                         style={{ background: LIGHT_BG }}
                       >
-                        <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                        <span className="text-[7.5pt] font-semibold leading-[3.8mm]" style={{ color: INK_SOFT }}>
                           Contract Value{' '}
                           <span lang="ar" dir="rtl" className="text-[7.5pt]">
                             قيمة العقد
                           </span>
                         </span>
-                        <span className="text-[9.5pt] font-extrabold tabular-nums" style={{ color: NAVY }}>
+                        <span className="text-[9.5pt] font-extrabold tabular-nums leading-[4.4mm]" style={{ color: NAVY }}>
                           {money(contractValue)}
                         </span>
                       </div>
                     ) : null}
                     {contractMonths && contractValue != null ? (
-                      <p className="px-2.5 pb-[3px] text-right text-[7.5pt]" style={{ color: INK_SOFT }}>
+                      <p className="px-[3mm] pb-[1.5mm] text-right text-[7.5pt] leading-[3.4mm]" style={{ color: INK_SOFT }}>
                         {contractMonths} months · incl. VAT · {currency}
                       </p>
                     ) : null}
                   </div>
                 </section>
               ) : null}
-
-              {/* amount in words — slim bilingual line under the split */}
-              {plan.blocks.includes('scopeSummary') ? (
-                <p className="mt-[1.5mm] text-[8pt] leading-snug" style={{ color: INK_SOFT }}>
-                  <span className="text-[8pt] font-bold uppercase tracking-[0.3pt]" style={{ color: DARK_GOLD }}>
-                    Amount in Words <span lang="ar" dir="rtl" className="normal-case">المبلغ كتابةً</span>:
-                  </span>{' '}
-                  <span className="text-[8pt] font-semibold" style={{ color: INK }}>
-                    {words.en}
-                  </span>{' '}
-                  <span className="mx-1" style={{ color: MUTED }}>|</span>{' '}
-                  <span lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: INK }}>
-                    {words.ar}
-                  </span>
-                </p>
+              {/* TERMS & CONDITIONS — full width, 2 columns, 7.5pt, bold
+                  item titles. Replaces the old Scope & Terms card. */}
+              {plan.blocks.includes('terms') ? (
+                <section
+                  className="mt-[2mm] rounded-lg border"
+                  style={{ borderColor: BORDER, background: 'white' }}
+                >
+                  <div
+                    className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-[3mm] py-[3.5px]"
+                    style={{ borderColor: BORDER, background: CREAM }}
+                  >
+                    <p
+                      className="text-[8.5pt] font-extrabold uppercase tracking-[0.3pt]"
+                      style={{ color: DARK_GOLD }}
+                    >
+                      Terms &amp; Conditions
+                    </p>
+                    <GoldDiamond size={5} />
+                    <p
+                      lang="ar"
+                      dir="rtl"
+                      className="text-[8.5pt] font-bold leading-none"
+                      style={{ color: DARK_GOLD }}
+                    >
+                      الشروط والأحكام
+                    </p>
+                  </div>
+                  <div className="px-[3mm] py-[1.2mm]">
+                    {terms.length === 0 ? (
+                      <p className="py-[1mm] text-center text-[7.5pt]" style={{ color: INK_SOFT }}>
+                        As mutually agreed between the parties.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-x-[6mm]">
+                        {[terms.slice(0, Math.ceil(terms.length / 2)), terms.slice(Math.ceil(terms.length / 2))].map(
+                          (col, ci) => (
+                            <ol key={ci} className="space-y-[0.4mm]">
+                              {col.map((t, ti) => {
+                                const n = ci === 0 ? ti + 1 : Math.ceil(terms.length / 2) + ti + 1
+                                return (
+                                  <li
+                                    key={`${n}-${t.text.slice(0, 12)}`}
+                                    className="flex gap-[1.5mm] text-[7.5pt] leading-[3.2mm] text-[#1D2433]"
+                                  >
+                                    <span className="shrink-0 font-bold" style={{ color: DARK_GOLD }}>
+                                      {n}.
+                                    </span>
+                                    <span className="break-words">
+                                      {t.title ? (
+                                        <>
+                                          <b>{t.title}: </b>
+                                          {t.text}
+                                        </>
+                                      ) : (
+                                        t.text
+                                      )}
+                                    </span>
+                                  </li>
+                                )
+                              })}
+                            </ol>
+                          )
+                        )}
+                      </div>
+                    )}
+                    {q.notes ? (
+                      <p
+                        className="mt-[1.2mm] whitespace-pre-line border-t pt-[1.2mm] text-[7.5pt] italic leading-[3.4mm]"
+                        style={{ borderColor: BORDER, color: INK_SOFT }}
+                      >
+                        {q.notes}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
               ) : null}
 
-              {/* SIGNATURES — APPROVED BY | ACCEPTED BY boxes with dashed gold
-                  stamp circles. ALWAYS pinned to the very bottom of the page
-                  (mt-auto): any leftover room lands between the content and
-                  the boxes, so both boxes sit at the foot of the letter on
-                  every page — matching the asset-placer preview exactly.
-                  Titles are kept to ONE line (short company label). */}
+              {/* SIGNATURES — APPROVED BY | ACCEPTED BY, pinned to the foot
+                  of the page; the note line follows with ≥3mm clear above
+                  and below. Name + designation come from Settings ›
+                  Signatories — empty line when none is set. */}
               {plan.blocks.includes('signatures') ? (
                 <div className="mt-auto" style={{ paddingTop: '2mm' }}>
                   <section className="grid grid-cols-2 gap-[5mm]">
@@ -1617,7 +1503,7 @@ export function QuotationDocument({
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-[3mm] py-[2px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
@@ -1636,17 +1522,11 @@ export function QuotationDocument({
                           اعتماد الشركة
                         </p>
                       </div>
-                      <div className="flex items-end justify-between gap-2 px-2.5 py-[5px]">
-                        <div className="min-w-0 flex-1 space-y-[1.1mm]">
+                      <div className="flex items-end justify-between gap-[3mm] px-[3mm] py-[1.5mm]">
+                        <div className="min-w-0 flex-1 space-y-[0.8mm]">
                           {/* Signature line — uploaded signature sits EXACTLY on
                               it (bottom-anchored, just above the border). */}
-                          <div
-                            className="relative border-b border-neutral-500"
-                            style={{
-                            height:
-                              plan.roomyTier === 2 ? '13mm' : plan.roomyTier === 1 ? '9mm' : '6mm',
-                          }}
-                          >
+                          <div className="relative border-b border-neutral-500" style={{ height: '4mm' }}>
                             {signatureAsset ? (
                               <img
                                 src={signatureAsset.dataUrl}
@@ -1655,49 +1535,38 @@ export function QuotationDocument({
                               />
                             ) : null}
                           </div>
-                          <p className="break-words text-[9pt] text-[#1D2433]">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Name: </span>
-                            {settings.authorizedSignatory || q.createdByName || preparedBy || '_____________________'}
-                            <span className="text-[7.5pt]" style={{ color: MUTED }}>
-                              {' '}· {settings.signatoryTitle || 'Manager'}
+                          <p className="break-words text-[8.5pt] leading-[4mm] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                              Name:{' '}
                             </span>
-                          </p>
-                          <p className="break-words text-[9pt] text-[#1D2433]">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Date: </span>
-                            ____ / ____ / ________
+                            {approvedBy?.name
+                              ? `${approvedBy.name}${approvedBy.designation ? ` · ${approvedBy.designation}` : ''}`
+                              : '______________'}
+                            <span className="mx-[2mm]" />
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                              Date:{' '}
+                            </span>
+                            <span className="tabular-nums">___ / ___ / ______</span>
                           </p>
                         </div>
-                        {/* Stamp circle — uploaded stamp fills it EXACTLY
-                            (dashed frame kept; placeholder text hidden). */}
-                        <div
-                          className={`relative flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[7.5pt] font-bold uppercase leading-tight tracking-[0.3pt]`}
-                          style={{ borderColor: GOLD, color: DARK_GOLD }}
-                        >
-                          {stampAsset ? (
-                            <img
-                              src={stampAsset.dataUrl}
-                              alt="Company stamp"
-                              className="absolute inset-[1.7mm] h-[calc(100%-3.4mm)] w-[calc(100%-3.4mm)] rounded-full object-contain"
-                            />
-                          ) : (
-                            <>
-                              Company
-                              <br />
-                              Stamp
-                            </>
-                          )}
-                        </div>
+                        {/* uploaded company stamp — frameless, beside the name */}
+                        {stampAsset ? (
+                          <img
+                            src={stampAsset.dataUrl}
+                            alt="Company stamp"
+                            className="h-[13mm] w-auto max-w-[24mm] shrink-0 object-contain"
+                          />
+                        ) : null}
                       </div>
                     </div>
 
-                    {/* ACCEPTED BY — the client (stays a physical-signature
-                        placeholder; the client signs on paper) */}
+                    {/* ACCEPTED BY — the client (physical signature on paper) */}
                     <div
                       className="rounded-lg border"
                       style={{ borderColor: BORDER, background: 'white' }}
                     >
                       <div
-                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-2.5 py-[3.5px]"
+                        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-[0.3mm] rounded-t-[7px] border-b px-[3mm] py-[2px]"
                         style={{ borderColor: BORDER, background: CREAM }}
                       >
                         <p
@@ -1716,63 +1585,31 @@ export function QuotationDocument({
                           موافقة العميل
                         </p>
                       </div>
-                      <div className="flex items-end justify-between gap-2 px-2.5 py-[5px]">
-                        <div className="min-w-0 flex-1 space-y-[1.1mm]">
-                          <div
-                            className="border-b border-neutral-500"
-                            style={{
-                            height:
-                              plan.roomyTier === 2 ? '13mm' : plan.roomyTier === 1 ? '9mm' : '6mm',
-                          }}
-                          />
-                          <p className="break-words text-[9pt] text-[#1D2433]">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Name: </span>
-                            _____________________
+                      <div className="flex items-end justify-between gap-[3mm] px-[3mm] py-[1.5mm]">
+                        <div className="min-w-0 flex-1 space-y-[0.8mm]">
+                          <div className="border-b border-neutral-500" style={{ height: '4mm' }} />
+                          <p className="break-words text-[8.5pt] leading-[4mm] text-[#1D2433]">
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                              Name:{' '}
+                            </span>
+                            ______________
+                            <span className="mx-[2mm]" />
+                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>
+                              Date:{' '}
+                            </span>
+                            <span className="tabular-nums">___ / ___ / ______</span>
                           </p>
-                          <p className="break-words text-[9pt] text-[#1D2433]">
-                            <span className="text-[7.5pt] font-semibold" style={{ color: INK_SOFT }}>Date: </span>
-                            ____ / ____ / ________
-                          </p>
-                        </div>
-                        <div
-                          className={`flex ${plan.roomyTier === 2 ? 'h-[24mm] w-[24mm]' : plan.roomyTier === 1 ? 'h-[19mm] w-[19mm]' : 'h-[15mm] w-[15mm]'} shrink-0 items-center justify-center rounded-full border-[0.45mm] border-dashed text-center text-[7.5pt] font-bold uppercase leading-tight tracking-[0.3pt]`}
-                          style={{ borderColor: GOLD, color: DARK_GOLD }}
-                        >
-                          Client
-                          <br />
-                          Stamp
                         </div>
                       </div>
                     </div>
                   </section>
 
-                  <p className="mt-[1.2mm] text-center text-[8pt]" style={{ color: INK_SOFT }}>
-                    This is a computer-generated quotation from {companyName} ·{' '}
-                    <span lang="ar" dir="rtl">
-                      عرض سعر مُنشأ آلياً من {settings.companyNameAr || companyName}
-                    </span>
-                  </p>
+                  {noteLine(pageIdx, plan)}
                 </div>
-              ) : null}
-            </div>
-
-            {/* ── page footer strip — sits above the reserved bottom band ── */}
-            <div
-              className="pointer-events-none absolute inset-x-[14mm] flex items-center justify-between gap-2 border-t pt-[1.5mm] text-[7.5pt]"
-              style={{ bottom: `${geo.bottomMm + 1}mm`, borderColor: BORDER, color: INK_SOFT }}
-            >
-              <span className="min-w-0 break-words">
-                {companyName} · {q.quoteNumber}
-                {q.referenceNo ? ` · Ref ${q.referenceNo}` : ''}
-              </span>
-              <span className="shrink-0 tabular-nums">
-                Page {pageIdx + 1} of {plans.length}{' '}
-                <span className="mx-0.5" style={{ color: MUTED }}>|</span>{' '}
-                <span lang="ar" dir="rtl">
-                  صفحة {pageIdx + 1} من {plans.length}
-                </span>
-              </span>
-              <span className="shrink-0 tabular-nums">Printed {fmtDate(printedAt.toISOString())}</span>
+              ) : (
+                /* continuation pages — the note line alone at the foot */
+                noteLine(pageIdx, plan)
+              )}
             </div>
           </div>
         )
@@ -1780,3 +1617,4 @@ export function QuotationDocument({
     </div>
   )
 }
+

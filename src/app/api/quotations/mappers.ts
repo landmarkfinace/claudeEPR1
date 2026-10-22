@@ -167,8 +167,18 @@ export const itemSchema = z.object({
   subText: z.string().max(300, 'Sub-text is too long').nullable().optional(),
   ratePerHour: z.coerce.number().min(0).max(100_000, 'Rate per hour is too large').nullable().optional(),
   hoursPerMonth: z.coerce.number().min(0).max(1_000, 'Hours per month is too large').nullable().optional(),
-  hoursPerDay: z.coerce.number().min(0).max(24, 'Hours per day is too large').nullable().optional(),
-  daysPerMonth: z.coerce.number().min(0).max(31, 'Days per month is too large').nullable().optional(),
+  hoursPerDay: z.coerce
+    .number()
+    .min(1, 'Hours per day must be between 1 and 24')
+    .max(24, 'Hours per day must be between 1 and 24')
+    .nullable()
+    .optional(),
+  daysPerMonth: z.coerce
+    .number()
+    .min(1, 'Days per month must be between 1 and 31')
+    .max(31, 'Days per month must be between 1 and 31')
+    .nullable()
+    .optional(),
 })
 
 export const assetSchema = z.object({
