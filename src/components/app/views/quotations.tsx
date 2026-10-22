@@ -246,6 +246,162 @@ function parseNum(v: string): number | null {
   return isFinite(n) ? n : null
 }
 
+// ---------------------------------------------------------------------------
+// Saved-items picker for the item trade box. Items added once (on any
+// quotation) are remembered server-side and offered here: focus or type to
+// see them, click one to reuse it (its usual detail line comes along); an
+// item not on the list is typed in freely — it joins the list once the
+// quotation is saved.
+// ---------------------------------------------------------------------------
+
+type ItemSuggestion = {
+  description: string
+  subText: string | null
+  count: number
+  lastUsedAt: string
+}
+
+const SUGGESTION_LIMIT = 8
+
+function TradeSuggestInput({
+  value,
+  onChange,
+  onPick,
+  suggestions,
+  placeholder,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (v: string) => void
+  /** Fills the line from a saved item (description + its usual detail line) */
+  onPick: (s: ItemSuggestion) => void
+  suggestions: ItemSuggestion[]
+  placeholder: string
+  ariaLabel: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Nothing saved yet → plain input (nothing to suggest, free typing only)
+  const hasList = suggestions.length > 0
+
+  // Close when clicking anywhere outside this field
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  // Delayed close on blur — late enough that clicking an option still lands
+  useEffect(() => () => {
+    if (blurTimer.current) clearTimeout(blurTimer.current)
+  }, [])
+
+  const q = value.trim().toLowerCase()
+  const matches = useMemo(() => {
+    const list = q
+      ? suggestions.filter((s) => s.description.toLowerCase().includes(q))
+      : suggestions
+    return list.slice(0, SUGGESTION_LIMIT)
+  }, [suggestions, q])
+
+  // Clamp the highlight into range as the filter narrows (no effect needed)
+  const activeIdx = matches.length === 0 ? 0 : Math.min(active, matches.length - 1)
+
+  function pick(s: ItemSuggestion) {
+    onPick(s)
+    setOpen(false)
+  }
+
+  function show() {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current)
+      blurTimer.current = null
+    }
+    setOpen(true)
+  }
+
+  function hideSoon() {
+    if (blurTimer.current) clearTimeout(blurTimer.current)
+    blurTimer.current = setTimeout(() => setOpen(false), 150)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative min-w-0 flex-1">
+      <Input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value)
+          if (hasList) show()
+        }}
+        onFocus={() => hasList && show()}
+        onBlur={hideSoon}
+        onKeyDown={(e) => {
+          if (!open || !hasList) return
+          if (e.key === 'ArrowDown' && matches.length > 0) {
+            e.preventDefault()
+            setActive((activeIdx + 1) % matches.length)
+          } else if (e.key === 'ArrowUp' && matches.length > 0) {
+            e.preventDefault()
+            setActive((activeIdx - 1 + matches.length) % matches.length)
+          } else if (e.key === 'Enter' && matches.length > 0) {
+            e.preventDefault()
+            pick(matches[activeIdx])
+          }
+        }}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
+        className="min-w-0"
+      />
+      {open && hasList ? (
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+          {matches.length === 0 ? (
+            <p className="px-3 py-2.5 text-xs text-muted-foreground">
+              No saved item matches — keep typing; it will be added as new.
+            </p>
+          ) : (
+            <ul role="listbox" className="max-h-[220px] overflow-y-auto p-1 text-sm">
+              {matches.map((s, idx) => (
+                <li key={s.description.toLowerCase()}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={idx === activeIdx}
+                    onMouseEnter={() => setActive(idx)}
+                    onClick={() => pick(s)}
+                    className={cn(
+                      'flex w-full flex-col gap-0.5 rounded-sm px-2.5 py-2 text-left',
+                      idx === active && 'bg-accent'
+                    )}
+                  >
+                    <span className="flex w-full items-center gap-2">
+                      <span className="truncate font-medium">{s.description}</span>
+                      <span className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+                        {s.count}×
+                      </span>
+                    </span>
+                    {s.subText ? (
+                      <span className="truncate text-xs text-muted-foreground">{s.subText}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function QuotationsView() {
   const { user, settings } = useAppStore()
   const currency = settings.currency || 'SAR'
@@ -281,6 +437,8 @@ export function QuotationsView() {
   const [form, setForm] = useState<QuotationForm>(() => emptyForm(defaultVatPercent))
   const [clients, setClients] = useState<ClientRow[]>([])
   const clientsLoaded = useRef(false)
+  // ---- saved items (every item ever used on a quotation) for the picker ----
+  const [itemSuggestions, setItemSuggestions] = useState<ItemSuggestion[]>([])
 
   // ---- default T&C (auto-fills new quotations) ----
   const [defaultTerms, setDefaultTerms] = useState<string | null>(null)
@@ -387,6 +545,19 @@ export function QuotationsView() {
     }
   }, [])
 
+  /**
+   * Saved items for the picker — refreshed on every dialog open so an item
+   * added on the quotation just saved is offered on the very next one.
+   */
+  const loadItemSuggestions = useCallback(async () => {
+    try {
+      const res = await api.get<{ data: ItemSuggestion[] }>('/api/quotations/item-suggestions')
+      setItemSuggestions(res.data)
+    } catch {
+      // non-critical — the picker stays empty, free typing still works
+    }
+  }, [])
+
   /** Default T&C — cached after the first read (auto-fills new quotations). */
   const getDefaultTerms = useCallback(async (): Promise<string | null> => {
     if (defaultTermsLoaded.current) return defaultTermsRef.current
@@ -449,6 +620,7 @@ export function QuotationsView() {
     setForm(f)
     setDialogOpen(true)
     void loadClients()
+    void loadItemSuggestions()
   }
 
   // Deep-open the create dialog when arriving via the command palette
@@ -499,6 +671,7 @@ export function QuotationsView() {
       setTermsItems(parseTerms(full.terms))
       setDialogOpen(true)
       void loadClients()
+      void loadItemSuggestions()
       void getDefaultTerms()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open the quotation')
@@ -1502,12 +1675,20 @@ export function QuotationsView() {
                       {i + 1}
                     </span>
                     <div className="min-w-0 flex-1 space-y-2">
-                      <Input
+                      <TradeSuggestInput
                         value={it.description}
-                        onChange={(e) => setItemField(it.key, 'description', e.target.value)}
-                        placeholder="Trade — e.g. Steel Fixter, Electrician, Helper"
-                        className="min-w-0"
-                        aria-label={`Item ${i + 1} trade`}
+                        onChange={(v) => setItemField(it.key, 'description', v)}
+                        onPick={(s) => {
+                          // Reuse a saved item: fill the trade and, when the
+                          // detail line is still blank, its usual companion
+                          setItemField(it.key, 'description', s.description)
+                          if (s.subText && !it.subText.trim()) {
+                            setItemField(it.key, 'subText', s.subText)
+                          }
+                        }}
+                        suggestions={itemSuggestions}
+                        placeholder="Trade — pick a saved item or type new (e.g. Steel Fixter)"
+                        ariaLabel={`Item ${i + 1} trade`}
                       />
                       <Input
                         value={it.subText}

@@ -2299,3 +2299,17 @@ Work Log:
 Stage Summary:
 - In Client Salary Summary, "Add Client" now auto-shows all Client Management companies in a searchable picker — pick an existing one (no re-typing, no duplicate companies) or create a new one; either way the Add Worker dialog opens right after locked to that client.
 - Committed as 89d44b4 (only views/client-salary-summary.tsx; the unrelated pre-existing prisma/schema.prisma modification was left unstaged).
+
+---
+Task ID: QTN-SAVED-ITEMS-PICKER
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "Quotations e Items gulu ekbar add korle save thakbe, pore zkn i quotation banabo box e sei category show korbe, na thakle add kora zabe" — items added once must persist; when building a later quotation the item box must auto-show those categories; if a category is not on the list, it can be added as new.
+
+Work Log:
+- Approach: NO schema change and no separate saved-items table — QuotationItem rows already persist every item ever used. New GET /api/quotations/item-suggestions aggregates them: one entry per distinct description (case-insensitive), subText = the detail line most often paired with that category, count, lastUsedAt from the parent quotation's issueDate; sorted count desc then name, capped 200 (permission quotations.view).
+- views/quotations.tsx: new TradeSuggestInput combobox replaces the plain trade Input — focus shows the saved list, typing filters (contains, 8 shown), click/Enter reuses an item (fills the trade AND, when the detail line is blank, its usual companion subText), ArrowUp/Down navigate, outside-click and delayed blur close it; unknown text shows "No saved item matches — keep typing; it will be added as new" (free add stays fully possible). Highlight clamped at render time (no reset effect). Suggestions fetched on every dialog open (openAdd/openEdit) so an item from the just-saved quotation is offered on the very next one.
+- Verification: tsc clean; eslint = the same 2 pre-existing repo-wide convention errors as at HEAD (the module's list + view-intent effects); live endpoint 200 with the 6 real saved categories (CARPENTER 2×, HELPER 2×, STEEL FIXTER→ARAMCO, SACAFFOLDER→TUV, MASON, PIPE FITTER); browser QA (agent-browser): dropdown on focus, pick STEEL FIXTER → trade + ARAMCO auto-filled, "fix" filters to STEEL FIXTER, "Plumber" → no-match hint, saved QTN-2026-0004 with the new item, reopened a new quotation → "Plumber 1×" now offered, then the QA row was deleted (list back to the 6 originals). Screenshots: qa/12 + qa/13 (git-ignored, like all qa/).
+
+Stage Summary:
+- Quotation items are now remembered: every trade ever used is auto-offered in the item box of every new quotation (most-used first, with its usual detail line); new trades are typed in freely and join the list once saved.
+- Committed as 0e24a45 (new route + quotations.tsx only; prisma/schema.prisma left unstaged as before).
