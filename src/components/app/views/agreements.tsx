@@ -68,6 +68,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
@@ -124,22 +125,22 @@ function AgreementStatusBadge({ status, className }: { status: string; className
   > = {
     draft: {
       label: 'Draft',
-      cls: 'border-neutral-200 bg-muted text-muted-foreground dark:border-neutral-700 dark:bg-muted/40',
+      cls: 'border-border bg-muted/60 text-muted-foreground',
       icon: Pencil,
     },
     final: {
       label: 'Final',
-      cls: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400',
+      cls: 'border-info/25 bg-info-soft text-info-soft-foreground',
       icon: Stamp,
     },
     signed: {
       label: 'Signed',
-      cls: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400',
+      cls: 'border-success/25 bg-success-soft text-success-soft-foreground',
       icon: PenLine,
     },
     expired: {
       label: 'Expired',
-      cls: 'border-neutral-300 bg-neutral-100 text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400',
+      cls: 'border-danger/25 bg-danger-soft text-danger-soft-foreground',
       icon: CalendarX,
     },
   }
@@ -208,6 +209,7 @@ export function AgreementsView() {
   })
   const [meta, setMeta] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 })
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<AgreementRow | null>(null)
@@ -221,6 +223,7 @@ export function AgreementsView() {
   }, [])
 
   const loadList = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<AgreementRow>>(
@@ -244,6 +247,7 @@ export function AgreementsView() {
       setMeta({ page: res.page, pageSize: res.pageSize, total: res.total, totalPages: res.totalPages })
       if (res.data.length === 0 && res.page > 1 && res.total > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load agreements')
     } finally {
       setLoading(false)
@@ -483,7 +487,14 @@ export function AgreementsView() {
         </FilterBar>
 
         <div className="mt-4">
-          {loading ? (
+          {loadError && !loading ? (
+            <ErrorState
+              title="Couldn't load agreements"
+              description={loadError}
+              onRetry={() => void loadList()}
+              className="m-4"
+            />
+          ) : loading ? (
             <TableSkeleton rows={6} />
           ) : rows.length === 0 ? (
             <EmptyState
@@ -506,7 +517,7 @@ export function AgreementsView() {
           ) : (
             <>
               {/* Desktop table */}
-              <div className="nice-scrollbar hidden overflow-x-auto md:block">
+              <div className="table-scroll nice-scrollbar hidden overflow-x-auto md:block">
                 <Table className="min-w-[880px]">
                   <TableHeader>
                     <TableRow>

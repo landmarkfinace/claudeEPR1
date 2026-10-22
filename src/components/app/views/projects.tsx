@@ -63,8 +63,9 @@ import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
-import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
+import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { CategoryChip, StatusBadge } from '@/components/app/shared/status-badge'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent, useViewRecordIntent } from '@/hooks/use-view-intent'
@@ -517,6 +518,7 @@ export function ProjectsView() {
   const [pageSize, setPageSize] = useState(10)
   const [data, setData] = useState<Paginated<ProjectRow> | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   // Form dialog state
@@ -543,6 +545,7 @@ export function ProjectsView() {
   }, [])
 
   const load = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<ProjectRow>>(
@@ -560,6 +563,7 @@ export function ProjectsView() {
       }
       setData(res)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Something went wrong')
     } finally {
       setLoading(false)
@@ -814,7 +818,14 @@ export function ProjectsView() {
         </div>
 
         {/* Table */}
-        {loading && !data ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load projects"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading && !data ? (
           <TableSkeleton rows={6} cols={7} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -840,7 +851,7 @@ export function ProjectsView() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="table-scroll overflow-x-auto">
           <Table className="min-w-[1000px]">
             <TableHeader>
               <TableRow>
@@ -1239,6 +1250,9 @@ export function ProjectsView() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Thumb-zone create action on mobile */}
+      {canCreate ? <MobileFab label="New Project" icon={Plus} onClick={openCreate} /> : null}
     </div>
   )
 }

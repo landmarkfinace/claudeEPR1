@@ -6,8 +6,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Inter for Latin UI + IBM Plex Sans Arabic per-glyph fallback for Arabic text */
+  --font-sans: var(--font-inter), var(--font-plex-arabic), ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono);
+  --font-arabic-ui: "IBM Plex Sans Arabic", "Cairo", "Tajawal", "Segoe UI", Tahoma, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -46,39 +49,73 @@
   --color-gold-foreground: var(--gold-foreground);
   --color-gold-deep: var(--gold-deep);
   --color-gold-soft: var(--gold-soft);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* ---- Status colours (never gold for success/error) ---- */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-success-soft-foreground: var(--success-soft-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-soft-foreground: var(--warning-soft-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-foreground: var(--danger-soft-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-info-soft-foreground: var(--info-soft-foreground);
+  /* ---- Radius scale: 8 px controls · 12 px cards · 16 px hero panels ---- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
 }
 
 :root {
-  --radius: 0.625rem;
-  /* ---- Landmark Inter Gulf brand: cream paper + deep navy + metallic gold ---- */
-  --background: oklch(0.966 0.005 106.5); /* #F4F4F0 cream */
-  --foreground: oklch(0.252 0.058 262); /* deep navy ink */
+  --radius: 0.5rem;
+  /* ---- Landmark Inter Gulf brand: slate neutrals + deep navy + metallic gold ---- */
+  --background: oklch(0.984 0.003 247.86); /* slate-50 #F8FAFC */
+  --foreground: oklch(0.208 0.042 265.76); /* slate-900 #0F172A */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.252 0.058 262);
+  --card-foreground: oklch(0.208 0.042 265.76);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.252 0.058 262);
+  --popover-foreground: oklch(0.208 0.042 265.76);
   --primary: oklch(0.244 0.061 261.8); /* #0F1F3D brand navy */
-  --primary-foreground: oklch(0.97 0.008 95); /* warm white */
-  --secondary: oklch(0.938 0.012 95); /* warm grey */
-  --secondary-foreground: oklch(0.3 0.06 262);
-  --muted: oklch(0.94 0.008 95);
-  /* navy-grey #5A6478 — comfortably WCAG AA on white/cream */
-  --muted-foreground: oklch(0.502 0.034 264.2);
-  --accent: oklch(0.947 0.029 89.6); /* soft gold wash */
+  --primary-foreground: oklch(0.984 0.003 247.86);
+  --secondary: oklch(0.968 0.007 247.9); /* slate-100 */
+  --secondary-foreground: oklch(0.373 0.044 257.3); /* slate-700 */
+  --muted: oklch(0.968 0.007 247.9); /* slate-100 */
+  --muted-foreground: oklch(0.554 0.046 257.42); /* slate-500 #64748B — WCAG AA */
+  --accent: oklch(0.947 0.029 89.6); /* soft gold wash for hovers */
   --accent-foreground: oklch(0.42 0.08 88);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.906 0.014 93); /* warm #E3E0D6 */
-  --input: oklch(0.906 0.014 93);
+  --destructive: oklch(0.585 0.24 27.3); /* rose-600 */
+  --border: oklch(0.929 0.013 255.51); /* slate-200 #E2E8F0 */
+  --input: oklch(0.929 0.013 255.51);
   --ring: oklch(0.682 0.124 88.8); /* deep gold #B8942C */
+  /* Status — light mode (emerald-600 / amber-500 / rose-600 / sky-600) */
+  --success: oklch(0.596 0.145 163.2); /* emerald-600 #059669 */
+  --success-foreground: oklch(0.985 0 0);
+  --success-soft: oklch(0.97 0.05 152.3); /* emerald-50 */
+  --success-soft-foreground: oklch(0.378 0.077 168.9); /* emerald-800 */
+  --warning: oklch(0.769 0.188 70.08); /* amber-500 #F59E0B */
+  --warning-foreground: oklch(0.985 0 0);
+  --warning-soft: oklch(0.987 0.022 95.28); /* amber-50 */
+  --warning-soft-foreground: oklch(0.394 0.067 59); /* amber-800 */
+  --danger: oklch(0.585 0.24 27.3); /* rose-600 #E11D48 */
+  --danger-foreground: oklch(0.985 0 0);
+  --danger-soft: oklch(0.971 0.021 17.38); /* rose-50 */
+  --danger-soft-foreground: oklch(0.435 0.181 16.4); /* rose-800 */
+  --info: oklch(0.588 0.158 241.97); /* sky-600 #0284C7 */
+  --info-foreground: oklch(0.985 0 0);
+  --info-soft: oklch(0.971 0.013 236.62); /* sky-50 */
+  --info-soft-foreground: oklch(0.392 0.075 240.5); /* sky-800 */
   --chart-1: oklch(0.244 0.061 261.8); /* navy */
   --chart-2: oklch(0.767 0.139 91.1); /* gold #D4AF37 */
   --chart-3: oklch(0.55 0.12 160); /* sage */
   --chart-4: oklch(0.62 0.15 40); /* terracotta */
-  --chart-5: oklch(0.55 0.04 260); /* slate navy */
+  --chart-5: oklch(0.554 0.046 257.42); /* slate-500 */
   /* Sidebar is BRAND NAVY in light mode (logo identity) */
   --sidebar: oklch(0.244 0.061 261.8);
   --sidebar-foreground: oklch(0.87 0.02 95);
@@ -102,24 +139,41 @@
 
 .dark {
   /* ---- Dark mode: deep navy night + GOLD primary (signature) ---- */
-  --background: oklch(0.187 0.043 266); /* #0A1226 */
-  --foreground: oklch(0.925 0.014 93); /* warm white #E9E6DC */
-  --card: oklch(0.221 0.046 264.5); /* #101A30 */
-  --card-foreground: oklch(0.925 0.014 93);
-  --popover: oklch(0.221 0.046 264.5);
-  --popover-foreground: oklch(0.925 0.014 93);
+  --background: oklch(0.169 0.024 258); /* slate-950-tinted navy night */
+  --foreground: oklch(0.929 0.013 255.5); /* slate-100 */
+  --card: oklch(0.209 0.038 260); /* #111C33 */
+  --card-foreground: oklch(0.929 0.013 255.5);
+  --popover: oklch(0.209 0.038 260);
+  --popover-foreground: oklch(0.929 0.013 255.5);
   --primary: oklch(0.767 0.139 91.1); /* gold */
   --primary-foreground: oklch(0.16 0.04 264);
-  --secondary: oklch(0.27 0.05 263);
-  --secondary-foreground: oklch(0.925 0.014 93);
-  --muted: oklch(0.26 0.045 264);
-  --muted-foreground: oklch(0.7 0.028 92);
+  --secondary: oklch(0.265 0.035 259);
+  --secondary-foreground: oklch(0.929 0.013 255.5);
+  --muted: oklch(0.255 0.032 259);
+  --muted-foreground: oklch(0.695 0.023 256.5); /* slate-400, AA on dark */
   --accent: oklch(0.3 0.055 263);
-  --accent-foreground: oklch(0.925 0.014 93);
-  --destructive: oklch(0.66 0.19 25);
+  --accent-foreground: oklch(0.929 0.013 255.5);
+  --destructive: oklch(0.684 0.208 22.6); /* rose-500 for dark */
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
   --ring: oklch(0.767 0.139 91.1); /* gold */
+  /* Status — dark mode (lighter 500-shades keep AA on navy-dark surfaces) */
+  --success: oklch(0.696 0.17 162.48); /* emerald-500 #10B981 */
+  --success-foreground: oklch(0.147 0.04 168);
+  --success-soft: oklch(0.268 0.082 171.3); /* emerald-950-tint */
+  --success-soft-foreground: oklch(0.828 0.089 164.1); /* emerald-300 */
+  --warning: oklch(0.795 0.184 86.05); /* amber-400 for dark text AA */
+  --warning-foreground: oklch(0.22 0.05 75);
+  --warning-soft: oklch(0.28 0.066 75);
+  --warning-soft-foreground: oklch(0.847 0.133 81.7); /* amber-300 */
+  --danger: oklch(0.705 0.196 21); /* rose-400 */
+  --danger-foreground: oklch(0.22 0.06 20);
+  --danger-soft: oklch(0.27 0.09 20);
+  --danger-soft-foreground: oklch(0.845 0.13 20); /* rose-300 */
+  --info: oklch(0.685 0.155 237.32); /* sky-500 #0EA5E9 */
+  --info-foreground: oklch(0.18 0.05 240);
+  --info-soft: oklch(0.27 0.06 240);
+  --info-soft-foreground: oklch(0.828 0.111 230.32); /* sky-300 */
   --chart-1: oklch(0.767 0.139 91.1); /* gold */
   --chart-2: oklch(0.65 0.09 255);
   --chart-3: oklch(0.68 0.12 160);
@@ -151,6 +205,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Prevent iOS tap-flash + smooth AA text */
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+  /* Gold focus ring for keyboard users — visible on every interactive element */
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--gold) 85%, transparent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  /* Arabic runs anywhere in the UI pick up Plex Arabic per-glyph from the
+     --font-sans chain; explicit .font-arabic stays on Cairo for print docs. */
+  [lang="ar"], [dir="rtl"] {
+    text-align: right;
   }
 }
 
@@ -334,6 +402,31 @@
   font-weight: 600;
   color: var(--muted-foreground);
   white-space: nowrap;
+}
+
+/* Sticky-header scroll container for the main list tables.
+   Add `table-scroll` next to the table's overflow wrapper: the wrapper gets a
+   max height (inner scroll) and the thead pins. Print restores full flow. */
+.table-scroll {
+  max-height: min(68vh, 680px);
+  overflow: auto;
+}
+.table-scroll thead [data-slot='table-head'] {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background-color: var(--card);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+@media print {
+  .table-scroll {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .table-scroll thead [data-slot='table-head'] {
+    position: static !important;
+    box-shadow: none !important;
+  }
 }
 
 /* ---------- Focus & motion polish ---------- */

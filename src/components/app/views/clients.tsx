@@ -54,6 +54,7 @@ import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { MobileFab, PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { CategoryChip, StatusBadge } from '@/components/app/shared/status-badge'
@@ -176,6 +177,7 @@ export function ClientsView() {
   const [pageSize, setPageSize] = useState(10)
   const [data, setData] = useState<Paginated<ClientRow> | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
 
   // Form dialog state
@@ -191,6 +193,7 @@ export function ClientsView() {
   const [client, setClient] = useState<Client | null>(null)
 
   const load = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<ClientRow>>(
@@ -207,6 +210,7 @@ export function ClientsView() {
       }
       setData(res)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Something went wrong')
     } finally {
       setLoading(false)
@@ -490,7 +494,14 @@ export function ClientsView() {
         </div>
 
         {/* Desktop table */}
-        {loading && !data ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load clients"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading && !data ? (
           <div className="hidden md:block">
             <TableSkeleton rows={6} cols={7} />
           </div>
@@ -518,7 +529,7 @@ export function ClientsView() {
             }
           />
         ) : (
-          <div className="hidden overflow-x-auto md:block">
+          <div className="table-scroll hidden overflow-x-auto md:block">
             <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>

@@ -231,7 +231,7 @@ export function UsersView() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="table-scroll overflow-x-auto">
             <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>

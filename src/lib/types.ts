@@ -655,6 +655,14 @@ export type DashboardData = {
       workers: number
     }[]
   } | null
+  /** This-month vs previous-month trends for KPI tiles (null sections without permission) */
+  trends?: {
+    income: { current: number; previous: number } | null
+    expense: { current: number; previous: number } | null
+    salaryPaid: { current: number; previous: number } | null
+  } | null
+  /** Signed (issued) e-invoices not yet cleared/reported by ZATCA Phase 2 (einvoices.view gated) */
+  zatcaPending?: { count: number; rejected: number } | null
 }
 
 export type DocumentAlert = {

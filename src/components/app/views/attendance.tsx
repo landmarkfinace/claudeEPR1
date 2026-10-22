@@ -34,6 +34,7 @@ import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -89,6 +90,7 @@ export function AttendanceView() {
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Filters
   const [search, setSearch] = useState('')
@@ -176,6 +178,7 @@ export function AttendanceView() {
     setForm((f) => ({ ...f, [key]: value }))
 
   const load = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<AttendanceRow>>(
@@ -194,6 +197,7 @@ export function AttendanceView() {
       setTotalPages(res.totalPages)
       if (res.page > res.totalPages && res.totalPages > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load attendance records')
     } finally {
       setLoading(false)
@@ -638,7 +642,14 @@ export function AttendanceView() {
           </FilterBar>
         </div>
 
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load attendance"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={6} cols={6} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -765,7 +776,7 @@ export function AttendanceView() {
             </ul>
 
             {/* Desktop: table */}
-            <div className="hidden md:block print:block print:overflow-visible">
+            <div className="table-scroll hidden overflow-x-auto md:block print:block print:overflow-visible">
             <Table className="min-w-[850px] print:min-w-0 print:text-xs">
               <TableHeader>
                 <TableRow>

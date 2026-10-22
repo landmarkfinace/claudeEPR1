@@ -25,16 +25,17 @@ export function StatCard({
   valuePrefix?: string
 }) {
   const tones: Record<string, string> = {
-    navy: 'bg-gradient-to-br from-[#1E3A66] to-[#0F1F3D] text-white',
-    gold: 'bg-gradient-to-br from-[#E3C55C] to-[#C9A430] text-[#2A2005]',
-    green: 'from-emerald-600 to-emerald-500 text-emerald-50',
-    red: 'from-rose-600 to-rose-500 text-rose-50',
-    amber: 'from-amber-500 to-amber-400 text-amber-50',
-    violet: 'from-violet-600 to-violet-500 text-violet-50',
-    teal: 'from-teal-600 to-teal-500 text-teal-50',
+    // Flat premium tints — cards never use gradients (hero panel only)
+    navy: 'bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary',
+    gold: 'bg-gold-soft text-gold-deep dark:bg-gold/15 dark:text-gold',
+    green: 'bg-success-soft text-success dark:bg-success-soft dark:text-success-soft-foreground',
+    red: 'bg-danger-soft text-danger dark:bg-danger-soft dark:text-danger-soft-foreground',
+    amber: 'bg-warning-soft text-warning-soft-foreground dark:bg-warning-soft dark:text-warning-soft-foreground',
+    violet: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300',
+    teal: 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300',
   }
   return (
-    <div className="group relative overflow-hidden rounded-xl border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <div className="group relative overflow-hidden rounded-xl border bg-card shadow-sm transition-all duration-150 hover:border-gold/50 hover:shadow-md">
       <div className={cn('flex items-start justify-between gap-3 p-4 sm:p-5', onMoreInfo && 'pb-11 sm:pb-11')}>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-muted-foreground" title={title}>
@@ -55,7 +56,7 @@ export function StatCard({
         </div>
         <div
           className={cn(
-            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br shadow-inner ring-1 ring-black/10 sm:h-11 sm:w-11',
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-black/5 sm:h-11 sm:w-11',
             tones[tone]
           )}
         >

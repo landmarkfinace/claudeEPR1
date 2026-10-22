@@ -76,6 +76,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { ConfirmDelete } from '../shared/confirm-delete'
 import { DataTablePagination } from '../shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '../shared/empty-state'
+import { ErrorState } from '../shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
@@ -151,27 +152,27 @@ function PoStatusBadge({ status }: { status: string }) {
     draft: {
       label: 'Draft',
       className:
-        'border-gray-200 bg-gray-100 text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400',
+        'border-border bg-muted/60 text-muted-foreground',
     },
     ordered: {
       label: 'Ordered',
       className:
-        'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300',
+        'border-info/25 bg-info-soft text-info-soft-foreground',
     },
     received: {
       label: 'Received',
       className:
-        'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
+        'border-success/25 bg-success-soft text-success-soft-foreground',
     },
     cancelled: {
       label: 'Cancelled',
       className:
-        'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300',
+        'border-danger/25 bg-danger-soft text-danger-soft-foreground',
     },
   }
   const entry = map[status] ?? {
     label: status,
-    className: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400',
+    className: 'border-border bg-muted/40 text-muted-foreground',
   }
   return (
     <Badge variant="outline" className={cn('whitespace-nowrap font-medium capitalize', entry.className)}>
@@ -275,6 +276,7 @@ export function SupplierPosView() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
 
   // ---- list filters ----
@@ -331,6 +333,7 @@ export function SupplierPosView() {
   // -----------------------------------------------------------------------
   const load = useCallback(async () => {
     const id = ++requestId.current
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<PoResponse>(
@@ -354,6 +357,7 @@ export function SupplierPosView() {
       setTotalPages(res.totalPages)
     } catch (e) {
       if (id !== requestId.current) return
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       setRows([])
       setTotals(EMPTY_TOTALS)
       setTotal(0)
@@ -1040,7 +1044,14 @@ export function SupplierPosView() {
           </FilterBar>
         </div>
 
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load purchase orders"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={6} cols={7} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -1063,7 +1074,7 @@ export function SupplierPosView() {
         ) : (
           <>
             {/* Desktop: full table */}
-            <div className="nice-scrollbar hidden overflow-x-auto md:block">
+            <div className="table-scroll nice-scrollbar hidden overflow-x-auto md:block">
               <Table className="min-w-[960px]">
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -1274,7 +1285,7 @@ export function SupplierPosView() {
               {pickedSupplierId ? (
                 <Badge
                   variant="outline"
-                  className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+                  className="border-success/25 bg-success-soft text-success-soft-foreground"
                 >
                   Saved supplier — details auto-filled
                 </Badge>

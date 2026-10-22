@@ -54,6 +54,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/shared/empty-state'
 import { SectionCard } from '@/components/app/shared/page-header'
+import { StatTile } from '@/components/app/shared/stat-tile'
 import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { api } from '@/lib/api-client'
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '@/lib/format'
@@ -571,6 +572,8 @@ function HeroPanel({
   canAccounts,
   actions,
   onOpen,
+  incomeTrend,
+  expenseTrend,
 }: {
   firstName: string
   companyName: string
@@ -582,6 +585,8 @@ function HeroPanel({
   canAccounts: boolean
   actions: QuickAction[]
   onOpen: (view: ViewKey) => void
+  incomeTrend?: { current: number; previous: number } | null
+  expenseTrend?: { current: number; previous: number } | null
 }) {
   const now = new Date()
   const dateLabel = now.toLocaleDateString('en-GB', {
@@ -661,10 +666,13 @@ function HeroPanel({
                 <HeroFigure
                   label={`Income in ${monthLabel}`}
                   value={`${currency} ${formatNumber(monthIncome)}`}
+                  trend={incomeTrend}
                 />
                 <HeroFigure
                   label={`Expense in ${monthLabel}`}
                   value={`${currency} ${formatNumber(monthExpense)}`}
+                  trend={expenseTrend}
+                  invertTrend
                 />
               </div>
             </div>
@@ -699,12 +707,18 @@ function HeroFigure({
   value,
   tone,
   onClick,
+  trend,
+  invertTrend,
 }: {
   label: string
   value: string
   tone?: 'up' | 'down'
   onClick?: () => void
+  trend?: { current: number; previous: number } | null
+  /** expense: an increase is bad — flip the trend colour */
+  invertTrend?: boolean
 }) {
+  const trendChip = trend && trend.previous > 0 ? buildTrendChip(trend, invertTrend) : null
   const content = (
     <>
       <span className="block text-xs text-[#EDE8DA]/55">{label}</span>
@@ -713,6 +727,7 @@ function HeroFigure({
         {tone === 'down' ? <TrendingDown className="h-4 w-4 text-rose-300" /> : null}
         {value}
       </span>
+      {trendChip}
     </>
   )
   if (!onClick) return <div>{content}</div>
@@ -724,6 +739,34 @@ function HeroFigure({
     >
       {content}
     </button>
+  )
+}
+
+/** Small hero trend chip: emerald when good, rose when bad. */
+function buildTrendChip(
+  trend: { current: number; previous: number },
+  invert?: boolean
+): React.ReactNode {
+  const pct = ((trend.current - trend.previous) / trend.previous) * 100
+  if (!Number.isFinite(pct)) return null
+  const rounded = Math.round(Math.abs(pct))
+  if (rounded === 0)
+    return (
+      <span className="mt-1 block text-[11px] font-medium text-[#EDE8DA]/55">No change vs last month</span>
+    )
+  const up = pct > 0
+  const good = invert ? !up : up
+  return (
+    <span
+      className={cn(
+        'mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+        good ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'
+      )}
+    >
+      {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {rounded}%
+      <span className="font-normal text-[#EDE8DA]/55">vs last month</span>
+    </span>
   )
 }
 
@@ -787,56 +830,6 @@ function AttentionStrip({ items, onOpen }: { items: AttentionItem[]; onOpen: (v:
         </button>
       ))}
     </div>
-  )
-}
-
-/* ------------------------------------------------------------------------ */
-/*  Metric tiles                                                             */
-/* ------------------------------------------------------------------------ */
-
-function MetricTile({
-  label,
-  value,
-  prefix,
-  note,
-  icon: Icon,
-  accent,
-  linkLabel,
-  onOpen,
-  children,
-}: {
-  label: string
-  value: string
-  prefix?: string
-  note?: string
-  icon: React.ComponentType<{ className?: string }>
-  accent: string
-  linkLabel: string
-  onOpen: () => void
-  children?: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group relative flex min-w-0 flex-col rounded-xl border bg-card p-4 text-left shadow-sm outline-none transition-colors hover:border-[#D4AF37]/70 focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span aria-hidden className="absolute left-0 top-4 h-8 w-[3px] rounded-r" style={{ backgroundColor: accent }} />
-      <span className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm text-muted-foreground">{label}</span>
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-      </span>
-      <span className="mt-2 truncate text-xl font-bold tabular-nums tracking-tight sm:text-2xl" title={prefix ? `${prefix} ${value}` : value}>
-        {prefix ? <span className="mr-1 text-sm font-semibold text-muted-foreground">{prefix}</span> : null}
-        {value}
-      </span>
-      {note ? <span className="mt-0.5 truncate text-xs text-muted-foreground">{note}</span> : null}
-      {children}
-      <span className="mt-3 flex items-center gap-1 text-xs font-medium text-muted-foreground group-hover:text-foreground">
-        {linkLabel}
-        <ArrowUpRight className="h-3 w-3" />
-      </span>
-    </button>
   )
 }
 
@@ -1053,32 +1046,85 @@ function TodayListsSection({
 }
 
 /* ------------------------------------------------------------------------ */
-/*  Financial chart (6 months)                                               */
+/*  Financial chart (period switcher: 6 months · this month · 3 months · year) */
 /* ------------------------------------------------------------------------ */
 
-function FinancialChart({ data, currency }: { data: DashboardData['chart']; currency: string }) {
+type ChartRangeKey = 'default' | 'month' | '3m' | 'year'
+
+const RANGE_OPTIONS: { key: ChartRangeKey; label: string }[] = [
+  { key: 'default', label: '6 months' },
+  { key: 'month', label: 'This month' },
+  { key: '3m', label: 'Last 3 months' },
+  { key: 'year', label: 'This year' },
+]
+
+function FinancialChart({
+  data,
+  currency,
+  range,
+  onRangeChange,
+  loading,
+}: {
+  data: DashboardData['chart']
+  currency: string
+  range: ChartRangeKey
+  onRangeChange: (r: ChartRangeKey) => void
+  loading?: boolean
+}) {
   const hasAny = data.some((d) => d.income !== 0 || d.expense !== 0)
   const rows = data.map((d) => ({ ...d, label: d.month.split(' ')[0] }))
+  const subtitle =
+    range === 'month'
+      ? 'Current month, by week'
+      : range === '3m'
+        ? 'Last 3 months, by month'
+        : range === 'year'
+          ? 'Last 12 months, by month'
+          : 'Last 6 months, by month'
   return (
     <SectionCard className="overflow-hidden lg:col-span-2">
       <div className="flex flex-col gap-2 border-b p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div>
           <h2 className="text-base font-semibold">Income and expense</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">Last 6 months, by month</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: INCOME_COLOR }} />
-            Income
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: EXPENSE_COLOR }} />
-            Expense
-          </span>
+        {/* Period switcher — refetches /api/dashboard?range=… */}
+        <div
+          role="tablist"
+          aria-label="Chart period"
+          className="flex shrink-0 items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
+        >
+          {RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              role="tab"
+              aria-selected={range === opt.key}
+              onClick={() => onRangeChange(opt.key)}
+              className={cn(
+                'rounded-md px-2.5 py-1 text-xs font-medium transition-colors outline-none',
+                range === opt.key
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
+      <div className="flex items-center justify-end gap-3 px-4 pt-3 text-xs text-muted-foreground sm:px-5">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: INCOME_COLOR }} />
+          Income
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: EXPENSE_COLOR }} />
+          Expense
+        </span>
+      </div>
       {hasAny ? (
-        <div className="h-[300px] w-full p-2 sm:p-4">
+        <div className={cn('h-[300px] w-full p-2 sm:p-4', loading && 'opacity-60 transition-opacity')}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={4} barCategoryGap="28%">
               <CartesianGrid stroke="#94a3b8" strokeOpacity={0.25} strokeDasharray="3 3" vertical={false} />
@@ -1109,7 +1155,7 @@ function FinancialChart({ data, currency }: { data: DashboardData['chart']; curr
       ) : (
         <EmptyState
           icon={BarChart3}
-          title="No income or expense in the last 6 months"
+          title="No income or expense in this period"
           description="Add income and expense entries in Accounts and they will be charted here."
           className="py-14"
         />
@@ -1132,15 +1178,24 @@ export function DashboardView() {
   // Pending payouts "show all" toggle (6 → full list and back)
   const [pendingLimit, setPendingLimit] = useState(6)
   const [expanding, setExpanding] = useState(false)
+  // Chart / KPI-trend period (default = historical 6-month behaviour).
+  // range lives in a ref so `load` stays stable across period switches
+  // (no double-fetch from the pendingLimit effect below).
+  const [range, setRange] = useState<ChartRangeKey>('default')
+  const rangeRef = useRef<ChartRangeKey>('default')
+  const [rangeLoading, setRangeLoading] = useState(false)
 
   const load = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, r?: ChartRangeKey) => {
+      const effRange = r ?? rangeRef.current
       if (showLoading) setLoading(true)
       setError(null)
       try {
-        const res = await api.get<DashboardData>(
-          `/api/dashboard${pendingLimit !== 6 ? `?pendingLimit=${pendingLimit}` : ''}`
-        )
+        const params = new URLSearchParams()
+        if (pendingLimit !== 6) params.set('pendingLimit', String(pendingLimit))
+        if (effRange !== 'default') params.set('range', effRange)
+        const qs = params.toString()
+        const res = await api.get<DashboardData>(`/api/dashboard${qs ? `?${qs}` : ''}`)
         setData(res)
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Something went wrong'
@@ -1167,6 +1222,20 @@ export function DashboardView() {
         .finally(() => setExpanding(false))
     }
   }, [load, pendingLimit])
+
+  // Period switch: silent refresh (the previous data dims instead of a skeleton)
+  const handleRangeChange = useCallback(
+    (r: ChartRangeKey) => {
+      if (r === rangeRef.current) return
+      rangeRef.current = r
+      setRange(r)
+      setRangeLoading(true)
+      load(false, r)
+        .catch(() => undefined)
+        .finally(() => setRangeLoading(false))
+    },
+    [load]
+  )
 
   // Quick action: mark a pending payroll as paid (syncs the linked Salary expense)
   const [markingId, setMarkingId] = useState<string | null>(null)
@@ -1214,8 +1283,11 @@ export function DashboardView() {
   const { stats } = data
   const firstName = user?.name?.trim().split(/\s+/)[0] ?? 'there'
   const canAccounts = can(user, 'accounts.view')
-  const thisMonth = data.chart[data.chart.length - 1]
-  const monthLabel = thisMonth ? thisMonth.month.split(' ')[0] : 'this month'
+  // Month figures come from the trends payload (always the CURRENT calendar
+  // month) so the hero stays correct regardless of the chart period switch.
+  const monthLabel = new Date().toLocaleDateString('en-GB', { month: 'long' })
+  const monthIncome = data.trends?.income?.current ?? 0
+  const monthExpense = data.trends?.expense?.current ?? 0
 
   // Quick actions (only the ones this user may perform)
   const actions: QuickAction[] = []
@@ -1246,6 +1318,18 @@ export function DashboardView() {
     attention.push({ key: 'q', tone: 'blue', count: data.pipeline.quotationsSent, text: 'Quotations awaiting reply', view: 'quotations' })
   if (data.todayLists && data.todayLists.listCount > 0)
     attention.push({ key: 'nl', tone: 'blue', count: data.todayLists.listCount, text: 'Name lists going out today', view: 'name-list' })
+  // Phase 2 e-invoices signed but not yet cleared/reported (or rejected)
+  if (data.zatcaPending && data.zatcaPending.count > 0)
+    attention.push({
+      key: 'zatca',
+      tone: data.zatcaPending.rejected > 0 ? 'red' : 'amber',
+      count: data.zatcaPending.count,
+      text:
+        data.zatcaPending.rejected > 0
+          ? `Phase 2 invoices rejected by ZATCA`
+          : 'Phase 2 invoices not yet cleared',
+      view: 'e-invoices',
+    })
 
   const wf = data.workforce
   const onSitePct = wf && wf.active > 0 ? Math.round((wf.onSite / wf.active) * 100) : 0
@@ -1258,73 +1342,77 @@ export function DashboardView() {
         companyName={settings.companyName || 'the company'}
         currency={currency}
         stats={stats}
-        monthIncome={thisMonth?.income ?? 0}
-        monthExpense={thisMonth?.expense ?? 0}
+        monthIncome={monthIncome}
+        monthExpense={monthExpense}
         monthLabel={monthLabel}
         canAccounts={canAccounts}
         actions={actions}
         onOpen={setView}
+        incomeTrend={data.trends?.income ?? null}
+        expenseTrend={data.trends?.expense ?? null}
       />
 
       <AttentionStrip items={attention} onOpen={setView} />
 
-      {/* Metric tiles — every original "more info" link is kept */}
+      {/* Metric tiles — every original "more info" link is kept; trends show
+          where previous-period data exists */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <MetricTile
+        <StatTile
           label="Total staff"
           value={stats.totalStaff.toLocaleString()}
           note={wf ? `${wf.onSite} on site, ${wf.available} available` : 'Active workforce members'}
           icon={Users}
-          accent="#1E3A66"
+          tone="navy"
           linkLabel="View staff"
           onOpen={() => setView('staff-list')}
         >
           {wf && wf.active > 0 ? (
             <span className="mt-2 block h-1.5 w-full overflow-hidden rounded-full bg-muted" title={`${onSitePct}% on site`}>
-              <span className="block h-full rounded-full bg-[#1E3A66] dark:bg-[#E8CB6A]" style={{ width: `${onSitePct}%` }} />
+              <span className="block h-full rounded-full bg-primary dark:bg-gold" style={{ width: `${onSitePct}%` }} />
             </span>
           ) : null}
-        </MetricTile>
-        <MetricTile
+        </StatTile>
+        <StatTile
           label="Salary paid"
           value={formatNumber(stats.salaryPaid)}
           prefix={currency}
           note="Disbursed payroll total"
           icon={BadgeDollarSign}
-          accent="#0D9488"
+          tone="teal"
+          trend={data.trends?.salaryPaid ?? undefined}
           linkLabel="View payroll"
           onOpen={() => setView('payroll')}
         />
         {stats.advanceOutstanding !== null ? (
-          <MetricTile
+          <StatTile
             label="Advance outstanding"
             value={formatNumber(stats.advanceOutstanding)}
             prefix={currency}
             note="Not yet recovered from salaries"
             icon={HandCoins}
-            accent="#D97706"
+            tone="warning"
             linkLabel="View advances"
             onOpen={() => setView('advances')}
           />
         ) : null}
         {data.receivables ? (
-          <MetricTile
+          <StatTile
             label="To collect"
             value={formatNumber(data.receivables.outstanding)}
             prefix={currency}
             note={`${data.receivables.openCount} unpaid invoice${data.receivables.openCount === 1 ? '' : 's'}`}
             icon={FileOutput}
-            accent="#D4AF37"
+            tone="gold"
             linkLabel="View invoices"
             onOpen={() => setView('e-invoices')}
           />
         ) : null}
-        <MetricTile
+        <StatTile
           label="System users"
           value={stats.totalUsers.toLocaleString()}
           note="Accounts that can sign in"
           icon={UsersRound}
-          accent="#7C3AED"
+          tone="violet"
           linkLabel="View users"
           onOpen={() => setView('users')}
         />
@@ -1332,7 +1420,15 @@ export function DashboardView() {
 
       {/* Chart + money pipeline */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {canAccounts ? <FinancialChart data={data.chart} currency={currency} /> : null}
+        {canAccounts ? (
+          <FinancialChart
+            data={data.chart}
+            currency={currency}
+            range={range}
+            onRangeChange={handleRangeChange}
+            loading={rangeLoading}
+          />
+        ) : null}
         <PipelineSection
           receivables={data.receivables ?? null}
           pipeline={data.pipeline ?? null}

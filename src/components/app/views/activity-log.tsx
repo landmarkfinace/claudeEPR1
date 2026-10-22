@@ -34,6 +34,7 @@ import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -93,13 +94,13 @@ const ACTION_LABELS: Record<string, string> = {
 function actionBadgeClasses(action: string): string {
   switch (action) {
     case 'created':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'
+      return 'border-success/25 bg-success-soft text-success-soft-foreground'
     case 'updated':
-      return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400'
+      return 'border-warning/30 bg-warning-soft text-warning-soft-foreground'
     case 'deleted':
-      return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-400'
+      return 'border-danger/25 bg-danger-soft text-danger-soft-foreground'
     case 'paid':
-      return 'border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900 dark:text-emerald-300'
+      return 'border-success/25 bg-success-soft text-success-soft-foreground'
     case 'login':
       return 'border-primary/30 bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary'
     case 'export':
@@ -209,6 +210,7 @@ export function ActivityLogView() {
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Filters
   const [search, setSearch] = useState('')
@@ -224,6 +226,7 @@ export function ActivityLogView() {
   const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<ActivityRow> & { totals?: ActivityTotals }>(
@@ -243,6 +246,7 @@ export function ActivityLogView() {
       setTotals(res.totals ?? null)
       if (res.page > res.totalPages && res.totalPages > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load activity log')
     } finally {
       setLoading(false)
@@ -435,7 +439,14 @@ export function ActivityLogView() {
           </FilterBar>
         </div>
 
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load the activity log"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={8} cols={6} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -507,7 +518,7 @@ export function ActivityLogView() {
             </ul>
 
             {/* Desktop: table */}
-            <div className="hidden overflow-x-auto md:block print:block" data-fade-right="">
+            <div className="table-scroll hidden overflow-x-auto md:block print:block" data-fade-right="">
               <Table>
                 <TableHeader>
                   <TableRow>

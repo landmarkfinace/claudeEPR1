@@ -91,6 +91,7 @@ import { AvatarInitials } from '../shared/avatar-initials'
 import { ConfirmDelete } from '../shared/confirm-delete'
 import { DataTablePagination } from '../shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '../shared/empty-state'
+import { ErrorState } from '../shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { CategoryChip } from '../shared/status-badge'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
@@ -185,6 +186,7 @@ export function ExpenseListView() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
 
   // ---- filters ----
@@ -252,6 +254,7 @@ export function ExpenseListView() {
 
   const load = useCallback(async () => {
     const id = ++requestId.current
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<TransactionsResponse>(
@@ -278,6 +281,7 @@ export function ExpenseListView() {
       setTotalPages(res.totalPages)
     } catch (e) {
       if (id !== requestId.current) return
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       setRows([])
       setSum(0)
       setTotal(0)
@@ -797,7 +801,7 @@ export function ExpenseListView() {
         ) : (
           <>
             {/* Desktop: month matrix */}
-            <div className="nice-scrollbar hidden overflow-x-auto md:block">
+            <div className="table-scroll nice-scrollbar hidden overflow-x-auto md:block">
               <Table className="min-w-[980px]">
                 <TableHeader>
                   <TableRow>
@@ -1015,7 +1019,14 @@ export function ExpenseListView() {
           </div>
         </div>
 
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load expenses"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={6} cols={8} />
         ) : rows.length === 0 ? (
           <EmptyState

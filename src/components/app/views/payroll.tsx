@@ -68,6 +68,7 @@ import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { CategoryChip, StatusBadge } from '@/components/app/shared/status-badge'
@@ -214,6 +215,7 @@ export function PayrollView() {
   const [totals, setTotals] = useState<ListTotals>({ gross: 0, deductions: 0, net: 0 })
   const [meta, setMeta] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 })
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Advances whose deduction month matches this period but whose payroll column
   // is out of date (advance added/edited after the payroll was generated)
@@ -231,6 +233,7 @@ export function PayrollView() {
   const [exporting, setExporting] = useState(false)
 
   const loadList = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<PayrollRow>>(
@@ -261,6 +264,7 @@ export function PayrollView() {
       // Jump back if the current page no longer exists (e.g. after delete)
       if (res.data.length === 0 && res.page > 1 && res.total > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load payrolls')
     } finally {
       setLoading(false)
@@ -662,7 +666,14 @@ export function PayrollView() {
 
       {/* Payroll table */}
       <SectionCard>
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load payrolls"
+            description={loadError}
+            onRetry={() => void loadList()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={6} cols={9} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -801,7 +812,7 @@ export function PayrollView() {
             </ul>
 
             {/* Desktop: table */}
-            <div className="nice-scrollbar hidden md:block print:block print:overflow-visible">
+            <div className="table-scroll nice-scrollbar hidden md:block print:block print:overflow-visible">
             <Table className="min-w-[1000px] print:min-w-0 print:text-xs">
               <TableHeader>
                 <TableRow>

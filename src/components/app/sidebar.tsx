@@ -2,7 +2,6 @@
 
 import { useCallback, useState } from 'react'
 import Image from 'next/image'
-import { usePathname } from 'next/navigation'
 import {
   ChevronsUpDown,
   HandCoins,
@@ -79,19 +78,25 @@ type MenuGroup = {
   items: (MenuItem | { submenu: true; label: string; icon: React.ComponentType<{ className?: string }>; perm?: string; children: MenuItem[] })[]
 }
 
+/**
+ * Navigation — five sections (Overview · Workforce · Finance · Business
+ * Documents · Administration). Every historical entry and its permission
+ * check is preserved; only the grouping changed.
+ */
 const MENU: MenuGroup[] = [
   {
+    label: 'Overview',
     items: [
       { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: 'dashboard.view' },
       { view: 'ai-assistant', label: 'AI Assistant', icon: Sparkles, perm: 'ai.use' },
-      { view: 'projects', label: 'Project Management', icon: FolderKanban, perm: 'projects.view' },
-      { view: 'clients', label: 'Clients', icon: Building2, perm: 'clients.view' },
-      { view: 'deployments', label: 'Worker Deployment', icon: Network, perm: 'clients.view' },
     ],
   },
   {
-    label: 'Staff Management',
+    label: 'Workforce',
     items: [
+      { view: 'projects', label: 'Project Management', icon: FolderKanban, perm: 'projects.view' },
+      { view: 'clients', label: 'Clients', icon: Building2, perm: 'clients.view' },
+      { view: 'deployments', label: 'Worker Deployment', icon: Network, perm: 'clients.view' },
       {
         submenu: true,
         label: 'Staff & Workforce',
@@ -111,7 +116,7 @@ const MENU: MenuGroup[] = [
     ],
   },
   {
-    label: 'Account Research',
+    label: 'Finance',
     items: [
       {
         submenu: true,
@@ -149,11 +154,26 @@ const MENU: MenuGroup[] = [
   },
 ]
 
+/** The sidebar section a view belongs to (used by the topbar breadcrumb). */
+export const VIEW_SECTION: Partial<Record<ViewKey, string>> = Object.fromEntries(
+  MENU.flatMap((g) =>
+    g.items.flatMap((item) =>
+      'submenu' in item
+        ? item.children.map((c) => [c.view, g.label ?? ''] as const)
+        : ([[item.view, g.label ?? ''] as const])
+    )
+  )
+)
+
+/** Active-item treatment shared by top-level and sub items:
+ *  gold left bar (inset box-shadow — never clipped) + subtle gold
+ *  background + gold text. */
+const ACTIVE_ITEM_CLASS =
+  'data-[active=true]:bg-sidebar-primary/15 data-[active=true]:font-semibold data-[active=true]:text-sidebar-primary data-[active=true]:shadow-[inset_3px_0_0_0_var(--gold)] hover:bg-sidebar-primary/10'
+
 export function AppSidebar({ onLogout }: { onLogout: () => void }) {
   const { view, setView, user, settings } = useAppStore()
   const { setOpenMobile } = useSidebar()
-  const pathname = usePathname()
-  void pathname
   const [changePwOpen, setChangePwOpen] = useState(false)
 
   // Navigate and close the mobile off-canvas sheet (no-op on desktop)
@@ -205,7 +225,9 @@ export function AppSidebar({ onLogout }: { onLogout: () => void }) {
           if (visibleItems.length === 0) return null
           return (
             <SidebarGroup key={gi}>
-              {group.label ? <SidebarGroupLabel className="mt-1.5">{group.label}</SidebarGroupLabel> : null}
+              {group.label ? (
+                <SidebarGroupLabel className="mt-1.5">{group.label}</SidebarGroupLabel>
+              ) : null}
               <SidebarGroupContent>
                 <SidebarMenu>
                   {visibleItems.map((item, ii) => {
@@ -231,26 +253,28 @@ export function AppSidebar({ onLogout }: { onLogout: () => void }) {
                               </CollapsibleTrigger>
                               <CollapsibleContent>
                                 <SidebarMenuSub>
-                                  {visibleChildren.map((c) => (
-                                    <SidebarMenuSubItem key={c.view}>
-                                      {/* Real <button> (not a span) so sub-nav is keyboard focusable */}
-                                      <SidebarMenuSubButton
-                                        asChild
-                                        isActive={view === c.view}
-                                        onClick={() => navigate(c.view)}
-                                        className={cn(
-                                          'cursor-pointer',
-                                          view === c.view &&
-                                            'data-[active=true]:bg-sidebar-primary data-[active=true]:font-semibold data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-sm hover:bg-sidebar-primary/90'
-                                        )}
-                                      >
-                                        <button type="button" className="w-full text-left">
-                                          <c.icon className="h-4 w-4" />
-                                          <span>{c.label}</span>
-                                        </button>
-                                      </SidebarMenuSubButton>
-                                    </SidebarMenuSubItem>
-                                  ))}
+                                  {visibleChildren.map((c) => {
+                                    const active = view === c.view
+                                    return (
+                                      <SidebarMenuSubItem key={c.view}>
+                                        {/* Real <button> (not a span) so sub-nav is keyboard focusable */}
+                                        <SidebarMenuSubButton
+                                          asChild
+                                          isActive={active}
+                                          onClick={() => navigate(c.view)}
+                                          className={cn(
+                                            'cursor-pointer',
+                                            active && ACTIVE_ITEM_CLASS
+                                          )}
+                                        >
+                                          <button type="button" className="w-full text-left">
+                                            <c.icon className="h-4 w-4" />
+                                            <span>{c.label}</span>
+                                          </button>
+                                        </SidebarMenuSubButton>
+                                      </SidebarMenuSubItem>
+                                    )
+                                  })}
                                 </SidebarMenuSub>
                               </CollapsibleContent>
                             </SidebarMenuItem>
@@ -265,11 +289,7 @@ export function AppSidebar({ onLogout }: { onLogout: () => void }) {
                           isActive={active}
                           tooltip={item.label}
                           onClick={() => navigate(item.view)}
-                          className={cn(
-                            'cursor-pointer',
-                            active &&
-                              'data-[active=true]:bg-sidebar-primary data-[active=true]:font-semibold data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-sm hover:bg-sidebar-primary/90'
-                          )}
+                          className={cn('cursor-pointer', active && ACTIVE_ITEM_CLASS)}
                         >
                           <item.icon />
                           <span>{item.label}</span>
@@ -338,3 +358,6 @@ export function AppSidebar({ onLogout }: { onLogout: () => void }) {
     </Sidebar>
   )
 }
+
+// Re-exported for the topbar breadcrumb (section names)
+export { MENU as SIDEBAR_MENU }

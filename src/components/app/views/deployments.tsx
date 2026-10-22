@@ -598,7 +598,7 @@ export function WorkerDeploymentView() {
             ) : (
               <>
                 {/* Desktop table */}
-                <div className="hidden overflow-x-auto md:block">
+                <div className="table-scroll hidden overflow-x-auto md:block">
                   <Table className="min-w-[860px]">
                     <TableHeader>
                       <TableRow>

@@ -36,11 +36,13 @@ import { useViewIntent, useViewRecordIntent } from '@/hooks/use-view-intent'
 import type { Paginated, ProjectRow, StaffCategory, StaffProfileStats, StaffRow } from '@/lib/types'
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
+import { useColumnVisibility } from '@/components/app/shared/column-visibility'
 import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { CategoryChip, StatusBadge, ExpiryBadge } from '@/components/app/shared/status-badge'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -228,8 +230,23 @@ function ProjectChips({ projects }: { projects: { id: string; name: string }[] }
   )
 }
 
+/** Hideable columns of the staff table (name + actions stay pinned). */
+const STAFF_COLUMNS = [
+  { id: 'name', label: 'Staff Member' },
+  { id: 'position', label: 'Position' },
+  { id: 'category', label: 'Category' },
+  { id: 'projects', label: 'Assigned Projects' },
+  { id: 'joining', label: 'Joining Date' },
+  { id: 'expiry', label: 'IQAMA Expiry' },
+  { id: 'salary', label: 'Salary' },
+  { id: 'rate', label: 'Rate' },
+] as const
+
 export function StaffListView() {
   const { user, settings } = useAppStore()
+
+  // Column visibility (name + actions always visible)
+  const cols = useColumnVisibility(STAFF_COLUMNS)
 
   // List state
   const [rows, setRows] = useState<StaffRow[]>([])
@@ -237,6 +254,7 @@ export function StaffListView() {
   const [totals, setTotals] = useState<StaffListTotals | null>(null)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
 
   // Filters
@@ -296,6 +314,7 @@ export function StaffListView() {
     setForm((f) => ({ ...f, [key]: value }))
 
   const load = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<StaffRow>>(
@@ -326,6 +345,7 @@ export function StaffListView() {
       setTotalPages(res.totalPages)
       if (res.page > res.totalPages && res.totalPages > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load staff list')
     } finally {
       setLoading(false)
@@ -593,6 +613,7 @@ export function StaffListView() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <PageHeader title="Staff List" description="Workforce directory &amp; profiles">
+        {cols.menu}
         <Button
           variant="outline"
           onClick={() => void handleExportCsv()}
@@ -698,7 +719,14 @@ export function StaffListView() {
           </FilterBar>
         </div>
 
-        {loading ? (
+        {loadError && !loading ? (
+          <ErrorState
+            title="Couldn't load staff"
+            description={loadError}
+            onRetry={() => void load()}
+            className="m-4"
+          />
+        ) : loading ? (
           <TableSkeleton rows={6} cols={7} />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -842,18 +870,18 @@ export function StaffListView() {
             </ul>
 
             {/* Desktop: table */}
-            <div className="hidden overflow-x-auto md:block print:block print:overflow-visible">
+            <div className="table-scroll hidden overflow-x-auto md:block print:block print:overflow-visible">
             <Table className="min-w-[1000px] print:min-w-0 print:text-xs">
               <TableHeader>
                 <TableRow>
                   <TableHead>Staff Member</TableHead>
-                  <TableHead>Position</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Assigned Projects</TableHead>
-                  <TableHead>Joining Date</TableHead>
-                  <TableHead>IQAMA Expiry</TableHead>
-                  <TableHead className="text-right">Salary</TableHead>
-                  <TableHead className="text-right">Rate</TableHead>
+                  {cols.isVisible('position') ? <TableHead>Position</TableHead> : null}
+                  {cols.isVisible('category') ? <TableHead>Category</TableHead> : null}
+                  {cols.isVisible('projects') ? <TableHead>Assigned Projects</TableHead> : null}
+                  {cols.isVisible('joining') ? <TableHead>Joining Date</TableHead> : null}
+                  {cols.isVisible('expiry') ? <TableHead>IQAMA Expiry</TableHead> : null}
+                  {cols.isVisible('salary') ? <TableHead className="text-right">Salary</TableHead> : null}
+                  {cols.isVisible('rate') ? <TableHead className="text-right">Rate</TableHead> : null}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -875,44 +903,58 @@ export function StaffListView() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm">{staff.position || '—'}</TableCell>
-                    <TableCell>
-                      {staff.staffCategory ? (
-                        <CategoryChip label={staff.staffCategory.name} />
-                      ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <ProjectChips projects={staff.projects} />
-                    </TableCell>
-                    <TableCell className="text-sm">{formatDate(staff.joiningDate)}</TableCell>
-                    <TableCell>
-                      {staff.iqamaExpiry ? (
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              'text-sm tabular-nums',
-                              expiryStatus(staff.iqamaExpiry) !== 'valid' && 'font-medium'
-                            )}
-                          >
-                            {formatDate(staff.iqamaExpiry)}
-                          </span>
-                          <ExpiryBadge
-                            status={expiryStatus(staff.iqamaExpiry)}
-                            daysLeft={daysUntil(staff.iqamaExpiry)}
-                          />
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right text-sm font-medium tabular-nums">
-                      {formatMoney(staff.monthlySalary, settings.currency)}
-                    </TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
-                      {formatMoney(staff.ratePerHour, settings.currency)}/hr
-                    </TableCell>
+                    {cols.isVisible('position') ? (
+                      <TableCell className="text-sm">{staff.position || '—'}</TableCell>
+                    ) : null}
+                    {cols.isVisible('category') ? (
+                      <TableCell>
+                        {staff.staffCategory ? (
+                          <CategoryChip label={staff.staffCategory.name} />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    ) : null}
+                    {cols.isVisible('projects') ? (
+                      <TableCell>
+                        <ProjectChips projects={staff.projects} />
+                      </TableCell>
+                    ) : null}
+                    {cols.isVisible('joining') ? (
+                      <TableCell className="text-sm">{formatDate(staff.joiningDate)}</TableCell>
+                    ) : null}
+                    {cols.isVisible('expiry') ? (
+                      <TableCell>
+                        {staff.iqamaExpiry ? (
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                'text-sm tabular-nums',
+                                expiryStatus(staff.iqamaExpiry) !== 'valid' && 'font-medium'
+                              )}
+                            >
+                              {formatDate(staff.iqamaExpiry)}
+                            </span>
+                            <ExpiryBadge
+                              status={expiryStatus(staff.iqamaExpiry)}
+                              daysLeft={daysUntil(staff.iqamaExpiry)}
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    ) : null}
+                    {cols.isVisible('salary') ? (
+                      <TableCell className="text-right text-sm font-medium tabular-nums">
+                        {formatMoney(staff.monthlySalary, settings.currency)}
+                      </TableCell>
+                    ) : null}
+                    {cols.isVisible('rate') ? (
+                      <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
+                        {formatMoney(staff.ratePerHour, settings.currency)}/hr
+                      </TableCell>
+                    ) : null}
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button

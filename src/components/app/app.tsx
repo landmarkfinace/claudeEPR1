@@ -102,14 +102,14 @@ export function App() {
       <SidebarProvider>
         <AppSidebar onLogout={() => void handleLogout()} />
         <SidebarInset className="min-h-svh min-w-0">
-          <Topbar onOpenPalette={() => setPaletteOpen(true)} />
+          <Topbar onOpenPalette={() => setPaletteOpen(true)} onLogout={() => void handleLogout()} />
           <div className="flex-1 space-y-4 p-4 pb-24 sm:space-y-6 sm:p-6 md:pb-10">
             {/* Smooth view-mount transition (subtle rise + fade) */}
             <motion.div
               key={view}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
             >
               <ViewRouter />
             </motion.div>

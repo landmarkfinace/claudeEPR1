@@ -1,14 +1,25 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Inter, IBM_Plex_Sans_Arabic, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Providers } from "@/components/app/providers";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Inter — the Latin workhorse (UI + numbers, tabular-nums in CSS)
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
+// IBM Plex Sans Arabic — bilingual documents & Arabic UI text
+const plexArabic = IBM_Plex_Sans_Arabic({
+  variable: "--font-plex-arabic",
+  weight: ["400", "500", "600", "700"],
+  subsets: ["arabic", "latin"],
+  display: "swap",
+});
+
+// Geist Mono — kbd hints, code, reference numbers
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -22,6 +33,13 @@ export const metadata: Metadata = {
   // favicon: src/app/icon.png (brand ML monogram) is auto-detected by Next.js
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // PWA-style safe areas (notched phones) — the topbar pads itself with env()
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,7 +48,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className={`${inter.variable} ${plexArabic.variable} ${geistMono.variable} font-sans antialiased bg-background text-foreground`}
       >
         <Providers>
           {children}

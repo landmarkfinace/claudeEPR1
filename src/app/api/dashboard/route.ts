@@ -36,12 +36,23 @@ async function latestPayrollMonth(): Promise<{ month: number; year: number } | n
 
 export const dynamic = 'force-dynamic'
 
+/** Chart period for the optional ?range= param. Default (no param) keeps the
+ *  historical last-6-months behaviour so existing consumers never break. */
+type ChartRange = 'month' | '3m' | 'year'
+
+function parseRange(value: string | null): ChartRange | null {
+  if (value === 'month' || value === '3m' || value === 'year') return value
+  return null
+}
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await requirePermission('dashboard.view')
     if (isResponse(auth)) return auth
 
     const now = new Date()
+    const { searchParams } = new URL(req.url)
+    const range = parseRange(searchParams.get('range'))
 
     const [totalStaff, totalUsers, incomeAgg, expenseAgg, salaryAgg, advanceRows] =
       await Promise.all([
@@ -64,8 +75,31 @@ export async function GET(req: NextRequest) {
         }),
       ])
 
-    // Last 6 months INCLUDING the current month (ascending)
-    const chartStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+    // Chart buckets depend on ?range= — default keeps the historical 6-month window
+    let chartBuckets: { month: string; income: number; expense: number }[]
+    if (range === 'month') {
+      // Weekly buckets of the current calendar month
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+      const weeks = Math.ceil(lastDay / 7)
+      chartBuckets = Array.from({ length: weeks }, (_, i) => ({
+        month: `Week ${i + 1}`,
+        income: 0,
+        expense: 0,
+      }))
+    } else {
+      const months = range === '3m' ? 3 : range === 'year' ? 12 : 6
+      chartBuckets = Array.from({ length: months }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1)
+        return { month: `${SHORT_MONTHS[d.getMonth()]} ${d.getFullYear()}`, income: 0, expense: 0 }
+      })
+    }
+
+    // Window covering the chart buckets
+    const chartStart = range
+      ? range === 'month'
+        ? new Date(now.getFullYear(), now.getMonth(), 1)
+        : new Date(now.getFullYear(), now.getMonth() - (range === '3m' ? 2 : 11), 1)
+      : new Date(now.getFullYear(), now.getMonth() - 5, 1)
     const chartEnd = new Date(
       now.getFullYear(),
       now.getMonth() + 1,
@@ -80,24 +114,26 @@ export async function GET(req: NextRequest) {
       select: { type: true, amount: true, transactionDate: true },
     })
 
+    // Map month-label → bucket object (the SAME objects as chartBuckets, so
+    // the mutation below is reflected in the chart result)
     const buckets = new Map<string, { month: string; income: number; expense: number }>()
-    for (let i = -5; i <= 0; i += 1) {
-      const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
-      buckets.set(`${d.getFullYear()}-${d.getMonth()}`, {
-        month: `${SHORT_MONTHS[d.getMonth()]} ${d.getFullYear()}`,
-        income: 0,
-        expense: 0,
-      })
-    }
+    for (const b of chartBuckets) buckets.set(b.month, b)
     for (const t of chartTxs) {
-      const bucket = buckets.get(
-        `${t.transactionDate.getFullYear()}-${t.transactionDate.getMonth()}`
-      )
+      let bucket: { month: string; income: number; expense: number } | undefined
+      if (range === 'month') {
+        // Bucket by week-of-month (1-based)
+        const day = t.transactionDate.getDate()
+        const week = Math.floor((day - 1) / 7)
+        bucket = chartBuckets[week]
+      } else {
+        const d = t.transactionDate
+        bucket = buckets.get(`${SHORT_MONTHS[d.getMonth()]} ${d.getFullYear()}`)
+      }
       if (!bucket) continue
       if (t.type === 'income') bucket.income += t.amount
       else bucket.expense += t.amount
     }
-    const chart = Array.from(buckets.values()).map((b) => ({
+    const chart = chartBuckets.map((b) => ({
       month: b.month,
       income: round2(b.income),
       expense: round2(b.expense),
@@ -407,6 +443,58 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ---- Period-over-period trends (this calendar month vs previous) ----
+    let trends: {
+      income: { current: number; previous: number } | null
+      expense: { current: number; previous: number } | null
+      salaryPaid: { current: number; previous: number } | null
+    } | null = null
+    try {
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999)
+      const canAccountsTrend = hasPermission(auth, 'accounts.view')
+      const [inM, exM, inP, exP, salM, salP] = await Promise.all([
+        canAccountsTrend
+          ? db.transaction.aggregate({ where: { type: 'income', transactionDate: { gte: thisMonthStart, lte: chartEnd } }, _sum: { amount: true } })
+          : null,
+        canAccountsTrend
+          ? db.transaction.aggregate({ where: { type: 'expense', transactionDate: { gte: thisMonthStart, lte: chartEnd } }, _sum: { amount: true } })
+          : null,
+        canAccountsTrend
+          ? db.transaction.aggregate({ where: { type: 'income', transactionDate: { gte: prevMonthStart, lte: prevMonthEnd } }, _sum: { amount: true } })
+          : null,
+        canAccountsTrend
+          ? db.transaction.aggregate({ where: { type: 'expense', transactionDate: { gte: prevMonthStart, lte: prevMonthEnd } }, _sum: { amount: true } })
+          : null,
+        db.payroll.aggregate({ where: { status: 'paid', payDate: { gte: thisMonthStart, lte: chartEnd } }, _sum: { netPay: true } }),
+        db.payroll.aggregate({ where: { status: 'paid', payDate: { gte: prevMonthStart, lte: prevMonthEnd } }, _sum: { netPay: true } }),
+      ])
+      trends = {
+        income: inM && inP ? { current: round2(inM._sum.amount ?? 0), previous: round2(inP._sum.amount ?? 0) } : null,
+        expense: exM && exP ? { current: round2(exM._sum.amount ?? 0), previous: round2(exP._sum.amount ?? 0) } : null,
+        salaryPaid: { current: round2(salM._sum.netPay ?? 0), previous: round2(salP._sum.netPay ?? 0) },
+      }
+    } catch {
+      trends = null
+    }
+
+    // ---- ZATCA Phase 2 clearance queue (einvoices.view gated) ----
+    // Issued (signed) invoices whose zatcaStatus is still pending/rejected —
+    // i.e. not yet cleared (standard) or reported (simplified).
+    let zatcaPending: { count: number; rejected: number } | null = null
+    if (hasPermission(auth, 'einvoices.view')) {
+      try {
+        const [pendingCount, rejectedCount] = await Promise.all([
+          db.eInvoice.count({ where: { signedXml: { not: null }, zatcaStatus: 'pending' } }),
+          db.eInvoice.count({ where: { signedXml: { not: null }, zatcaStatus: 'rejected' } }),
+        ])
+        zatcaPending = { count: pendingCount + rejectedCount, rejected: rejectedCount }
+      } catch {
+        zatcaPending = null
+      }
+    }
+
     return ok({
       stats: {
         totalStaff,
@@ -426,6 +514,8 @@ export async function GET(req: NextRequest) {
       receivables,
       pipeline,
       todayLists,
+      trends,
+      zatcaPending,
     })
   } catch {
     return serverError()

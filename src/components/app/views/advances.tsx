@@ -68,6 +68,7 @@ import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
 import { EmptyState, TableSkeleton } from '@/components/app/shared/empty-state'
+import { ErrorState } from '@/components/app/shared/error-state'
 import { FilterBar, FilterSelect, SearchInput } from '@/components/app/shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
@@ -121,17 +122,17 @@ export function AdvanceStatusBadge({ status, className }: { status: AdvanceStatu
   const map: Record<AdvanceStatus, { label: string; cls: string; icon: React.ComponentType<{ className?: string }> }> = {
     pending: {
       label: 'Pending',
-      cls: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400',
+      cls: 'border-warning/30 bg-warning-soft text-warning-soft-foreground',
       icon: CircleDashed,
     },
     partially_deducted: {
       label: 'Partially Deducted',
-      cls: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-400',
+      cls: 'border-warning/30 bg-warning-soft text-warning-soft-foreground',
       icon: TrendingUp,
     },
     deducted: {
       label: 'Deducted',
-      cls: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400',
+      cls: 'border-success/25 bg-success-soft text-success-soft-foreground',
       icon: CheckCircle2,
     },
   }
@@ -176,6 +177,7 @@ export function AdvancesView() {
   const [totals, setTotals] = useState<ListTotals>({ count: 0, given: 0, deducted: 0, outstanding: 0 })
   const [meta, setMeta] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 })
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [summary, setSummary] = useState<SummaryData | null>(null)
   const [projects, setProjects] = useState<ProjectRow[]>([])
@@ -193,6 +195,7 @@ export function AdvancesView() {
   }, [])
 
   const loadList = useCallback(async () => {
+    setLoadError(null)
     setLoading(true)
     try {
       const res = await api.get<Paginated<AdvanceRow>>(
@@ -216,6 +219,7 @@ export function AdvancesView() {
       setMeta({ page: res.page, pageSize: res.pageSize, total: res.total, totalPages: res.totalPages })
       if (res.data.length === 0 && res.page > 1 && res.total > 0) setPage(res.totalPages)
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Something went wrong')
       toast.error(e instanceof Error ? e.message : 'Failed to load advances')
     } finally {
       setLoading(false)
@@ -505,7 +509,14 @@ export function AdvancesView() {
             </div>
 
             <div className="mt-4 print:mt-0">
-              {loading ? (
+              {loadError && !loading ? (
+                <ErrorState
+                  title="Couldn't load advances"
+                  description={loadError}
+                  onRetry={() => void loadList()}
+                  className="m-4"
+                />
+              ) : loading ? (
                 <TableSkeleton rows={6} />
               ) : rows.length === 0 ? (
                 <EmptyState
@@ -528,7 +539,7 @@ export function AdvancesView() {
               ) : (
                 <>
                   {/* Desktop / print table */}
-                  <div className="nice-scrollbar hidden overflow-x-auto md:block print:block print:overflow-visible">
+                  <div className="table-scroll nice-scrollbar hidden overflow-x-auto md:block print:block print:overflow-visible">
                     <Table className="min-w-[760px] print:min-w-0">
                       <TableHeader>
                         <TableRow>
