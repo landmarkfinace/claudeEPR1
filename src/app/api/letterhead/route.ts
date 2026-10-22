@@ -4,7 +4,8 @@
 // textual company-details toggle. Images arrive as base64 data URLs and are
 // validated (PNG/JPEG only, magic-byte sniffed, ≤ 2 MB decoded).
 // GET requires quotations.view OR supplierpo.view (both print documents read
-// this config); PUT requires quotations.edit.
+// this config); PUT requires quotations.edit OR supplierpo.edit (the shared
+// design can be managed from either module).
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
@@ -15,8 +16,6 @@ import {
   badRequest,
   forbidden,
   serverError,
-  requirePermission,
-  isResponse,
   logActivity,
   unauthorized,
 } from '@/lib/api-helpers'
@@ -71,8 +70,13 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await requirePermission('quotations.edit')
-    if (isResponse(auth)) return auth
+    // The letterhead is shared by the Quotation and Supplier P.O. documents —
+    // either module's edit permission allows managing it.
+    const user = await getSessionUser()
+    if (!user) return unauthorized()
+    if (!hasPermission(user, 'quotations.edit') && !hasPermission(user, 'supplierpo.edit')) {
+      return forbidden()
+    }
 
     let raw: unknown
     try {
@@ -132,7 +136,7 @@ export async function PUT(req: NextRequest) {
     }
 
     await logActivity({
-      user: auth,
+      user,
       action: 'updated',
       module: 'quotation',
       description: `Company letterhead settings updated (mode: ${merged.mode})`,

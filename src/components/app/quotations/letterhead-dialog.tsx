@@ -8,7 +8,8 @@
 //   • toggle the textual company-details block (for artwork that already
 //     carries the company identity)
 //   • live mini A4 preview of the arrangement
-// Saved via PUT /api/letterhead; every A4 quotation picks it up immediately.
+// Saved via PUT /api/letterhead; every A4 Quotation and Supplier P.O. picks
+// it up immediately.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ImageUp, Layers, Loader2, Save, Trash2 } from 'lucide-react'
@@ -116,7 +117,7 @@ export function LetterheadDialog({
       const saved = await api.put<LetterheadConfig>('/api/letterhead', config)
       setConfig({ ...DEFAULT_CONFIG, ...saved })
       onSaved?.(saved)
-      toast.success('Letterhead saved — new quotations use it immediately')
+      toast.success('Letterhead saved — quotations and P.O.s use it immediately')
       onOpenChange(false)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save the letterhead')
@@ -136,8 +137,8 @@ export function LetterheadDialog({
             Company Letterhead — A4
           </DialogTitle>
           <DialogDescription>
-            Design reused by every printed quotation. Upload artwork sized for A4 (210 × 297 mm);
-            PNG or JPEG up to 2 MB per image.
+            One A4 design reused by every printed Quotation and Supplier P.O. Upload artwork
+            sized for A4 (210 × 297 mm); PNG or JPEG up to 2 MB per image.
           </DialogDescription>
         </DialogHeader>
 

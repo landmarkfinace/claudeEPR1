@@ -12,7 +12,8 @@
 //     always recomputes the final money figures — the in-dialog math is only
 //     a preview. Draft preview renders the print document unsaved.
 //   • CSV export of the filtered list, A4 print via SupplierPoPrintDialog
-//     (reads the shared company letterhead config)
+//     (reads the shared company letterhead config — managed via the
+//     "Letterhead" toolbar button, the same A4 design as Quotations)
 // Role-based: add/edit/delete/print only with supplierpo.* permissions.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -23,6 +24,7 @@ import {
   Download,
   Eye,
   Hash,
+  Layers,
   Mail,
   Package,
   PackageCheck,
@@ -82,6 +84,7 @@ import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
 import { SupplierPoPrintDialog, DEFAULT_LETTERHEAD } from '../print/supplier-po-print'
 import type { SupplierPoDetail } from '../print/supplier-po-print'
+import { LetterheadDialog } from '../quotations/letterhead-dialog'
 
 type PoListRow = SupplierPoRow & { itemCount: number }
 
@@ -316,6 +319,8 @@ export function SupplierPosView() {
 
   // company letterhead config — the printed P.O. reads it from here
   const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
+  // letterhead manager dialog (shared with the Quotations module)
+  const [letterheadOpen, setLetterheadOpen] = useState(false)
   useEffect(() => {
     api
       .get<LetterheadConfig>('/api/letterhead')
@@ -901,6 +906,12 @@ export function SupplierPosView() {
         title="Supplier P.O."
         description={`Issue purchase orders to suppliers — items, ${vatPercentLabel}% VAT and totals are computed automatically.`}
       >
+        {canEdit ? (
+          <Button variant="outline" size="sm" onClick={() => setLetterheadOpen(true)}>
+            <Layers className="h-4 w-4" />
+            Letterhead
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"
@@ -1978,6 +1989,13 @@ export function SupplierPosView() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ---- Company letterhead manager (shared A4 design with Quotations) ---- */}
+      <LetterheadDialog
+        open={letterheadOpen}
+        onOpenChange={setLetterheadOpen}
+        onSaved={(cfg) => setLetterhead(cfg)}
+      />
 
       {/* ---- Print dialog (saved documents + live drafts) ---- */}
       <SupplierPoPrintDialog
