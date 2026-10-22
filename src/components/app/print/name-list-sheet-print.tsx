@@ -18,8 +18,16 @@
 //   • Signature cards with dashed stamp circles: "PREPARED BY / Company
 //     Stamp" + "INTERVIEWED BY (CLIENT) / Client Stamp" (interview) or
 //     "RECEIVED BY (CLIENT / SITE) / Site Stamp" (mobilization).
-//   • Explicit A4 pages with thead repeated on every page and a
-//     "Page X of Y" footer; several lists can print in one PDF.
+//   • Signature cards are PINNED to the bottom of the LAST page, directly
+//     above the footer note — never flowing right after the table. Every
+//     page is a flex column filling the full content area (between the
+//     letterhead bands): table + trade summary at the top, a flexible
+//     spacer absorbing the empty space BETWEEN them and the signature
+//     cards, then the cards, exactly 3mm, then the "Page X of Y" note line
+//     at the very bottom of the content column (1mm above the letterhead
+//     footer band). Empty space never lands below the signature cards.
+//   • Explicit A4 pages with thead repeated on every page; several lists
+//     can print in one PDF.
 //
 // The Columns setting hides data everywhere (print AND Excel): changes are
 // saved to the list instantly so the server-side Excel export always matches.
@@ -82,7 +90,17 @@ const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arab
 const PAGE_W_MM = 210
 const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (Chrome blank-page fix)
 const SIDE_PAD_MM = 8
+/** LEGACY bottom budget kept ONLY inside the pagination formulas so the row
+ *  chunking (rows per page) stays byte-identical to the previous layout. */
 const FOOTER_MM = 4
+/** real render gap between the note line and the letterhead footer band */
+const BAND_GAP_BOTTOM_MM = 1
+/** signature cards bottom edge → note line: the boss's 3mm */
+const GAP_SIG_NOTE_MM = 3
+/** note line height estimate (7.5pt leading-snug ≈ 3.6mm real) */
+const NOTE_MM = 3
+/** minimum breathing room kept between the trade summary and the cards */
+const SPACER_MIN_MM = 2.4
 
 const DEFAULT_LETTERHEAD: LetterheadConfig = {
   mode: 'none',
@@ -370,7 +388,11 @@ export function NameListSheetDocument({
   const contHeaderMm = 8 // continuation mini header + thead
 
   const rowsMm = list.workers.map((w) => rowHeightMm(w, isMob ? false : hasResultCol && !w.result, hasRemarks))
-  const tailMm = chipsMm + 2 + signaturesMm
+  // what the LAST page must additionally hold below its rows: chips row +
+  // spacer floor + signature cards + the 3mm to the note line + the note.
+  // Row chunking itself is UNCHANGED (same limits as the previous layout) —
+  // only this tail-fit test got stricter because the cards bottom-pin now.
+  const tailMm = chipsMm + 2.2 + SPACER_MIN_MM + GAP_SIG_NOTE_MM + signaturesMm + NOTE_MM
 
   const availFirst = PAGE_H_MM - geo.topMm - (geo.bottomMm + FOOTER_MM) - page1FixedMm
   const availRest = PAGE_H_MM - geo.topMm - (geo.bottomMm + FOOTER_MM) - contHeaderMm
@@ -393,8 +415,8 @@ export function NameListSheetDocument({
   }
   chunks.push(cur)
 
-  // tail (chips + signatures) flows onto the last items page if it fits,
-  // otherwise continues on a fresh page (never stranded without the chips)
+  // tail (trade summary + signature cards) stays on the last items page only
+  // when the whole bottom stack fits; otherwise it continues on a fresh page
   const lastChunkUsed = used
   const cap = chunks.length === 1 ? availFirst : availRest
   let tailOnLastItemsPage = lastChunkUsed + tailMm <= cap
@@ -535,7 +557,7 @@ export function NameListSheetDocument({
               className="absolute inset-x-0 top-0 z-10 flex h-full flex-col [&>*]:shrink-0"
               style={{
                 paddingTop: `${geo.topMm}mm`,
-                paddingBottom: `${geo.bottomMm + FOOTER_MM}mm`,
+                paddingBottom: `${geo.bottomMm + BAND_GAP_BOTTOM_MM}mm`,
                 paddingLeft: `${SIDE_PAD_MM}mm`,
                 paddingRight: `${SIDE_PAD_MM}mm`,
               }}
@@ -720,50 +742,61 @@ export function NameListSheetDocument({
                 </>
               )}
 
-              {/* tail — trade chips + total capsule + signature cards */}
+              {/* tail — LAST PAGE ONLY. The trade summary stays in the TOP
+                  group (right under the table); the signature cards are pinned
+                  to the bottom: spacer → cards → 3mm → note line. */}
               {plan.hasTail ? (
-                <div className="mt-[2.2mm]">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-[4px]">
-                      {[...trades.entries()].map(([t, n]) => (
-                        <span
-                          key={t}
-                          className="rounded-full px-2 py-[1.6px] text-[8pt]"
-                          style={{ border: `1px solid ${BORDER}`, color: '#374151' }}
-                        >
-                          {t} <b style={{ color: NAVY }}>{n}</b>
-                        </span>
-                      ))}
-                    </div>
-                    <span
-                      className="rounded-full px-3 py-[2px] text-[8.5pt] font-bold text-white"
-                      style={{ background: NAVY }}
-                    >
-                      Total <span style={{ color: LIGHT_GOLD }}>{list.workers.length}</span> Workers
-                    </span>
+                <div className="mt-[2.2mm] flex flex-wrap items-center justify-between gap-2" data-nl-chips>
+                  <div className="flex flex-wrap items-center gap-[4px]">
+                    {[...trades.entries()].map(([t, n]) => (
+                      <span
+                        key={t}
+                        className="rounded-full px-2 py-[1.6px] text-[8pt]"
+                        style={{ border: `1px solid ${BORDER}`, color: '#374151' }}
+                      >
+                        {t} <b style={{ color: NAVY }}>{n}</b>
+                      </span>
+                    ))}
                   </div>
-
-                  {/* signature cards */}
-                  <div className="mt-[2.4mm] grid grid-cols-2 gap-3">
-                    <SignatureCard
-                      title="Prepared by"
-                      stamp="Company Stamp"
-                    />
-                    <SignatureCard
-                      title={isMob ? 'Received by (Client / Site)' : 'Interviewed by (Client)'}
-                      stamp={isMob ? 'Site Stamp' : 'Client Stamp'}
-                    />
-                  </div>
+                  <span
+                    className="rounded-full px-3 py-[2px] text-[8.5pt] font-bold text-white"
+                    style={{ background: NAVY }}
+                  >
+                    Total <span style={{ color: LIGHT_GOLD }}>{list.workers.length}</span> Workers
+                  </span>
                 </div>
               ) : null}
-            </div>
 
-            {/* footer strip — page X of Y */}
-            <div
-              className="pointer-events-none absolute inset-x-0 z-10 flex items-center justify-center"
-              style={{ bottom: `${geo.bottomMm + 0.8}mm` }}
-            >
-              <p className="text-[7.5pt] font-semibold tracking-[0.3pt] uppercase" style={{ color: MUTED }}>
+              {/* the flexible spacer — empty space goes BETWEEN the trade
+                  summary and the signature cards, never below them */}
+              {plan.hasTail ? (
+                <div className="w-full" style={{ flex: '1 1 0', minHeight: `${SPACER_MIN_MM}mm` }} />
+              ) : null}
+
+              {/* signature cards — pinned group, last page only */}
+              {plan.hasTail ? (
+                <div className="grid grid-cols-2 gap-3" data-nl-signatures>
+                  <SignatureCard
+                    title="Prepared by"
+                    stamp="Company Stamp"
+                  />
+                  <SignatureCard
+                    title={isMob ? 'Received by (Client / Site)' : 'Interviewed by (Client)'}
+                    stamp={isMob ? 'Site Stamp' : 'Client Stamp'}
+                  />
+                </div>
+              ) : null}
+
+              {/* exactly 3mm: signature cards bottom edge → the footer note */}
+              {plan.hasTail ? <div style={{ height: `${GAP_SIG_NOTE_MM}mm` }} /> : null}
+
+              {/* note line — the page footer, at the bottom of the content
+                  column on EVERY page (1mm above the letterhead footer band) */}
+              <p
+                className="break-words text-center text-[7.5pt] font-semibold leading-snug tracking-[0.3pt] uppercase"
+                style={{ color: MUTED }}
+                data-nl-note
+              >
                 Page {pageIdx + 1} of {totalPages}
                 <span className="mx-1.5 opacity-50">|</span>
                 <span lang="ar" dir="rtl" className="tracking-normal">

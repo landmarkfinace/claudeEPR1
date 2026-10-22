@@ -2234,3 +2234,26 @@ Stage Summary:
 - Deliverables in /home/z/my-project/download/: 6 test PDFs (E-Invoice-INV-2026-0000{1,4,5}_{2,6,25}items_{With,Without}Letterhead_{1,2,3}page(s).pdf) + e-invoice-layout-test-results.json.
 - Keepers in scripts/: ei-layout-seed.ts (demo data), ei-layout-pdfs.mjs (regenerate PDFs), ei-verify-pdfs.py (verify suite).
 - DB state: letterhead header_footer with recovered artwork (45/25), companyName = full legal name, INV-1 poRef = client P.O., 2 extra issued demo invoices (00004/00005) for layout testing.
+
+---
+Task ID: NAMELIST-SIGNATURE-PIN
+Agent: main (Z.ai Code)
+Task: Boss request — SIGNATURE ROW POSITION, Name List module ONLY. Pin the "Prepared by" / "Interviewed·Received by" signature cards to the BOTTOM of the LAST page, directly above the footer; empty space must sit between the trade summary and the cards, never below them. Rows per page, column layout, letterhead, fonts, Arabic and data all unchanged. No other module touched.
+
+Work Log:
+- Studied name-list-sheet-print.tsx (tail = chips + cards flowed right after the table; "Page X of Y" strip absolutely positioned in a 4mm band; column pad bottom = band + 4mm).
+- Rewrote the layout to the approved E-Invoice pinning pattern: every page is a flex column filling the full content area — table + trade summary at the top, a flexible spacer (flex 1 1 0, min 2.4mm) absorbing the empty space BETWEEN them and the cards, then the cards, exactly 3mm (GAP_SIG_NOTE_MM), then the "Page X of Y | صفحة" note line as the last flex child at the very bottom of the column on EVERY page (1mm above the reserved band; 4mm above the footer artwork with the geometryFor +3 breathing). The absolute footer strip was removed (replaced by the in-column note line).
+- Pagination math: row chunking limits byte-identical (legacy FOOTER_MM=4 kept as the budget term so rows per page can never change; any real-space delta is <2.6mm, far below the 2.6mm row quantum). Only the tail-fit test got stricter: tailMm now = chips + 2.2 + spacer floor 2.4 + 3mm + cards 30 + note 3 (was chips+2+cards), so a nearly-full last items page pushes the tail to a fresh page instead of overflowing the pinned group. Column render pad bottom band+1mm (was band+4mm).
+- Geometry constants: BAND_GAP_BOTTOM_MM=1, GAP_SIG_NOTE_MM=3, NOTE_MM=3, SPACER_MIN_MM=2.4; data-nl-chips / data-nl-signatures / data-nl-note hooks for measurement.
+- Test data (scripts/nl-layout-seed.ts, real API, idempotent via NL-LAYOUT-TEST notes marker): NL-2026-0003 Trade Test & Interview · 5 workers · EPIS · sent; NL-2026-0004 same subject · 25 workers · GCC · sent. Interview rows print tick-box results (12mm rows).
+- PDFs (scripts/nl-layout-pdfs.mjs — puppeteer drives the real app, measures the live DOM in mm, serializes .print-area through the real /api/print-pdf vector pipeline; letterhead left exactly as configured, no toggling): NL-2026-0003 → 1 page; NL-2026-0004 → 2 pages (p1: 14 rows, table only, note; p2: 11 rows + chips + spacer + cards + 3mm + note).
+- Measured (DOM, exact): sig cards bottom edge → note line top = 3.00mm; note bottom 29mm from page bottom = 4mm above the footer artwork (25mm); spacer 87.45mm (5-worker) / 59.13mm (25-worker p2); chips sit right under the table (top group). PDF-side (pymupdf): sig→note 3.14mm (text-ink bbox), note→artwork 4.34mm, nothing below the cards but the 3mm + note (note bottom 29.89mm above page bottom).
+- Verification (scripts/nl-verify-pdfs.py): 35/35 checks pass — page counts, A4 size, letterhead artwork on every page, EN+AR note line on every page, cards/capsule only on the last page, exact 3mm/4mm gaps, empty-space placement, DOM cross-checks.
+- Change scope: git shows ONLY name-list-sheet-print.tsx modified in src/ (+3 new scripts); the sheet component is imported only by the name-list view. Existing lists NL-2026-0001/0002 keep their page counts (chunk limits unchanged; both tails fit the stricter test by >25mm margin) — they now get the pinned cards too, which is the intended module-wide behaviour.
+- bunx tsc clean; eslint clean on the changed file (the single remaining error is the pre-existing set-state-in-effect pattern on an untouched line).
+
+Stage Summary:
+- Name List signature cards now bottom-pin on the last page of every list; all other documents untouched by construction.
+- Deliverables in /home/z/my-project/download/: Name-List-NL-2026-0003_5workers_1page.pdf, Name-List-NL-2026-0004_25workers_2pages.pdf, name-list-layout-test-results.json.
+- Keepers in scripts/: nl-layout-seed.ts, nl-layout-pdfs.mjs, nl-verify-pdfs.py.
+- DB state: 2 extra sent demo lists (NL-2026-0003 5 workers / NL-2026-0004 25 workers) for layout testing.
