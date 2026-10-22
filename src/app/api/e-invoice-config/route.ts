@@ -1,8 +1,8 @@
 // E-Invoice print & translation config API — GET / PUT /api/e-invoice-config
 // Setting keys (stored in the shared Setting table):
 //   einvoice_letterhead               data URL ('' when unset)
-//   einvoice_letterhead_top_mm        '35'
-//   einvoice_letterhead_bottom_mm     '22'
+//   einvoice_letterhead_top_mm        '45'
+//   einvoice_letterhead_bottom_mm     '25'
 //   einvoice_signature                data URL
 //   einvoice_stamp                    data URL
 //   einvoice_show_receiver_signature  'true'
@@ -34,8 +34,8 @@ const KEYS = [
 
 const DEFAULTS: Record<(typeof KEYS)[number], string> = {
   einvoice_letterhead: '',
-  einvoice_letterhead_top_mm: '35',
-  einvoice_letterhead_bottom_mm: '22',
+  einvoice_letterhead_top_mm: '45',
+  einvoice_letterhead_bottom_mm: '25',
   einvoice_signature: '',
   einvoice_stamp: '',
   einvoice_show_receiver_signature: 'true',
@@ -77,8 +77,8 @@ export async function GET() {
     const map = await readConfigMap()
     return ok({
       letterhead: map.einvoice_letterhead ?? DEFAULTS.einvoice_letterhead,
-      topMm: clampMm(map.einvoice_letterhead_top_mm ?? DEFAULTS.einvoice_letterhead_top_mm, 35),
-      bottomMm: clampMm(map.einvoice_letterhead_bottom_mm ?? DEFAULTS.einvoice_letterhead_bottom_mm, 22),
+      topMm: clampMm(map.einvoice_letterhead_top_mm ?? DEFAULTS.einvoice_letterhead_top_mm, 45),
+      bottomMm: clampMm(map.einvoice_letterhead_bottom_mm ?? DEFAULTS.einvoice_letterhead_bottom_mm, 25),
       signature: map.einvoice_signature ?? DEFAULTS.einvoice_signature,
       stamp: map.einvoice_stamp ?? DEFAULTS.einvoice_stamp,
       showReceiverSignature: (map.einvoice_show_receiver_signature ?? DEFAULTS.einvoice_show_receiver_signature) === 'true',
@@ -168,8 +168,8 @@ export async function PUT(req: NextRequest) {
     const map = await readConfigMap()
     return ok({
       letterhead: map.einvoice_letterhead ?? DEFAULTS.einvoice_letterhead,
-      topMm: clampMm(map.einvoice_letterhead_top_mm ?? DEFAULTS.einvoice_letterhead_top_mm, 35),
-      bottomMm: clampMm(map.einvoice_letterhead_bottom_mm ?? DEFAULTS.einvoice_letterhead_bottom_mm, 22),
+      topMm: clampMm(map.einvoice_letterhead_top_mm ?? DEFAULTS.einvoice_letterhead_top_mm, 45),
+      bottomMm: clampMm(map.einvoice_letterhead_bottom_mm ?? DEFAULTS.einvoice_letterhead_bottom_mm, 25),
       signature: map.einvoice_signature ?? DEFAULTS.einvoice_signature,
       stamp: map.einvoice_stamp ?? DEFAULTS.einvoice_stamp,
       showReceiverSignature: (map.einvoice_show_receiver_signature ?? DEFAULTS.einvoice_show_receiver_signature) === 'true',

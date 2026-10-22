@@ -91,8 +91,8 @@ export function EInvoiceSettingsSection() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<ImageField | null>(null)
 
-  const [topMm, setTopMm] = useState('35')
-  const [bottomMm, setBottomMm] = useState('22')
+  const [topMm, setTopMm] = useState('45')
+  const [bottomMm, setBottomMm] = useState('25')
   const [showReceiver, setShowReceiver] = useState(true)
   const [provider, setProvider] = useState('builtin')
   const [apiKey, setApiKey] = useState('')
@@ -278,6 +278,11 @@ export function EInvoiceSettingsSection() {
         Print template for the bilingual ZATCA tax invoices — full-page A4 letterhead artwork,
         content margins, signature and stamp, and the Arabic auto-translation provider.
       </p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Without a full-page upload here, the invoice prints the shared company letterhead
+        (Settings → the letterhead manager — 45mm header + 25mm footer artwork) on every page;
+        with no letterhead at all, the same 45mm / 25mm zones stay completely empty.
+      </p>
 
       {loading ? (
         <div className="mt-6 flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
@@ -352,9 +357,9 @@ export function EInvoiceSettingsSection() {
                 disabled={!canEdit}
               />
               <p className="text-xs text-muted-foreground">
-                Reserved height of the letterhead&apos;s top band. Without uploaded
-                artwork the band prints with the striped placeholder zone from
-                the approved template. Default 35.
+                Reserved height of the letterhead&apos;s top band (shared-company
+                default: 45). Without any letterhead the band prints EMPTY —
+                no placeholder stripes, no text. Default 45.
               </p>
             </div>
             <div className="space-y-2">
@@ -369,16 +374,16 @@ export function EInvoiceSettingsSection() {
                 disabled={!canEdit}
               />
               <p className="text-xs text-muted-foreground">
-                Reserved height of the bottom band. Without uploaded artwork the
-                band prints with the striped placeholder zone. Default 22.
+                Reserved height of the bottom band (shared-company default:
+                25). Without any letterhead the band prints EMPTY. Default 25.
               </p>
             </div>
           </div>
           <p className="-mt-2 text-xs text-muted-foreground">
             The invoice body starts below the top margin and stops above the bottom one — it never
-            overlaps the letterhead artwork. With no letterhead uploaded the
-            striped placeholder zones mark the bands, and a typical invoice
-            still fits ONE nicely-filled A4 page.
+            overlaps the letterhead artwork. Without any letterhead the reserved bands stay
+            completely empty, and a typical invoice still fits ONE A4 page (the layout is
+            measured automatically before the PDF is created).
           </p>
 
           <div className="grid gap-5 sm:grid-cols-2">

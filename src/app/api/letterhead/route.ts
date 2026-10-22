@@ -3,9 +3,9 @@
 // header/footer/full-page artwork, layout mode, reserved heights and the
 // textual company-details toggle. Images arrive as base64 data URLs and are
 // validated (PNG/JPEG only, magic-byte sniffed, ≤ 2 MB decoded).
-// GET requires quotations.view OR supplierpo.view (both print documents read
-// this config); PUT requires quotations.edit OR supplierpo.edit (the shared
-// design can be managed from either module).
+// GET requires quotations.view / supplierpo.view / einvoices.view (the
+// print documents that read this config); PUT requires quotations.edit OR
+// supplierpo.edit (the shared design can be managed from either module).
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
@@ -56,9 +56,14 @@ export async function GET() {
   try {
     const user = await getSessionUser()
     if (!user) return unauthorized()
-    // The company letterhead powers the printed Quotation AND Supplier P.O.
-    // documents — either module's view permission grants read access.
-    if (!hasPermission(user, 'quotations.view') && !hasPermission(user, 'supplierpo.view')) {
+    // The company letterhead powers the printed Quotation, Supplier P.O. and
+    // E-Invoice documents — any of those modules' view permission grants read
+    // access.
+    if (
+      !hasPermission(user, 'quotations.view') &&
+      !hasPermission(user, 'supplierpo.view') &&
+      !hasPermission(user, 'einvoices.view')
+    ) {
       return forbidden()
     }
     return ok(await readConfig())

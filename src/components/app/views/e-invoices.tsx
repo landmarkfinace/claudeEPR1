@@ -49,7 +49,7 @@ import { amountInWordsBoth } from '@/lib/arabic-words'
 import { fileToDataUrl } from '@/lib/image-data-url'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
-import type { ClientRow, EInvoiceConfig, EInvoiceRow, Paginated } from '@/lib/types'
+import type { ClientRow, EInvoiceConfig, EInvoiceRow, LetterheadConfig, Paginated } from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -707,6 +707,11 @@ export function EInvoicesView() {
   const [eiConfig, setEiConfig] = useState<EInvoiceConfig | null>(null)
   const configRef = useRef<EInvoiceConfig | null>(null)
   const configLoaded = useRef(false)
+  // shared company letterhead (45mm header + 25mm footer artwork) — cached
+  // after the first read and passed to the print dialog
+  const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
+  const letterheadRef = useRef<LetterheadConfig | null>(null)
+  const letterheadLoaded = useRef(false)
 
   // guard against out-of-order responses when filters/page change quickly
   const requestId = useRef(0)
@@ -808,6 +813,19 @@ export function EInvoicesView() {
       setEiConfig(res)
     } catch {
       // fall back to defaults inside the print component
+    }
+  }, [])
+
+  /** Shared company letterhead — cached after the first read. */
+  const loadLetterhead = useCallback(async () => {
+    if (letterheadLoaded.current) return
+    letterheadLoaded.current = true
+    try {
+      const res = await api.get<LetterheadConfig>('/api/letterhead')
+      letterheadRef.current = res
+      setLetterhead(res)
+    } catch {
+      // no letterhead → the print component reserves empty 45/25mm bands
     }
   }, [])
 
@@ -1772,6 +1790,7 @@ export function EInvoicesView() {
   /** Live preview of the UNSAVED form — rendered by the same print component. */
   function openDraftPreview() {
     void loadConfig()
+    void loadLetterhead()
     setQrDataUrl(null) // QR available after save
     setPrintInvoice(null)
     setDraftPreview(buildDraftRow())
@@ -1783,6 +1802,7 @@ export function EInvoicesView() {
     setPrintLoading(true)
     try {
       void loadConfig()
+      void loadLetterhead()
       const [full, qr] = await Promise.all([
         api.get<EInvoiceRow>(`/api/e-invoices/${row.id}`),
         api.get<{ qrPayload: string; qrDataUrl: string }>(`/api/e-invoices/${row.id}/qr`),
@@ -3662,6 +3682,7 @@ export function EInvoicesView() {
       <EInvoicePrintDialog
         invoice={printInvoice ?? draftPreview}
         config={eiConfig}
+        letterhead={letterhead}
         qrDataUrl={qrDataUrl}
         open={printOpen}
         onOpenChange={(v) => {
