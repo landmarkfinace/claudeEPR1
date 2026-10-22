@@ -24,6 +24,7 @@ import {
   Loader2,
   Lock,
   Pencil,
+  Plus,
   Printer,
   Trash2,
   UserPlus,
@@ -59,6 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { PageHeader, SectionCard } from '@/components/app/shared/page-header'
 import { StatCard } from '@/components/app/shared/stat-card'
@@ -489,7 +491,9 @@ function BulkRateApply({
 }
 
 // ---------------------------------------------------------------------------
-// Add Client — create the client company inline (then add its workers).
+// Add Client — companies already added in Client Management are auto-shown
+// in a searchable picker (pick one), or create a new company inline. Either
+// way the Add Worker dialog opens right after, locked to that client.
 // ---------------------------------------------------------------------------
 
 const EMPTY_CLIENT_FORM = {
@@ -505,24 +509,49 @@ const EMPTY_CLIENT_FORM = {
 function AddClientDialog({
   open,
   onOpenChange,
-  onCreated,
+  onSelected,
+  clients,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  onCreated: (client: { id: string; name: string }) => void
+  /** Called with the picked (existing) or newly created client */
+  onSelected: (client: { id: string; name: string }) => void
+  /** Companies already added in Client Management — auto-shown in the picker */
+  clients: ClientOption[]
 }) {
   const [form, setForm] = useState(EMPTY_CLIENT_FORM)
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState<'existing' | 'new'>('existing')
+  const [query, setQuery] = useState('')
+  const [picked, setPicked] = useState<ClientOption | null>(null)
 
   // Reset every time the dialog opens (draft state lives only while open)
   useEffect(() => {
-    if (open) setForm(EMPTY_CLIENT_FORM)
+    if (open) {
+      setForm(EMPTY_CLIENT_FORM)
+      setTab('existing')
+      setQuery('')
+      setPicked(null)
+    }
   }, [open])
 
   const set =
     (k: keyof typeof EMPTY_CLIENT_FORM) =>
     (e: ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  // Client Management companies matching the search box (alphabetical)
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const list = q ? clients.filter((c) => c.name.toLowerCase().includes(q)) : clients
+    return [...list].sort((a, b) => a.name.localeCompare(b.name))
+  }, [clients, query])
+
+  // Exact name typed in the New tab that already exists in Client Management
+  const duplicate = useMemo(() => {
+    const n = form.name.trim().toLowerCase()
+    return n ? clients.find((c) => c.name.toLowerCase() === n) ?? null : null
+  }, [clients, form.name])
 
   async function submit() {
     const name = form.name.trim()
@@ -548,7 +577,7 @@ function AddClientDialog({
       })
       toast.success(`${res.name} created — now add its workers`)
       onOpenChange(false)
-      onCreated({ id: res.id, name: res.name })
+      onSelected({ id: res.id, name: res.name })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create the client')
     } finally {
@@ -562,56 +591,159 @@ function AddClientDialog({
         <DialogHeader>
           <DialogTitle>Add client company</DialogTitle>
           <DialogDescription>
-            Create the client company this summary bills. Right after this, add its workers —
-            name, iqama no, project, total hours and rate.
+            Companies already added in Client Management are listed below — pick one, or create a
+            new company. Right after this, add its workers — name, iqama no, project, total hours
+            and rate.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="ac-name">Client name *</Label>
+
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'existing' | 'new')}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="existing">
+              <Building2 className="h-3.5 w-3.5" />
+              Existing company
+            </TabsTrigger>
+            <TabsTrigger value="new">
+              <Plus className="h-3.5 w-3.5" />
+              New company
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Existing — every company from Client Management, auto-shown */}
+          <TabsContent value="existing" className="mt-4 space-y-3">
             <Input
-              id="ac-name"
-              placeholder="e.g. Saudia Marine Services Co."
-              value={form.name}
-              onChange={set('name')}
-              maxLength={120}
+              autoFocus
+              placeholder="Search client companies…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="ac-name-ar">Arabic name</Label>
-              <Input id="ac-name-ar" dir="rtl" placeholder="الاسم بالعربية" value={form.nameAr} onChange={set('nameAr')} maxLength={160} />
+            <div
+              role="listbox"
+              aria-label="Client Management companies"
+              className="max-h-[240px] space-y-1 overflow-y-auto rounded-md border bg-muted/20 p-1"
+            >
+              {filtered.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  {clients.length === 0
+                    ? 'No companies in Client Management yet — use New company to create one.'
+                    : `No company matches “${query.trim()}” — use New company to create it.`}
+                </p>
+              ) : (
+                filtered.map((c) => {
+                  const active = picked?.id === c.id
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => setPicked(c)}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
+                        active ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted'
+                      )}
+                    >
+                      <Building2
+                        className={cn(
+                          'h-4 w-4 shrink-0',
+                          active ? 'text-primary' : 'text-muted-foreground'
+                        )}
+                      />
+                      <span className="truncate">{c.name}</span>
+                      {active ? <Check className="ml-auto h-4 w-4 shrink-0" /> : null}
+                    </button>
+                  )
+                })
+              )}
             </div>
+            {picked ? (
+              <p className="text-xs text-muted-foreground">
+                Workers you add next are billed under{' '}
+                <span className="font-medium text-foreground">{picked.name}</span>.
+              </p>
+            ) : null}
+          </TabsContent>
+
+          {/* New — create the company (it is added to Client Management) */}
+          <TabsContent value="new" className="mt-4 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="ac-contact">Contact person</Label>
-              <Input id="ac-contact" placeholder="e.g. Eng. Khalid" value={form.contactPerson} onChange={set('contactPerson')} maxLength={80} />
+              <Label htmlFor="ac-name">Client name *</Label>
+              <Input
+                id="ac-name"
+                placeholder="e.g. Saudia Marine Services Co."
+                value={form.name}
+                onChange={set('name')}
+                maxLength={120}
+              />
+              {duplicate ? (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  “{duplicate.name}” already exists in Client Management —{' '}
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2"
+                    onClick={() => {
+                      setQuery(duplicate.name)
+                      setPicked(duplicate)
+                      setTab('existing')
+                    }}
+                  >
+                    pick it instead
+                  </button>
+                </p>
+              ) : null}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ac-phone">Phone</Label>
-              <Input id="ac-phone" placeholder="e.g. 013 341 0000" value={form.phone} onChange={set('phone')} maxLength={40} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="ac-name-ar">Arabic name</Label>
+                <Input id="ac-name-ar" dir="rtl" placeholder="الاسم بالعربية" value={form.nameAr} onChange={set('nameAr')} maxLength={160} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ac-contact">Contact person</Label>
+                <Input id="ac-contact" placeholder="e.g. Eng. Khalid" value={form.contactPerson} onChange={set('contactPerson')} maxLength={80} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ac-phone">Phone</Label>
+                <Input id="ac-phone" placeholder="e.g. 013 341 0000" value={form.phone} onChange={set('phone')} maxLength={40} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ac-city">City</Label>
+                <Input id="ac-city" placeholder="e.g. Jubail" value={form.city} onChange={set('city')} maxLength={60} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ac-cr">CR number</Label>
+                <Input id="ac-cr" placeholder="Commercial registration" value={form.crNumber} onChange={set('crNumber')} maxLength={40} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ac-vat">VAT number</Label>
+                <Input id="ac-vat" placeholder="15 digits (optional)" value={form.vatNumber} onChange={set('vatNumber')} maxLength={30} />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ac-city">City</Label>
-              <Input id="ac-city" placeholder="e.g. Jubail" value={form.city} onChange={set('city')} maxLength={60} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ac-cr">CR number</Label>
-              <Input id="ac-cr" placeholder="Commercial registration" value={form.crNumber} onChange={set('crNumber')} maxLength={40} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ac-vat">VAT number</Label>
-              <Input id="ac-vat" placeholder="15 digits (optional)" value={form.vatNumber} onChange={set('vatNumber')} maxLength={30} />
-            </div>
-          </div>
-        </div>
+          </TabsContent>
+        </Tabs>
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button type="button" disabled={busy} onClick={() => void submit()}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
-            Create client
-          </Button>
+          {tab === 'existing' ? (
+            <Button
+              type="button"
+              disabled={!picked}
+              onClick={() => {
+                if (!picked) return
+                onOpenChange(false)
+                onSelected(picked)
+              }}
+            >
+              <UserPlus className="h-4 w-4" />
+              Add workers for this company
+            </Button>
+          ) : (
+            <Button type="button" disabled={busy || !!duplicate} onClick={() => void submit()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+              Create client
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2075,11 +2207,13 @@ export function ClientSalarySummaryView() {
         </p>
       </div>
 
-      {/* Add client → then add its workers under it */}
+      {/* Add client → pick an existing Client Management company (auto-shown)
+          or create a new one → then add its workers under it */}
       <AddClientDialog
         open={clientDialogOpen}
         onOpenChange={setClientDialogOpen}
-        onCreated={(c) => {
+        clients={clientOptions}
+        onSelected={(c) => {
           setClientOptions((prev) => (prev.some((x) => x.id === c.id) ? prev : [...prev, c]))
           setWorkerDialog({ open: true, client: c, editing: null })
         }}

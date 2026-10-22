@@ -2284,3 +2284,18 @@ Stage Summary:
 - Deliverables in /home/z/my-project/download/: Agreement-AGR-2025-0001_Green Forest Company Limited..pdf (the sample agreement), Agreement-AGR-2025-0002_Gulf Manpower Solutions.pdf (amount mode, expired), Agreement-REFERENCE-original-template.pdf (the uploaded file as a browser prints it), Agreement-ERP-vs-original-template-side-by-side.png, agreement-layout-test-results.json + QA screenshots.
 - Keepers in scripts/: agr-make-fonts.mjs (regenerate fonts), agreement-seed.ts (idempotent seed), agr-verify-pdfs.mjs/.py (PDF comparison suite), agr-vlm-check.mjs (VLM visual QA).
 - DB state: 2 seeded agreements (AGR-2025-0001 sample / AGR-2025-0002 amount-mode expired) + Sub-Contract Agreement template + Gusan/Green Forest saved parties + fax + Arabic signatory settings; boss should upload the real company signature + stamp in Settings.
+
+---
+Task ID: CSS-ADDCLIENT-AUTOSHOW
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): "Client Salary Summary module e add client e auto company show korbe je Client Management e je client add thakbe ta" — when adding a client in the Client Salary Summary module, the companies already added in Client Management must show up automatically (instead of the old blank create-only form).
+
+Work Log:
+- Located the flow: "Add Client" button → AddClientDialog (blank text form creating a NEW client via POST /api/clients) → then Add Worker dialog. The Add Worker dialog already had a Client Management dropdown; the Add Client dialog was the gap.
+- Rewrote AddClientDialog (views/client-salary-summary.tsx) as a two-tab dialog: "Existing company" (default) — live search + alphabetical auto-list of every active company from Client Management (same /api/clients source the module already fetches), click to select, primary button "Add workers for this company" opens the Add Worker dialog locked to that client (no duplicate company created); "New company" — the original create form, now with a duplicate guard: typing a name that already exists in Client Management disables Create and shows an amber "already exists — pick it instead" shortcut that jumps back to the picker with that company pre-selected.
+- Dialog resets to the picker tab with cleared search/selection each time it opens; rename onCreated→onSelected + new clients prop wired at the usage site (clientOptions).
+- Verification: bunx tsc --noEmit clean; dev server compiles and serves ?view=client-salary-summary 200; eslint on the file = same 3 pre-existing repo-wide set-state-in-effect convention errors as at HEAD (same count before/after — the dialog-reset idiom shared by every sibling dialog); no other module touched.
+
+Stage Summary:
+- In Client Salary Summary, "Add Client" now auto-shows all Client Management companies in a searchable picker — pick an existing one (no re-typing, no duplicate companies) or create a new one; either way the Add Worker dialog opens right after locked to that client.
+- Committed as 89d44b4 (only views/client-salary-summary.tsx; the unrelated pre-existing prisma/schema.prisma modification was left unstaged).
