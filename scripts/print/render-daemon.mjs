@@ -48,10 +48,14 @@ function log(line) {
   } catch {}
 }
 
-// ── static asset roots (prod standalone first, then the source build) ──────
+// ── static asset roots ─────────────────────────────────────────────────────
+// prod standalone → Turbopack DEV build (.next/dev/static, created by
+// `next dev` — CSS lives in .next/dev/static/chunks, fonts in ../media) →
+// source prod build (.next/static).
 function resolveStaticDir() {
   for (const candidate of [
     path.join(REPO, '.next', 'standalone', '.next', 'static'),
+    path.join(REPO, '.next', 'dev', 'static'),
     path.join(REPO, '.next', 'static'),
   ]) {
     // compiled CSS lives under static/css (webpack) or static/chunks (Turbopack)
@@ -236,11 +240,12 @@ const server = http.createServer((req, res) => {
           css += fs.readFileSync(path.join(dir, f), 'utf8') + '\n'
         }
       }
-      // The compiled @font-face rules use url(../media/…) relative to the
-      // css/chunks dir — rewrite to this daemon's absolute static path so the
-      // webfonts (Inter + Cairo subsets) actually load in the render page.
-      css = css.replace(/url\(\.\.\/media\//g, 'url(/_next/static/media/')
-      css = css.replace(/url\(\.\.\/chunks\//g, 'url(/_next/static/chunks/')
+      // The compiled @font-face rules use url(../media/…) (Turbopack dev
+      // emits them QUOTED: url("../media/…")) relative to the css/chunks
+      // dir — rewrite to this daemon's absolute static path so the webfonts
+      // (Inter + Cairo subsets) actually load in the render page.
+      css = css.replace(/url\((["']?)\.\.\/media\//g, 'url($1/_next/static/media/')
+      css = css.replace(/url\((["']?)\.\.\/chunks\//g, 'url($1/_next/static/chunks/')
       // next/font defines --font-inter / --font-cairo on generated
       // `.__variable_*` classes applied to the app <body>. A serialized print
       // fragment doesn't carry them — hoist every --font-* custom property
