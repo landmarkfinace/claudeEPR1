@@ -55,6 +55,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/app/shared/empty-state'
 import { SectionCard } from '@/components/app/shared/page-header'
 import { StatTile } from '@/components/app/shared/stat-tile'
+import { PrayerTimesCard } from '@/components/app/dashboard/prayer-times-card'
 import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { api } from '@/lib/api-client'
 import { formatDate, formatDateTime, formatMoney, formatNumber } from '@/lib/format'
@@ -1353,6 +1354,9 @@ export function DashboardView() {
       />
 
       <AttentionStrip items={attention} onOpen={setView} />
+
+      {/* Prayer times — locally calculated (Umm Al-Qura), rolls over at midnight */}
+      <PrayerTimesCard />
 
       {/* Metric tiles — every original "more info" link is kept; trends show
           where previous-period data exists */}

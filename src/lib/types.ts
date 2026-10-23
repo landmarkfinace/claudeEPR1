@@ -931,6 +931,15 @@ export type AiMessage = {
   streaming?: boolean
 }
 
+/** Prayer times widget config (GET/PUT /api/prayer-times/settings). */
+export type PrayerTimesSettingsView = {
+  city: string
+  latitude: number
+  longitude: number
+  timezone: string
+  notificationsEnabled: boolean
+}
+
 export type AiSettingsView = {
   provider: 'builtin' | 'zhipu' | 'anthropic' | 'openai'
   model: string

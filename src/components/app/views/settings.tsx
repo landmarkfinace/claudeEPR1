@@ -27,6 +27,7 @@ import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
 import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
 import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
+import { PrayerTimesSettingsSection } from '@/components/app/settings/prayer-times-settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -785,6 +786,9 @@ export function SettingsView() {
 
         {/* ---- Name List subjects ---- */}
         <NameListSettingsSection />
+
+        {/* ---- Prayer times (dashboard widget) ---- */}
+        <PrayerTimesSettingsSection canEdit={canEdit} />
 
         {/* ---- EN→AR translation glossary ---- */}
         <GlossarySettingsSection />
