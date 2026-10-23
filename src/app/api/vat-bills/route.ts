@@ -57,7 +57,11 @@ function quarterRange(year: number, quarter: number): { start: Date; end: Date }
   const startMonth = (quarter - 1) * 3 // 0-based
   return {
     start: new Date(year, startMonth, 1, 0, 0, 0, 0),
-    end: endOfDay(new Date(year, startMonth + 2, 1)),
+    // day 0 of the month AFTER the quarter's last month = its final day
+    // (Q1 → Mar 31, Q2 → Jun 30, …). The old `startMonth + 2, 1` ended the
+    // range at the 1st of the quarter's last month, silently dropping ~30
+    // days of bills from every quarter.
+    end: endOfDay(new Date(year, startMonth + 3, 0)),
   }
 }
 
@@ -114,7 +118,11 @@ export async function GET(req: NextRequest) {
     } else if (hasMonth && hasYear) {
       where.billDate = {
         gte: new Date(year, month - 1, 1, 0, 0, 0, 0),
-        lte: endOfDay(new Date(year, month, 1)),
+        // day 0 of the NEXT month = the selected month's final day. The old
+        // `new Date(year, month, 1)` (month is 1-based!) leaked the 1st of
+        // the FOLLOWING month into the list — disagreeing with the summary
+        // cards, which use a correct endOfMonth.
+        lte: endOfDay(new Date(year, month, 0)),
       }
     } else if (hasYear) {
       where.billDate = {

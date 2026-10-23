@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params
     const inv = await db.eInvoice.findUnique({
       where: { id },
-      select: { id: true, status: true, invoiceNumber: true },
+      select: { id: true, status: true, invoiceNumber: true, totalDue: true, paidAmount: true },
     })
     if (!inv) return notFound('E-Invoice not found')
     if (inv.status === 'draft') return badRequest('Issue the invoice first')
@@ -78,6 +78,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const paymentDate = parseDate(body.paymentDate)
     if (!paymentDate) return badRequest('Invalid payment date')
+
+    // Overpayment guard: a payment larger than the remaining balance used to
+    // be accepted, driving every balance computation negative (client owes
+    // -SAR X). Over-payments must go through a credit note instead.
+    const remaining = round2(inv.totalDue - inv.paidAmount)
+    if (round2(body.amount) > remaining + 0.005) {
+      return badRequest(
+        `Payment exceeds the remaining balance of ${remaining.toFixed(2)} SAR. Record a partial payment, or issue a credit note for the difference.`
+      )
+    }
 
     const payment = await db.eInvoicePayment.create({
       data: {

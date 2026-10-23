@@ -72,12 +72,22 @@ const quotationSchema = z.object({
   assets: z.array(assetSchema).max(4, 'Too many assets').optional(),
 })
 
-/** Distinct issue-date years present in the table (for the year filter). */
+/** Distinct issue-date years present in the table (for the year filter).
+ *  Uses Prisma, not strftime — this database stores DateTime as ms-epoch
+ *  integers, which SQLite date functions cannot read (strftime returned NULL
+ *  for every row, so the year dropdown silently fell back to current-year
+ *  only — from 2027 on, older quotes could no longer be year-filtered). */
 async function quotationYears(): Promise<number[]> {
-  const rows = await db.$queryRaw<{ y: string }[]>(
-    Prisma.sql`SELECT DISTINCT strftime('%Y', issueDate) AS y FROM Quotation ORDER BY y DESC`
-  )
-  return rows.map((r) => Number(r.y)).filter((y) => Number.isInteger(y) && y >= 1900 && y <= 2200)
+  const rows = await db.quotation.findMany({
+    distinct: ['issueDate'],
+    select: { issueDate: true },
+  })
+  const years = new Set<number>()
+  for (const r of rows) {
+    const y = r.issueDate.getFullYear()
+    if (y >= 1900 && y <= 2200) years.add(y)
+  }
+  return [...years].sort((a, b) => b - a)
 }
 
 export async function GET(req: NextRequest) {

@@ -28,6 +28,12 @@ export async function POST(_req: NextRequest, { params }: Params) {
     })
     if (!source) return notFound('Quotation not found')
 
+    /** Local midnight today — validity dates at/after this are still in the future. */
+    const startOfToday = () => {
+      const d = new Date()
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    }
+
     // Derive the prefix from the source number (QTN-2026-0007 → QTN) so a
     // duplicate keeps the same series.
     const m = /^([A-Za-z0-9]+)-\d{4}-\d+$/.exec(source.quoteNumber)
@@ -43,7 +49,13 @@ export async function POST(_req: NextRequest, { params }: Params) {
           subject: source.subject,
           referenceNo: source.referenceNo,
           issueDate: new Date(),
-          validityDate: source.validityDate,
+          // copy the validity date only while it is still in the future — a
+          // stale past date would make the duplicate's "Valid Until" precede
+          // its own issue date
+          validityDate:
+            source.validityDate && source.validityDate.getTime() >= startOfToday().getTime()
+              ? source.validityDate
+              : null,
           status: 'draft', // duplicates always start as drafts
           subtotal: source.subtotal,
           discount: source.discount,

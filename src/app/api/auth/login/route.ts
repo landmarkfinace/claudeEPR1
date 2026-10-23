@@ -19,7 +19,9 @@ const attempts = new Map<string, { count: number; firstAt: number; lockedUntil: 
 
 function clientIp(req: NextRequest): string {
   const fwd = req.headers.get('x-forwarded-for')
-  return (fwd ? fwd.split(',')[0].trim() : '') || 'local'
+  // LAST entry: the trusted gateway (caddy) appends the real client IP —
+  // client-supplied spoofed entries at the front must not reset the counter.
+  return (fwd ? (fwd.split(',').pop()?.trim() ?? '') : '') || 'local'
 }
 
 function tooManyAttempts(key: string, now: number): number {

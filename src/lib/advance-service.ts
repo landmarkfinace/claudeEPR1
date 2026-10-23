@@ -238,14 +238,23 @@ export async function syncPayrollAdvanceDeductions(
     }))
     .filter((a) => scheduledForAdvance(a, month, year) > 0)
   const room = advanceRoom(grossPay, otherDeductions)
-  const applied = capAdvanceDeductions(schedulable, room, month, year)
-  const advanceTotal = round2(applied.reduce((s, a) => s + a.applied, 0))
+  const appliedRaw = capAdvanceDeductions(schedulable, room, month, year)
 
-  // 4. Fresh deduction rows + balance updates
-  for (const item of applied) {
+  // 4. Fresh deduction rows + balance updates — with a hard invariant: never
+  // deduct more than the advance's own remaining balance. The scheduler is
+  // month-aware and salary-room-capped, but ANY edge case that over-applies
+  // would corrupt WorkerAdvance.deductedAmount (over-recovery, negative
+  // outstanding on the dashboard). Clamping here makes over-deduction
+  // structurally impossible, whatever the scheduling path.
+  let advanceTotal = 0
+  const items: { advanceId: string; scheduled: number; applied: number }[] = []
+  for (const item of appliedRaw) {
     if (item.applied <= 0) continue
     const adv = candidates.find((a) => a.id === item.advanceId)!
-    const nextDeducted = round2(adv.deductedAmount + item.applied)
+    const remaining = round2(Math.max(0, adv.amount - adv.deductedAmount))
+    const applied = round2(Math.min(item.applied, remaining))
+    if (applied <= 0) continue
+    const nextDeducted = round2(Math.min(adv.amount, adv.deductedAmount + applied))
     await tx.workerAdvance.update({
       where: { id: item.advanceId },
       data: {
@@ -254,16 +263,18 @@ export async function syncPayrollAdvanceDeductions(
       },
     })
     await tx.payrollAdvanceDeduction.create({
-      data: { payrollId, advanceId: item.advanceId, amount: item.applied },
+      data: { payrollId, advanceId: item.advanceId, amount: applied },
     })
+    items.push({ advanceId: item.advanceId, scheduled: item.scheduled, applied })
+    advanceTotal = round2(advanceTotal + applied)
   }
 
   // 5. Recovery income entries for finalized (paid) payrolls
-  if (isPaid && applied.length) {
+  if (isPaid && items.length) {
     await ensureRecoveryTransactions(tx, payrollId, payDate, operatorUserId, staffName, month, year)
   }
 
-  return { advanceTotal, items: applied }
+  return { advanceTotal, items }
 }
 
 /**

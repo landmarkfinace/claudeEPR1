@@ -182,7 +182,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
         const next = body.workers
         const prevIds = new Set(list.workers.map((w) => w.staffId))
         const nextIds = new Set(next.map((w) => w.staffId))
-        if (next.length !== nextIds.size) return badRequest('Duplicate workers in the list')
+        // THROW, never return, from inside the transaction: a return value is
+        // just the transaction's result — the tx COMMITS (header saved) and
+        // the outer handler would continue as if everything succeeded.
+        if (next.length !== nextIds.size) throw new Error('DUPLICATE_WORKERS')
 
         // verify all staff exist
         if (nextIds.size > 0) {
@@ -291,6 +294,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
   } catch (e) {
     if (e instanceof Error && e.message === 'WORKER_NOT_FOUND') {
       return badRequest('One or more workers were not found')
+    }
+    if (e instanceof Error && e.message === 'DUPLICATE_WORKERS') {
+      return badRequest('Duplicate workers in the list')
     }
     return serverError()
   }

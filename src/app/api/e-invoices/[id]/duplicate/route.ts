@@ -86,6 +86,9 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           showReceiverSignature: source.showReceiverSignature,
           invoiceKind: source.invoiceKind,
           noteReason: source.noteReason,
+          // keep the source's ZATCA phase — duplicating a Phase-2 invoice used
+          // to silently yield a Phase-1 draft (schema default)
+          zatcaPhase: source.zatcaPhase,
           paymentMeansCode: source.paymentMeansCode,
           buyerStreet: source.buyerStreet,
           buyerBuildingNo: source.buyerBuildingNo,

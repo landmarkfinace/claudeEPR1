@@ -215,13 +215,22 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     const client = await db.client.findUnique({
       where: { id },
-      include: { _count: { select: { projects: true } } },
+      include: {
+        _count: { select: { projects: true, nameLists: true } },
+      },
     })
     if (!client) return notFound('Client not found')
 
     if (client._count.projects > 0) {
       return conflict(
         'Cannot delete: projects are linked to this client. Unlink or reassign them first.'
+      )
+    }
+    if (client._count.nameLists > 0) {
+      // NameList.client is a required relation with no cascade — deleting here
+      // used to throw a raw FK violation (500 "Internal server error").
+      return conflict(
+        'Cannot delete: name lists are linked to this client. Delete or reassign them first.'
       )
     }
 
