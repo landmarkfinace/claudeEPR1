@@ -163,17 +163,28 @@ All endpoints are JSON, cookie-authenticated, permission-checked (401/403/409 fr
 - The salary slip is verified to fit **exactly one A4 page** including the signature section.
 - Verified end-to-end with automated browser QA: login, all 18 views, create/edit/delete flows, live payroll calculation, paid→expense linking, dark mode, mobile layout (390 px), and print/PDF output of salary slip / salary sheet / statements.
 
-## Deployment (GitHub → server)
+## Deployment (production VPS)
+
+Complete step-by-step guide for a fresh **Contabo Ubuntu 24.04** VPS —
+Bun install, environment, database bootstrap (company config + admin user,
+**no demo data**), Google Chrome for PDF printing, systemd service, Caddy
+HTTPS and daily backups:
+
+➡ **See [`DEPLOY.md`](DEPLOY.md)**
+
+Quick summary:
 
 ```bash
-git clone <your-repo-url> && cd <repo>
-bun install
-cp .env.example .env
-bun run db:push && bun run db:seed   # seed optional in production
-bun run build && bun run start       # standalone server
+git clone https://github.com/landmarkfinace/claudeEPR1.git && cd claudeEPR1
+cp .env.example .env      # set DATABASE_URL to the absolute server path
+bun install               # runs prisma generate
+bunx prisma db push       # create tables (empty — production)
+ADMIN_EMAIL=you@co.com ADMIN_PASSWORD='...' bun run db:bootstrap
+bun run build && bun run start
 ```
 
-Put the app behind Nginx/Caddy with HTTPS; the SQLite file lives in `db/custom.db` (back it up regularly — or use the built-in JSON backup in Settings). To reset demo data: `bun run db:seed`.
+> ⚠ In production use `bun run db:bootstrap` (company configuration, no demo
+> data). **`db:seed` is DEMO data — never run it on the production server.**
 
 ---
 
