@@ -106,32 +106,65 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const [rows, totalCount, agg, overdueAgg, years] = await Promise.all([
-      db.eInvoice.findMany({
-        where,
-        orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
-        skip: p.skip,
-        take: p.take,
-        include: eInvoiceListInclude,
-      }),
-      db.eInvoice.count({ where }),
-      db.eInvoice.aggregate({
-        where,
-        _count: true,
-        _sum: { totalDue: true, paidAmount: true },
-      }),
-      db.eInvoice.aggregate({
-        where: { ...where, ...overdueWhere() },
-        _count: true,
-        _sum: { totalDue: true, paidAmount: true },
-      }),
-      eInvoiceYears(),
-    ])
+    // Header totals are computed over EVERY row in the filter (not just the
+    // page) with credit/debit notes NETTED against their original invoice —
+    // the old flat aggregate summed note docTypes as if they were invoices,
+    // so a credit note (money owed BACK) used to ADD to Invoiced/Outstanding.
+    const [rows, totalCount, allRows, count, overdueRows, overdueCount, years] =
+      await Promise.all([
+        db.eInvoice.findMany({
+          where,
+          orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
+          skip: p.skip,
+          take: p.take,
+          include: eInvoiceListInclude,
+        }),
+        db.eInvoice.count({ where }),
+        db.eInvoice.findMany({
+          where,
+          select: { id: true, docType: true, relatedInvoiceId: true, totalDue: true, paidAmount: true, status: true },
+        }),
+        db.eInvoice.count({ where }),
+        db.eInvoice.findMany({
+          where: { ...where, ...overdueWhere() },
+          select: { id: true, docType: true, relatedInvoiceId: true, totalDue: true, paidAmount: true },
+        }),
+        db.eInvoice.count({ where: { ...where, ...overdueWhere() } }),
+        eInvoiceYears(),
+      ])
 
-    const totalDue = round2(agg._sum.totalDue ?? 0)
-    const paid = round2(agg._sum.paidAmount ?? 0)
-    const overdueTotalDue = round2(overdueAgg._sum.totalDue ?? 0)
-    const overduePaid = round2(overdueAgg._sum.paidAmount ?? 0)
+    const debitByInvoice = new Map<string, number>()
+    const creditByInvoice = new Map<string, number>()
+    for (const r of allRows) {
+      if (!r.relatedInvoiceId) continue
+      if (r.docType === 'debit_note') {
+        debitByInvoice.set(r.relatedInvoiceId, round2((debitByInvoice.get(r.relatedInvoiceId) ?? 0) + r.totalDue))
+      } else if (r.docType === 'credit_note') {
+        creditByInvoice.set(r.relatedInvoiceId, round2((creditByInvoice.get(r.relatedInvoiceId) ?? 0) + r.totalDue))
+      }
+    }
+
+    // Notes never carry an outstanding balance of their own — they adjust
+    // the invoice they correct (debit adds, credit subtracts).
+    let totalDue = 0
+    let paid = 0
+    for (const r of allRows) {
+      if (r.docType !== 'invoice') continue
+      const eff = round2(
+        r.totalDue + (debitByInvoice.get(r.id) ?? 0) - (creditByInvoice.get(r.id) ?? 0)
+      )
+      totalDue = round2(totalDue + Math.max(eff, 0))
+      paid = round2(paid + r.paidAmount)
+    }
+
+    let overdueAmount = 0
+    for (const r of overdueRows) {
+      if (r.docType !== 'invoice') continue
+      const eff = round2(
+        r.totalDue + (debitByInvoice.get(r.id) ?? 0) - (creditByInvoice.get(r.id) ?? 0)
+      )
+      overdueAmount = round2(overdueAmount + Math.max(eff - r.paidAmount, 0))
+    }
 
     return ok({
       rows: rows.map((r) => mapEInvoice(r)),
@@ -140,12 +173,12 @@ export async function GET(req: NextRequest) {
       page: p.page,
       pageSize: p.pageSize,
       totals: {
-        count: agg._count,
+        count,
         totalDue,
         paid,
         outstanding: round2(totalDue - paid),
-        overdueCount: overdueAgg._count,
-        overdueAmount: round2(overdueTotalDue - overduePaid),
+        overdueCount,
+        overdueAmount,
       },
       years,
     })

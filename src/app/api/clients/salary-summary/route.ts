@@ -19,6 +19,7 @@
 // Permission: payroll.view (salary figures are exposed).
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { getVatRate } from '@/lib/vat'
 import { round2 } from '@/lib/format'
 import { ok, serverError, requirePermission, isResponse, toInt } from '@/lib/api-helpers'
 import type {
@@ -28,13 +29,15 @@ import type {
 } from '@/lib/types'
 
 const NO_CLIENT = 'No Client (Unlinked Payroll)'
-/** Saudi standard VAT */
-export const VAT_RATE = 0.15
 
 export async function GET(req: NextRequest) {
   try {
     const auth = await requirePermission('payroll.view')
     if (isResponse(auth)) return auth
+
+    // The configured VAT rate (Settings) — the module used to hardcode 0.15
+    // and silently ignore the Setting like every other module respects it.
+    const vatRate = await getVatRate()
 
     const { searchParams } = new URL(req.url)
     const search = (searchParams.get('search') ?? '').trim().toLowerCase()
@@ -284,7 +287,7 @@ export async function GET(req: NextRequest) {
       const hours = round2(g.rows.reduce((s, r) => s + r.hours, 0))
       const otHours = round2(g.rows.reduce((s, r) => s + r.otHours, 0))
       const billedAmount = round2(g.rows.reduce((s, r) => s + r.amount, 0))
-      const vatAmount = round2(billedAmount * VAT_RATE)
+      const vatAmount = round2(billedAmount * vatRate)
       const workerCost = round2(g.rows.reduce((s, r) => s + r.workerCost, 0))
       const salaryByStaff = new Map<string, number>()
       for (const r of g.rows) salaryByStaff.set(r.staffId, r.monthlySalary)
@@ -369,7 +372,7 @@ export async function GET(req: NextRequest) {
     const data: ClientSalarySummaryData = {
       month,
       year,
-      vatRate: VAT_RATE,
+      vatRate,
       cards: {
         totalClients: built.filter((g) => g.clientId !== null).length,
         totalWorkers,

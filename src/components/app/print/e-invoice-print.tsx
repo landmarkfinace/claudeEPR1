@@ -1143,6 +1143,22 @@ function ClosingGroup({ m }: { m: DocModel }) {
             ['Discount', 'الخصم', inv.totalDiscount > 0 ? `-${m.money(inv.totalDiscount)}` : m.money(0)],
             ['Taxable Amount', 'المبلغ الخاضع للضريبة', m.money(inv.taxableAmount)],
             [`VAT ${m.vatLabel}`.trim(), 'ضريبة القيمة المضافة', m.money(inv.vatAmount)],
+            // ZATCA BR-CO-17 rounds VAT at CATEGORY level while item rows
+            // round per LINE — with 2+ lines the two can differ by a halala.
+            // Show the reconciliation so the itemized table + this row equals
+            // the document VAT (and the itemized totals equal Total Due).
+            ...(Math.abs(round2(inv.vatAmount - round2((inv.items ?? []).reduce((s, it) => s + it.vatAmount, 0)))) > 0.005
+              ? [
+                  [
+                    'Rounding',
+                    'تقريب',
+                    (() => {
+                      const d = round2(inv.vatAmount - round2((inv.items ?? []).reduce((s, it) => s + it.vatAmount, 0)))
+                      return `${d > 0 ? '+' : ''}${m.money(d)}`
+                    })(),
+                  ] as [string, string, string],
+                ]
+              : []),
           ] as Array<[string, string, string]>
         ).map(([en, ar, value], i) => (
           <div

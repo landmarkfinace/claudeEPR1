@@ -322,10 +322,17 @@ export async function GET(req: NextRequest) {
       try {
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        const [openRows, monthAgg] = await Promise.all([
+        const [openRows, noteRows, monthAgg] = await Promise.all([
           db.eInvoice.findMany({
             where: { docType: 'invoice', status: { in: ['issued', 'partially_paid'] } },
-            select: { totalDue: true, paidAmount: true, dueDate: true },
+            select: { id: true, totalDue: true, paidAmount: true, dueDate: true },
+          }),
+          // Non-draft credit/debit notes net against the invoice they correct
+          // (the old receivables card ignored notes entirely, so a credit note
+          // never reduced what the dashboard said clients owe).
+          db.eInvoice.findMany({
+            where: { docType: { in: ['credit_note', 'debit_note'] }, status: { not: 'draft' } },
+            select: { relatedInvoiceId: true, docType: true, totalDue: true },
           }),
           db.eInvoice.aggregate({
             where: {
@@ -336,11 +343,19 @@ export async function GET(req: NextRequest) {
             _sum: { totalDue: true },
           }),
         ])
+        const debitByInvoice = new Map<string, number>()
+        const creditByInvoice = new Map<string, number>()
+        for (const n of noteRows) {
+          if (!n.relatedInvoiceId) continue
+          const map = n.docType === 'debit_note' ? debitByInvoice : creditByInvoice
+          map.set(n.relatedInvoiceId, (map.get(n.relatedInvoiceId) ?? 0) + n.totalDue)
+        }
         let outstanding = 0
         let overdueCount = 0
         let overdueAmount = 0
         for (const r of openRows) {
-          const bal = Math.max(r.totalDue - r.paidAmount, 0)
+          const eff = r.totalDue + (debitByInvoice.get(r.id) ?? 0) - (creditByInvoice.get(r.id) ?? 0)
+          const bal = Math.max(eff - r.paidAmount, 0)
           outstanding += bal
           if (r.dueDate && r.dueDate < todayStart && bal > 0.004) {
             overdueCount += 1
