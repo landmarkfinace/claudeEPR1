@@ -17,6 +17,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Printer,
   ReceiptText,
   RefreshCw,
   TrendingDown,
@@ -64,6 +65,8 @@ import {
 } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { SalarySlipDialog, type SlipPayroll } from '@/components/app/print/salary-slip'
+import { SalarySlipsBulkDialog } from '@/components/app/print/salary-slips-bulk'
+import { ConfirmDialog } from '@/components/app/shared/confirm-dialog'
 import { AvatarInitials } from '@/components/app/shared/avatar-initials'
 import { ConfirmDelete } from '@/components/app/shared/confirm-delete'
 import { DataTablePagination } from '@/components/app/shared/data-table-pagination'
@@ -230,6 +233,12 @@ export function PayrollView() {
   const [editing, setEditing] = useState<PayrollRow | null>(null)
   const [slipRow, setSlipRow] = useState<SlipPayroll | null>(null)
   const [slipOpen, setSlipOpen] = useState(false)
+
+  // Bulk pay slip print — the currently filtered list, one slip per page
+  const [bulkRows, setBulkRows] = useState<SlipPayroll[] | null>(null)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState<SlipPayroll[] | null>(null)
+  const [gathering, setGathering] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const loadList = useCallback(async () => {
@@ -490,6 +499,49 @@ export function PayrollView() {
     setSlipOpen(true)
   }
 
+  // Bulk print — walk the CURRENTLY FILTERED list server-side (same filters
+  // as the table: search / client / project / category / month / year /
+  // status), sort by staff name, confirm the count, then open the bulk
+  // dialog. Read-only: printing never writes anything.
+  async function handlePrintSlips() {
+    if (gathering) return
+    setGathering(true)
+    try {
+      const all: PayrollRow[] = []
+      let p = 1
+      for (;;) {
+        const res = await api.get<Paginated<PayrollRow>>(
+          `/api/payrolls${qs({
+            search: debouncedSearch,
+            clientId: clientFilter === 'all' ? '' : clientFilter,
+            projectId: projectFilter === 'all' ? '' : projectFilter,
+            categoryId: categoryFilter === 'all' ? '' : categoryFilter,
+            month: monthFilter === 'all' ? '' : monthFilter,
+            year: yearFilter === 'all' ? '' : yearFilter,
+            status: statusFilter === 'all' ? '' : statusFilter,
+            page: p,
+            pageSize: 100,
+          })}`
+        )
+        all.push(...res.data)
+        if (all.length >= res.total || p >= res.totalPages) break
+        p++
+      }
+      if (all.length === 0) {
+        toast.info('No pay slips match the current filters.')
+        return
+      }
+      const sorted = [...all].sort((a, b) =>
+        a.staff.fullName.localeCompare(b.staff.fullName, 'en', { sensitivity: 'base' })
+      )
+      setBulkConfirm(sorted)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load the pay slips')
+    } finally {
+      setGathering(false)
+    }
+  }
+
   async function handleDelete(row: PayrollRow) {
     try {
       await api.del(`/api/payrolls/${row.id}`)
@@ -534,6 +586,21 @@ export function PayrollView() {
           )}
           Export CSV
         </Button>
+        {canPrint ? (
+          <Button
+            variant="outline"
+            onClick={() => void handlePrintSlips()}
+            disabled={gathering || loading}
+            title="Print a pay slip for every payroll in the current filters — one slip per page, one PDF"
+          >
+            {gathering ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4" />
+            )}
+            Print Slips
+          </Button>
+        ) : null}
         {canCreate ? (
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4" />
@@ -982,6 +1049,42 @@ export function PayrollView() {
       />
 
       <SalarySlipDialog payroll={slipRow} open={slipOpen} onOpenChange={setSlipOpen} />
+
+      {/* Bulk print — count confirmation first (“Print N pay slips?”; batches
+          over 100 get an extra warning), then the preview dialog */}
+      <ConfirmDialog
+        open={bulkConfirm !== null}
+        onOpenChange={(v) => {
+          if (!v) setBulkConfirm(null)
+        }}
+        onConfirm={() => {
+          setBulkRows(bulkConfirm)
+          setBulkConfirm(null)
+          setBulkOpen(true)
+        }}
+        title={`Print ${bulkConfirm?.length ?? 0} ${bulkConfirm?.length === 1 ? 'pay slip' : 'pay slips'}?`}
+        item={
+          bulkConfirm && bulkConfirm.length > 0
+            ? `${monthName(bulkConfirm[0].month)} ${bulkConfirm[0].year} · sorted by staff name`
+            : undefined
+        }
+        description={
+          (bulkConfirm?.length ?? 0) > 100
+            ? 'Large batch — one PDF with one slip per A4 page will be generated. This may take a moment. Continue?'
+            : 'One PDF with one slip per A4 page, in the template chosen in the next step.'
+        }
+        confirmLabel="Print"
+      />
+      <SalarySlipsBulkDialog
+        rows={bulkRows ?? []}
+        periodLabel={
+          monthFilter !== 'all' && yearFilter !== 'all'
+            ? `${monthName(Number(monthFilter))} ${yearFilter}`
+            : 'Selected payrolls'
+        }
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+      />
     </div>
   )
 }

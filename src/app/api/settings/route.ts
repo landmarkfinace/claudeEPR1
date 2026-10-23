@@ -19,6 +19,11 @@ import { QUOTATION_TEMPLATE_IDS } from '@/lib/quotation-templates'
 import { EINVOICE_TEMPLATE_IDS } from '@/lib/e-invoice-templates'
 import { NAME_LIST_TEMPLATE_IDS } from '@/lib/name-list-templates'
 import { AGREEMENT_PRINT_TEMPLATE_IDS } from '@/lib/agreement-print-templates'
+import {
+  PAYSLIP_TEMPLATE_IDS,
+  DEFAULT_PAYSLIP_ACK_TEXT,
+  PAYSLIP_ACK_MAX_LENGTH,
+} from '@/lib/payslip-print-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,6 +84,16 @@ function buildSettings(map: Record<string, string>) {
     )
       ? (map.agreementDefaultTemplate as string)
       : 'classic',
+    // Default print template for the Payroll pay slips (classic until changed)
+    payrollPayslipDefaultTemplate: (PAYSLIP_TEMPLATE_IDS as readonly string[]).includes(
+      map.payrollPayslipDefaultTemplate ?? ''
+    )
+      ? (map.payrollPayslipDefaultTemplate as string)
+      : 'classic',
+    // Acknowledgment text printed by the Sidebar / Folder pay slip templates
+    // (placeholders {netPay} {period} {method} {project} {client}); Classic
+    // keeps its own hard-coded text
+    payrollAcknowledgmentText: map.payrollAcknowledgmentText ?? DEFAULT_PAYSLIP_ACK_TEXT,
   }
 }
 
@@ -151,6 +166,14 @@ const settingsSchema = z.object({
   nameListDefaultTemplate: z.enum(NAME_LIST_TEMPLATE_IDS).optional(),
   // Default print template for the Agreement module
   agreementDefaultTemplate: z.enum(AGREEMENT_PRINT_TEMPLATE_IDS).optional(),
+  // Default print template for the Payroll pay slips (print option only — no
+  // Payroll.template column exists)
+  payrollPayslipDefaultTemplate: z.enum(PAYSLIP_TEMPLATE_IDS).optional(),
+  // Acknowledgment text for the Sidebar / Folder pay slip templates
+  payrollAcknowledgmentText: z
+    .string()
+    .max(PAYSLIP_ACK_MAX_LENGTH, `Acknowledgment text cannot exceed ${PAYSLIP_ACK_MAX_LENGTH} characters`)
+    .optional(),
 })
 
 export async function GET() {
@@ -255,6 +278,15 @@ export async function PUT(req: NextRequest) {
     }
     if (body.agreementDefaultTemplate !== undefined) {
       entries.push(['agreementDefaultTemplate', body.agreementDefaultTemplate])
+    }
+    if (body.payrollPayslipDefaultTemplate !== undefined) {
+      entries.push(['payrollPayslipDefaultTemplate', body.payrollPayslipDefaultTemplate])
+    }
+    if (body.payrollAcknowledgmentText !== undefined) {
+      entries.push([
+        'payrollAcknowledgmentText',
+        body.payrollAcknowledgmentText.trim() || DEFAULT_PAYSLIP_ACK_TEXT,
+      ])
     }
 
     for (const [key, value] of entries) {

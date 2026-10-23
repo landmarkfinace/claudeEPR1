@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Printer, FileDown, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -9,21 +10,38 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { usePageRule } from '@/components/app/print/print-page-rule'
 import { formatDate, formatMoney, monthName, round2 } from '@/lib/format'
 import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
+import { api } from '@/lib/api-client'
+import {
+  PAYSLIP_TEMPLATES,
+  resolvePayslipTemplate,
+  type PayslipTemplateId,
+} from '@/lib/payslip-print-templates'
+import type { LetterheadConfig } from '@/lib/types'
 import { PAY_TYPE_LABELS, type AppSettings, type PayrollRow } from '@/lib/types'
+import { DEFAULT_LETTERHEAD } from './payslip-print-shared'
+import { PayslipSidebarDocument } from './payslip-print-sidebar'
+import { PayslipFolderDocument } from './payslip-print-folder'
 
 export type SlipPayroll = PayrollRow & { otherDeductionAmount?: number }
 
 /**
- * Full-screen dialog rendering an A4-style salary pay slip.
- * The slip itself is wrapped in `.print-area` (globals.css) so that
+ * Full-screen dialog rendering an A4-style salary pay slip. The slip itself
+ * is wrapped in `.print-area` (globals.css) so that
  * the server PDF pipeline renders it; print button prints that PDF.
  * The document ends with an Approval & Acknowledgment block: Approved By
  * (authorized signatory) and Received By (the staff member who collects the
  * money) each get a signature line + date, so the printed / saved-as-PDF
  * slip can be physically signed.
+ *
+ * Template dropdown: Classic (the default, byte-identical to the original
+ * layout) or the 2 newer layouts (Sidebar / Folder) — a PRINT OPTION ONLY
+ * (no database column, nothing saved): switching never changes any amount,
+ * hours, status or employee data, only the look of the printout.
  */
 export function SalarySlipDialog({
   payroll,
@@ -35,6 +53,42 @@ export function SalarySlipDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const settings = useAppStore((s) => s.settings)
+  const user = useAppStore((s) => s.user)
+  const [tpl, setTpl] = useState<PayslipTemplateId>('classic')
+  const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
+  const isClassic = tpl === 'classic'
+
+  // Classic keeps the print pipeline's default flow behaviour; the 2 new
+  // templates are fixed A4 sheets with a 0 margin.
+  usePageRule(open && !isClassic, 'size: A4; margin: 0;')
+
+  // reset the working template to the module default whenever a slip opens
+  const [openId, setOpenId] = useState<string | null>(null)
+  if (!open && openId !== null) {
+    setOpenId(null)
+  }
+  if (open && payroll && payroll.id !== openId) {
+    setOpenId(payroll.id)
+    setTpl(resolvePayslipTemplate(settings.payrollPayslipDefaultTemplate))
+  }
+
+  // letterhead artwork for the 2 new templates (Classic keeps its own
+  // brand header — untouched)
+  useEffect(() => {
+    if (!open || isClassic || letterhead) return
+    let alive = true
+    api
+      .get<LetterheadConfig>('/api/letterhead')
+      .then((lh) => {
+        if (alive) setLetterhead(lh)
+      })
+      .catch(() => {
+        /* without letterhead config the reserved bands stay empty */
+      })
+    return () => {
+      alive = false
+    }
+  }, [open, isClassic, letterhead])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -57,7 +111,19 @@ export function SalarySlipDialog({
               {payroll ? payroll.staff.fullName : 'Select a payroll to preview the slip'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={tpl} onValueChange={(v) => setTpl(v as PayslipTemplateId)}>
+              <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Pay slip template">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAYSLIP_TEMPLATES.map((t) => (
+                  <SelectItem key={t.id} value={t.id} className="text-xs">
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
@@ -86,7 +152,19 @@ export function SalarySlipDialog({
         {/* Scrollable preview area */}
         <div className="nice-scrollbar min-h-0 flex-1 overflow-auto bg-neutral-100 p-4 dark:bg-neutral-900 print:flex-none print:overflow-visible print:bg-transparent print:p-0">
           {payroll ? (
-            <SalarySlipDocument payroll={payroll} settings={settings} />
+            isClassic ? (
+              <SalarySlipDocument payroll={payroll} settings={settings} />
+            ) : (
+              <div className="print-area mx-auto flex w-full flex-col items-center gap-6 bg-transparent [print-color-adjust:exact] [-webkit-print-color-adjust:exact]">
+                <PayslipTemplateDocument
+                  template={tpl}
+                  payroll={payroll}
+                  settings={settings}
+                  preparedBy={user?.name ?? ''}
+                  letterhead={letterhead ?? DEFAULT_LETTERHEAD}
+                />
+              </div>
+            )
           ) : (
             <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
               No payroll selected.
@@ -96,6 +174,51 @@ export function SalarySlipDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+/**
+ * Renders one pay slip in the selected print template. The SAME data (staff
+ * name, Iqama, category, hours, rates, every earning and deduction line,
+ * stored totals, method, project, client) flows to whichever template is
+ * chosen; only the layout changes. Used by the print dialogs and the
+ * Settings template previews. Classic renders the ORIGINAL document
+ * (byte-identical); Sidebar / Folder render the fixed A4 sheets.
+ */
+export function PayslipTemplateDocument({
+  template,
+  payroll,
+  settings,
+  preparedBy,
+  letterhead,
+}: {
+  template: string | null | undefined
+  payroll: SlipPayroll
+  settings: AppSettings
+  preparedBy: string
+  letterhead?: LetterheadConfig | null
+}) {
+  const tpl = resolvePayslipTemplate(template)
+  if (tpl === 'sidebar') {
+    return (
+      <PayslipSidebarDocument
+        payroll={payroll}
+        settings={settings}
+        preparedBy={preparedBy}
+        letterhead={letterhead ?? DEFAULT_LETTERHEAD}
+      />
+    )
+  }
+  if (tpl === 'folder') {
+    return (
+      <PayslipFolderDocument
+        payroll={payroll}
+        settings={settings}
+        preparedBy={preparedBy}
+        letterhead={letterhead ?? DEFAULT_LETTERHEAD}
+      />
+    )
+  }
+  return <SalarySlipDocument payroll={payroll} settings={settings} />
 }
 
 function InfoItem({ label, value }: { label: string; value: string }) {
@@ -154,7 +277,12 @@ function SignatureBlock({
   )
 }
 
-function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; settings: AppSettings }) {
+/**
+ * The ORIGINAL pay slip document ("Classic") — rendered output is
+ * UNCHANGED (byte-identical). Exported so the bulk print dialog can render
+ * the same layout per page and the template dispatcher can fall back to it.
+ */
+export function SalarySlipDocument({ payroll, settings }: { payroll: SlipPayroll; settings: AppSettings }) {
   const user = useAppStore((s) => s.user)
   const currency = settings.currency || 'SAR'
   const p = payroll

@@ -1,6 +1,7 @@
 // Global client state (zustand): current user, settings, active view
 import { create } from 'zustand'
 import { BASELINE_PERMISSIONS } from '@/lib/permissions'
+import { DEFAULT_PAYSLIP_ACK_TEXT } from '@/lib/payslip-print-templates'
 import type { AppSettings, SessionUser, ViewKey } from '@/lib/types'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -34,6 +35,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   eInvoiceDefaultTemplate: 'classic',
   nameListDefaultTemplate: 'classic',
   agreementDefaultTemplate: 'classic',
+  payrollPayslipDefaultTemplate: 'classic',
+  payrollAcknowledgmentText: DEFAULT_PAYSLIP_ACK_TEXT,
 }
 
 export type ViewIntentPayload = {

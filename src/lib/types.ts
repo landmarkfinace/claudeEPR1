@@ -603,6 +603,13 @@ export type AppSettings = {
   nameListDefaultTemplate: string
   // Default print template for the Agreement module (classic until changed)
   agreementDefaultTemplate: string
+  // Default print template for the Payroll pay slips (classic until changed;
+  // print option only — no Payroll.template column exists)
+  payrollPayslipDefaultTemplate: string
+  // Acknowledgment text printed by the Sidebar / Folder pay slip templates
+  // (placeholders {netPay} {period} {method} {project} {client}); Classic
+  // keeps its own hard-coded text
+  payrollAcknowledgmentText: string
 }
 
 export type ActivityRow = {
