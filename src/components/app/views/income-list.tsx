@@ -121,6 +121,10 @@ export function TransactionsListView({
   const [totalPages, setTotalPages] = useState(1)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  // Full filtered list for PRINT/PDF output — the printed statement must carry
+  // EVERY filtered row, not just the current 10-row page. Null = normal
+  // paginated view; set only while the print serializer runs.
+  const [printRows, setPrintRows] = useState<TransactionRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -377,30 +381,36 @@ export function TransactionsListView({
     )
   }
 
+  /** Every filtered transaction across all pages (server clamps pageSize to 100). */
+  async function fetchAllTransactionRows(): Promise<TransactionRow[]> {
+    const all: TransactionRow[] = []
+    let p = 1
+    for (;;) {
+      const res = await api.get<TransactionsResponse>(
+        `/api/transactions${qs({
+          type,
+          categoryId: categoryId === 'all' ? '' : categoryId,
+          projectId: projectId === 'all' ? '' : projectId,
+          from,
+          to,
+          search: debouncedSearch,
+          page: p,
+          pageSize: 100,
+        })}`
+      )
+      all.push(...res.data)
+      if (p >= res.totalPages || res.data.length === 0) break
+      p += 1
+    }
+    return all
+  }
+
   // Export the WHOLE filtered set (walks pages server-side max 100)
   async function handleExportCsv() {
     if (exporting) return
     setExporting(true)
     try {
-      const all: TransactionRow[] = []
-      let p = 1
-      for (;;) {
-        const res = await api.get<TransactionsResponse>(
-          `/api/transactions${qs({
-            type,
-            categoryId: categoryId === 'all' ? '' : categoryId,
-            projectId: projectId === 'all' ? '' : projectId,
-            from,
-            to,
-            search: debouncedSearch,
-            page: p,
-            pageSize: 100,
-          })}`
-        )
-        all.push(...res.data)
-        if (p >= res.totalPages || res.data.length === 0) break
-        p += 1
-      }
+      const all = await fetchAllTransactionRows()
       const csv = buildCsv(
         ['Date', 'Title', 'Category', 'Project', 'Operator', 'Amount', 'Description', 'Payroll-linked'],
         all.map((r) => [
@@ -420,6 +430,32 @@ export function TransactionsListView({
       toast.error(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setExporting(false)
+    }
+  }
+
+  /**
+   * Run a print/export job against the COMPLETE filtered list: fetch every
+   * page (same filters as the on-screen table), swap the full list in for one
+   * render so the serializer captures it, then restore the paginated view.
+   * Without this the printed/PDF statement contained only the current 10-row
+   * page while its header claimed whole-filter totals ("N records").
+   */
+  async function withFullRows(job: () => Promise<unknown>): Promise<void> {
+    if (loading || rows.length === 0) return
+    try {
+      const all = await fetchAllTransactionRows()
+      if (all.length === 0) {
+        toast.info('Nothing matches the current filters')
+        return
+      }
+      setPrintRows(all)
+      // let React flush + the browser paint the full table before serializing
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+      await job()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Print failed')
+    } finally {
+      setPrintRows(null)
     }
   }
 
@@ -443,17 +479,27 @@ export function TransactionsListView({
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Export CSV
           </Button>
-          <Button variant="outline" size="sm" onClick={(e) => printPrintArea(e.currentTarget)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading || total === 0}
+            onClick={(e) =>
+              void withFullRows(() => printPrintArea(e.currentTarget))
+            }
+          >
             <Printer className="h-4 w-4" />
             Print Statement
           </Button>
           <Button
             variant="outline"
             size="sm"
+            disabled={loading || total === 0}
             onClick={(e) =>
-              void downloadPrintAreaAsPdf(
-                `${isIncome ? 'Income' : 'Expense'}-List`,
-                e.currentTarget
+              void withFullRows(() =>
+                downloadPrintAreaAsPdf(
+                  `${isIncome ? 'Income' : 'Expense'}-List`,
+                  e.currentTarget
+                )
               )
             }
           >
@@ -637,7 +683,7 @@ export function TransactionsListView({
           <>
             {/* Mobile: stacked cards — a wide table is unreadable at <md widths */}
             <ul className="space-y-3 p-4 sm:p-6 md:hidden print:hidden">
-              {rows.map((row) => (
+              {(printRows ?? rows).map((row) => (
                 <li
                   key={row.id}
                   className="rounded-xl border bg-card p-3 shadow-sm transition-colors hover:bg-muted/30"
@@ -752,7 +798,7 @@ export function TransactionsListView({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {(printRows ?? rows).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="max-w-[280px] print:max-w-none">
                     <div className="flex items-start gap-3">

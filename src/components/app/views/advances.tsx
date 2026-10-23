@@ -173,6 +173,10 @@ export function AdvancesView() {
   const [projectFilter, setProjectFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  // Full filtered list for PRINT/PDF output — the printed document must carry
+  // EVERY filtered row, not just the current 10-row page. Null = normal
+  // paginated view; set only for the instant the print serializer runs.
+  const [printRows, setPrintRows] = useState<AdvanceRow[] | null>(null)
 
   const [rows, setRows] = useState<AdvanceRow[]>([])
   const [totals, setTotals] = useState<ListTotals>({ count: 0, given: 0, deducted: 0, outstanding: 0 })
@@ -289,28 +293,34 @@ export function AdvancesView() {
     if (created) setReceipt(created)
   }
 
+  /** Every filtered advance across all pages (server clamps pageSize to 100). */
+  async function fetchAllAdvanceRows(): Promise<AdvanceRow[]> {
+    const all: AdvanceRow[] = []
+    let p = 1
+    for (;;) {
+      const res = await api.get<Paginated<AdvanceRow>>(
+        `/api/advances${qs({
+          search: debouncedSearch,
+          month: monthFilter === 'all' ? '' : monthFilter,
+          year: yearFilter === 'all' ? '' : yearFilter,
+          status: statusFilter === 'all' ? '' : statusFilter,
+          projectId: projectFilter === 'all' ? '' : projectFilter,
+          page: p,
+          pageSize: 100,
+        })}`
+      )
+      all.push(...res.data)
+      if (p >= res.totalPages || res.data.length === 0) break
+      p += 1
+    }
+    return all
+  }
+
   async function handleExportCsv() {
     if (exporting) return
     setExporting(true)
     try {
-      const all: AdvanceRow[] = []
-      let p = 1
-      for (;;) {
-        const res = await api.get<Paginated<AdvanceRow>>(
-          `/api/advances${qs({
-            search: debouncedSearch,
-            month: monthFilter === 'all' ? '' : monthFilter,
-            year: yearFilter === 'all' ? '' : yearFilter,
-            status: statusFilter === 'all' ? '' : statusFilter,
-            projectId: projectFilter === 'all' ? '' : projectFilter,
-            page: p,
-            pageSize: 100,
-          })}`
-        )
-        all.push(...res.data)
-        if (p >= res.totalPages || res.data.length === 0) break
-        p += 1
-      }
+      const all = await fetchAllAdvanceRows()
       if (all.length === 0) {
         toast.info('No advances match the current filters')
         return
@@ -362,8 +372,34 @@ export function AdvancesView() {
     }
   }
 
+  /**
+   * Run a print/export job against the COMPLETE filtered list: fetch every
+   * page (same filters as the on-screen table), swap the full list in for one
+   * render so the serializer captures it, then restore the paginated view.
+   * Without this the printed/PDF report contained only the current 10-row
+   * page while its header claimed whole-filter totals ("All records").
+   */
+  async function withFullRows(job: () => Promise<unknown>): Promise<void> {
+    if (loading || rows.length === 0) return
+    try {
+      const all = await fetchAllAdvanceRows()
+      if (all.length === 0) {
+        toast.info('No advances match the current filters')
+        return
+      }
+      setPrintRows(all)
+      // let React flush + the browser paint the full table before serializing
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+      await job()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Print failed')
+    } finally {
+      setPrintRows(null)
+    }
+  }
+
   function handlePrint(anchor?: HTMLElement | null) {
-    void printPrintArea(anchor ?? null)
+    void withFullRows(() => printPrintArea(anchor ?? null))
   }
 
   const maxMonthly = summary ? Math.max(...summary.monthly.map((m) => m.given), 0) : 0
@@ -394,7 +430,7 @@ export function AdvancesView() {
           size="sm"
           className="h-9 print-hidden"
           onClick={(e) =>
-            void downloadPrintAreaAsPdf('Worker-Advances', e.currentTarget)
+            void withFullRows(() => downloadPrintAreaAsPdf('Worker-Advances', e.currentTarget))
           }
           disabled={loading || rows.length === 0}
         >
@@ -568,7 +604,7 @@ export function AdvancesView() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {rows.map((r) => {
+                        {(printRows ?? rows).map((r) => {
                           const remaining = r.amount - r.deductedAmount
                           const share = monthlyInstallment(r)
                           return (
@@ -688,7 +724,7 @@ export function AdvancesView() {
 
                   {/* Mobile cards */}
                   <ul className="space-y-3 md:hidden print:hidden">
-                    {rows.map((r) => {
+                    {(printRows ?? rows).map((r) => {
                       const remaining = r.amount - r.deductedAmount
                       return (
                         <li key={r.id} className="rounded-xl border bg-card p-3.5 shadow-sm">

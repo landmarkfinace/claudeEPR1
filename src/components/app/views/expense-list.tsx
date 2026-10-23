@@ -21,6 +21,7 @@ import {
   FileText,
   Loader2,
   Lock,
+  FileDown,
   Paperclip,
   Pencil,
   Plus,
@@ -96,6 +97,7 @@ import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { CategoryChip } from '../shared/status-badge'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { ExpenseStatementPrintDialog } from '../print/expense-statement-print'
+import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import type { ExpenseStatement } from '@/lib/types'
 
 type TransactionsResponse = Paginated<TransactionRow> & { totals: { sum: number } }
@@ -185,6 +187,10 @@ export function ExpenseListView() {
   const [totalPages, setTotalPages] = useState(1)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  // Full filtered list for PRINT/PDF output — the printed statement must carry
+  // EVERY filtered row, not just the current 10-row page. Null = normal
+  // paginated view; set only while the print serializer runs.
+  const [printRows, setPrintRows] = useState<TransactionRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -568,31 +574,37 @@ export function ExpenseListView() {
     setReceiptDialogOpen(true)
   }
 
+  /** Every filtered expense across all pages (server clamps pageSize to 100). */
+  async function fetchAllExpenseRows(): Promise<TransactionRow[]> {
+    const all: TransactionRow[] = []
+    let p = 1
+    for (;;) {
+      const res = await api.get<TransactionsResponse>(
+        `/api/transactions${qs({
+          type: 'expense',
+          categoryId: categoryId === 'all' ? '' : categoryId,
+          projectId: projectId === 'all' ? '' : projectId,
+          spenderId: spenderId === 'all' ? '' : spenderId,
+          expenseMonth: monthFilter === 'all' ? '' : monthFilter,
+          expenseYear: yearFilter === 'all' ? '' : yearFilter,
+          search: debouncedSearch,
+          page: p,
+          pageSize: 100,
+        })}`
+      )
+      all.push(...res.data)
+      if (p >= res.totalPages || res.data.length === 0) break
+      p += 1
+    }
+    return all
+  }
+
   // Export the WHOLE filtered set (walks pages server-side max 100)
   async function handleExportCsv() {
     if (exporting) return
     setExporting(true)
     try {
-      const all: TransactionRow[] = []
-      let p = 1
-      for (;;) {
-        const res = await api.get<TransactionsResponse>(
-          `/api/transactions${qs({
-            type: 'expense',
-            categoryId: categoryId === 'all' ? '' : categoryId,
-            projectId: projectId === 'all' ? '' : projectId,
-            spenderId: spenderId === 'all' ? '' : spenderId,
-            expenseMonth: monthFilter === 'all' ? '' : monthFilter,
-            expenseYear: yearFilter === 'all' ? '' : yearFilter,
-            search: debouncedSearch,
-            page: p,
-            pageSize: 100,
-          })}`
-        )
-        all.push(...res.data)
-        if (p >= res.totalPages || res.data.length === 0) break
-        p += 1
-      }
+      const all = await fetchAllExpenseRows()
       const csv = buildCsv(
         [
           'Date',
@@ -630,6 +642,32 @@ export function ExpenseListView() {
     }
   }
 
+  /**
+   * Run a print/export job against the COMPLETE filtered list: fetch every
+   * page (same filters as the on-screen table), swap the full list in for one
+   * render so the serializer captures it, then restore the paginated view.
+   * Without this the printed/PDF list contained only the current 10-row page
+   * while its header claimed whole-filter totals ("N records").
+   */
+  async function withFullRows(job: () => Promise<unknown>): Promise<void> {
+    if (loading || rows.length === 0) return
+    try {
+      const all = await fetchAllExpenseRows()
+      if (all.length === 0) {
+        toast.info('Nothing matches the current filters')
+        return
+      }
+      setPrintRows(all)
+      // let React flush + the browser paint the full table before serializing
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+      await job()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Print failed')
+    } finally {
+      setPrintRows(null)
+    }
+  }
+
   function openPrint(spenderFilter: string | null) {
     setPrintSpenderId(spenderFilter)
     setPrintOpen(true)
@@ -650,6 +688,30 @@ export function ExpenseListView() {
           >
             {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading || total === 0}
+            onClick={(e) =>
+              void withFullRows(() => printPrintArea(e.currentTarget))
+            }
+          >
+            <Printer className="h-4 w-4" />
+            Print List
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading || total === 0}
+            onClick={(e) =>
+              void withFullRows(() =>
+                downloadPrintAreaAsPdf('Expense-List', e.currentTarget)
+              )
+            }
+          >
+            <FileDown className="h-4 w-4" />
+            Download PDF
           </Button>
           <Button
             variant="outline"
@@ -1046,7 +1108,7 @@ export function ExpenseListView() {
           <>
             {/* Mobile: stacked cards */}
             <ul className="space-y-3 p-4 sm:p-6 md:hidden print:hidden">
-              {rows.map((row) => (
+              {(printRows ?? rows).map((row) => (
                 <li
                   key={row.id}
                   className="rounded-xl border bg-card p-3 shadow-sm transition-colors hover:bg-muted/30"
@@ -1170,7 +1232,7 @@ export function ExpenseListView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => (
+                  {(printRows ?? rows).map((row) => (
                     <TableRow key={row.id}>
                       <TableCell className="max-w-[240px] print:max-w-none">
                         <div className="flex items-start gap-3">
