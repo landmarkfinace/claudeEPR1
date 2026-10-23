@@ -102,16 +102,18 @@ export const NL_ALL_COLUMNS: { key: NameListColumnKey; label: string }[] = [
 ]
 
 /** Column order per template kind — mirrors the two design images. */
-export const NL_KIND_COLUMN_ORDER: Record<'interview' | 'mobilization', NameListColumnKey[]> = {
+export const NL_KIND_COLUMN_ORDER: Record<'interview' | 'mobilization' | 'demobilization', NameListColumnKey[]> = {
   // # · Name · Trade · Exp · Nationality · Iqama · Mobile · Result · Remarks
   interview: ['trade', 'experience', 'nationality', 'iqama', 'mobile', 'result', 'remarks'],
   // # · Name · Iqama · Passport · Mobile · Nationality · Trade · Blood · Remarks
   mobilization: ['iqama', 'passport', 'mobile', 'nationality', 'trade', 'blood', 'remarks'],
+  // demob lists are site paperwork too — print like mobilization lists
+  demobilization: ['iqama', 'passport', 'mobile', 'nationality', 'trade', 'blood', 'remarks'],
 }
 
 /** Ordered visible columns for a list (print + Excel share this). */
 export function nlOrderedColumns(
-  kind: 'interview' | 'mobilization',
+  kind: NameListSubjectKind,
   cols: NameListColumns
 ): { key: NameListColumnKey; label: string }[] {
   const order = NL_KIND_COLUMN_ORDER[kind]

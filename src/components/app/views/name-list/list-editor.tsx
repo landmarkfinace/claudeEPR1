@@ -1007,8 +1007,9 @@ export function ListEditor({
                     : 'Move back to Draft?'}
             </DialogTitle>
             <DialogDescription>
-              {confirmStatus === 'completed' && detail.subjectKind === 'mobilization'
-                ? detail.subjectName.toLowerCase().startsWith('demob')
+              {confirmStatus === 'completed' &&
+              (detail.subjectKind === 'mobilization' || detail.subjectKind === 'demobilization')
+                ? detail.subjectKind === 'demobilization'
                   ? 'Every worker on this list will be released from the site and return to Available.'
                   : 'Every worker on this list will be marked Deployed and assigned to the site (start date = list date).'
                 : confirmStatus === 'completed'

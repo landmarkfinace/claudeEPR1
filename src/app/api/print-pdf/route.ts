@@ -19,7 +19,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 
 import { getSessionUser } from '@/lib/auth'
-import { unauthorized, badRequest, serverError } from '@/lib/api-helpers'
+import { unauthorized, badRequest, serverError, logActivity } from '@/lib/api-helpers'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -154,6 +154,18 @@ export async function POST(req: NextRequest) {
       return serverError()
     }
     const bytes = new Uint8Array(await res.arrayBuffer())
+    // Audit trail: PDF exports were invisible — log who printed what
+    // (page mode + payload size; the HTML itself is never logged).
+    try {
+      await logActivity({
+        user,
+        action: 'export',
+        module: 'print',
+        description: `PDF export (${pageMode}, ${body.html.length.toLocaleString()} chars)`,
+      })
+    } catch {
+      // logging must never block the export
+    }
     return new Response(bytes, {
       headers: {
         'content-type': 'application/pdf',

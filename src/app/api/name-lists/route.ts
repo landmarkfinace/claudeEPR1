@@ -6,16 +6,7 @@ import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import {
-  ok,
-  badRequest,
-  serverError,
-  requirePermission,
-  isResponse,
-  parsePagination,
-  paginatedResponse,
-  logActivity,
-} from '@/lib/api-helpers'
+import { ok, badRequest, serverError, requirePermission, isResponse, parsePagination, paginatedResponse, logActivity, parseDate } from '@/lib/api-helpers'
 import { LIST_INCLUDE, mapListRow, nextListNo, findWorkerConflicts } from '@/lib/name-list-server'
 
 const createSchema = z.object({
@@ -144,7 +135,7 @@ export async function POST(req: NextRequest) {
     }
     const body = parsed.data
 
-    const date = new Date(body.date)
+    const date = parseDate(body.date) ?? new Date(body.date)
     if (Number.isNaN(date.getTime())) return badRequest('Invalid date')
 
     const [client, subject] = await Promise.all([

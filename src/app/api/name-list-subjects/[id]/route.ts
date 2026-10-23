@@ -21,7 +21,7 @@ const updateSchema = z.object({
     .string()
     .regex(/^#[0-9A-Fa-f]{6}$/, 'Colour must be a hex value like #2F6FB0')
     .optional(),
-  kind: z.enum(['interview', 'mobilization']).optional(),
+  kind: z.enum(['interview', 'mobilization', 'demobilization']).optional(),
   sortOrder: z.number().int().min(0).max(999).optional(),
 })
 

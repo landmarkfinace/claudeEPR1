@@ -29,6 +29,24 @@ const ALLOWED: Record<string, string> = {
 }
 const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
 
+/**
+ * Server-side content sniffing — the client-declared MIME type is trivially
+ * spoofable, so verify the actual bytes before storing anything. Mirrors the
+ * data-URL path's validateImageDataUrl.
+ */
+function sniffExt(buf: Buffer): 'jpg' | 'png' | 'webp' | 'pdf' | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg'
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png'
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && // RIFF
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50    // WEBP
+  ) return 'webp'
+  if (buf.length >= 5 && buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'pdf'
+  return null
+}
+
+
 function contentTypeFor(ext: string): string {
   switch (ext) {
     case 'jpg':
@@ -93,6 +111,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (file.size > MAX_BYTES) return badRequest('File is larger than 10 MB')
 
     const bytes = Buffer.from(await file.arrayBuffer())
+    // Verify the ACTUAL content — a spoofed MIME type must not store
+    // arbitrary bytes as an image/PDF that is later served inline.
+    if (sniffExt(bytes) !== ext) {
+      return badRequest('File content does not match its type — only real JPG, PNG, WebP images or PDFs are accepted.')
+    }
     await fs.mkdir(DIR, { recursive: true })
     await fs.writeFile(path.join(DIR, `${id}.${ext}`), bytes)
 

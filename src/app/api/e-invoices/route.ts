@@ -211,6 +211,14 @@ export async function POST(req: NextRequest) {
     if (body.supplyDate && !supplyDate) return badRequest('Invalid supply date')
     const dueDate = parseDate(body.dueDate)
     if (body.dueDate && !dueDate) return badRequest('Invalid due date')
+    // Cross-check: a document cannot be supplied/due BEFORE it is issued
+    // (agreement-style validation; the module used to accept any order).
+    if (supplyDate && supplyDate.getTime() < issueDate.getTime() - 86_400_000) {
+      return badRequest('Supply date cannot be before the issue date.')
+    }
+    if (dueDate && dueDate.getTime() < issueDate.getTime() - 86_400_000) {
+      return badRequest('Due date cannot be before the issue date.')
+    }
 
     const docType = body.docType ?? 'invoice'
 

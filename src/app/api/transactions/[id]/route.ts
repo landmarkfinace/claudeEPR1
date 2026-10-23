@@ -182,9 +182,19 @@ export async function PUT(
     if (isResponse(auth)) return auth
 
     const { id } = await params
-    const existing = await db.transaction.findUnique({ where: { id } })
+    const existing = await db.transaction.findUnique({
+      where: { id },
+      include: { advancePayment: { select: { id: true } }, advanceRecoveries: { select: { id: true }, take: 1 } },
+    })
     if (!existing) return notFound('Transaction not found')
     if (existing.payrollId) return conflict(PAYROLL_LINKED_MSG)
+    // Advance-linked entries are managed by the advance module — editing the
+    // books here used to desync Transaction.amount from WorkerAdvance.amount.
+    if (existing.advancePayment || existing.advanceRecoveries.length > 0) {
+      return conflict(
+        'This entry is linked to a worker advance — edit or delete it from the Advances module.'
+      )
+    }
 
     let raw: unknown
     try {
@@ -234,9 +244,17 @@ export async function DELETE(
     if (isResponse(auth)) return auth
 
     const { id } = await params
-    const existing = await db.transaction.findUnique({ where: { id } })
+    const existing = await db.transaction.findUnique({
+      where: { id },
+      include: { advancePayment: { select: { id: true } }, advanceRecoveries: { select: { id: true }, take: 1 } },
+    })
     if (!existing) return notFound('Transaction not found')
     if (existing.payrollId) return conflict(PAYROLL_LINKED_MSG)
+    if (existing.advancePayment || existing.advanceRecoveries.length > 0) {
+      return conflict(
+        'This entry is linked to a worker advance — edit or delete it from the Advances module.'
+      )
+    }
 
     // Remove the attached bill receipt file (best-effort) along with the row
     if (existing.receiptExt) {

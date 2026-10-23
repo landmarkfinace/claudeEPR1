@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx'
 import { db } from '@/lib/db'
 import { parseTerms } from '@/lib/quotation-terms'
 import { formatDate } from '@/lib/format'
-import { serverError, notFound, requirePermission, isResponse } from '@/lib/api-helpers'
+import { serverError, notFound, requirePermission, isResponse, logActivity } from '@/lib/api-helpers'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -176,6 +176,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, sheet, 'Quotation')
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    // Audit trail: bulk exports were invisible — log who pulled what.
+    await logActivity({
+      user: auth,
+      action: 'export',
+      module: 'quotation',
+      description: `Excel export: ${quotation.quoteNumber}`,
+    })
 
     return new NextResponse(new Uint8Array(buf), {
       status: 200,

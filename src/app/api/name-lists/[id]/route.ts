@@ -3,15 +3,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import {
-  ok,
-  badRequest,
-  notFound,
-  serverError,
-  requirePermission,
-  isResponse,
-  logActivity,
-} from '@/lib/api-helpers'
+import { ok, badRequest, notFound, serverError, requirePermission, isResponse, logActivity, parseDate } from '@/lib/api-helpers'
 import {
   getListDetail,
   findWorkerConflicts,
@@ -136,7 +128,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const body = parsed.data
 
     if (body.date) {
-      const d = new Date(body.date)
+      const d = parseDate(body.date) ?? new Date(body.date)
       if (Number.isNaN(d.getTime())) return badRequest('Invalid date')
     }
     if (body.clientId) {
@@ -156,7 +148,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
       await tx.nameList.update({
         where: { id },
         data: {
-          ...(body.date ? { date: new Date(body.date) } : {}),
+          ...(body.date ? { date: parseDate(body.date) ?? new Date(body.date) } : {}),
           ...(body.time !== undefined ? { time: body.time?.trim() || null } : {}),
           ...(body.clientId ? { clientId: body.clientId } : {}),
           ...(body.location !== undefined ? { location: body.location?.trim() || null } : {}),

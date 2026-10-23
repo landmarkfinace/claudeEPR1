@@ -1,6 +1,7 @@
 // GET /api/projects/[id]/financials — profitability breakdown for one project
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { round2 } from '@/lib/format'
 import {
   ok,
   notFound,
@@ -12,7 +13,6 @@ import type { ProjectFinancials, TransactionType } from '@/lib/types'
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {

@@ -60,10 +60,16 @@ export function calcPayroll(input: PayrollCalcInput): PayrollCalcResult {
   const otherDeductionAmount = round2(
     otherDeductionType === 'percent' ? (grossPay * otherDeductionValue) / 100 : otherDeductionValue
   )
-  const totalDeductions = round2(advance + absentPenalty + ptAmount + unionFees + otherDeductionAmount)
+  let totalDeductions = round2(advance + absentPenalty + ptAmount + unionFees + otherDeductionAmount)
   const rawNet = round2(grossPay - totalDeductions)
   const negativeWarning = rawNet < 0
   const netPay = Math.max(0, rawNet)
+  // Keep the stored identity grossPay − totalDeductions === netPay even when
+  // the raw net goes negative: clamp the stored deductions to grossPay too
+  // (CSV/print consumers that recompute used to get a mismatch).
+  if (netPay === 0 && totalDeductions > grossPay) {
+    totalDeductions = round2(grossPay)
+  }
 
   return { regularPay, overtimePay, grossPay, otherDeductionAmount, totalDeductions, netPay, negativeWarning }
 }

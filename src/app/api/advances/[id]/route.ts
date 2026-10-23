@@ -87,6 +87,16 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const reference = input.reference?.trim() ? input.reference.trim() : null
 
+    // The amount can never drop below what payroll already recovered — that
+    // used to leave remaining = amount − deductedAmount NEGATIVE, force the
+    // status to 'deducted' (over-recovery) and feed a negative value into the
+    // dashboard's advance-outstanding sum.
+    if (round2(input.amount) < round2(existing.deductedAmount) - 0.005) {
+      return conflict(
+        `Amount cannot be less than what has already been recovered (${existing.deductedAmount.toFixed(2)} SAR). Delete the recovering payrolls first or raise the amount.`
+      )
+    }
+
     const updated = await db.$transaction(async (tx) => {
       const row = await tx.workerAdvance.update({
         where: { id },

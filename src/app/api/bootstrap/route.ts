@@ -27,7 +27,9 @@ const bodySchema = z.object({
 export async function GET() {
   try {
     const userCount = await db.user.count()
-    return ok({ needsBootstrap: userCount === 0, userCount })
+    // Only the boolean is exposed — the count itself was a recon aid
+    // (how many accounts exist on this system) for anonymous callers.
+    return ok({ needsBootstrap: userCount === 0 })
   } catch (err) {
     console.error('[api/bootstrap GET]', err)
     return serverError()

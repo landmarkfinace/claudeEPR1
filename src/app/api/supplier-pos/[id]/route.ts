@@ -113,6 +113,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const startDate = parseDate(body.startDate)
     if (body.startDate && !startDate) return badRequest('Invalid start date')
+    // Cross-check: work cannot be expected/start before the PO is issued.
+    if (expectedDate && expectedDate.getTime() < issueDate.getTime() - 86_400_000) {
+      return badRequest('Expected delivery date cannot be before the issue date.')
+    }
+    if (startDate && startDate.getTime() < issueDate.getTime() - 86_400_000) {
+      return badRequest('Start date cannot be before the issue date.')
+    }
 
     const supplierName = body.supplierName.trim()
     if (!supplierName) return badRequest('Supplier name is required')

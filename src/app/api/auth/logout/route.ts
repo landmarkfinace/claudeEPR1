@@ -1,7 +1,7 @@
 // POST /api/auth/logout — destroy session + clear cookie/token (no auth required)
 import { NextRequest } from 'next/server'
-import { destroySession, SESSION_COOKIE } from '@/lib/auth'
-import { ok, serverError } from '@/lib/api-helpers'
+import { destroySession, SESSION_COOKIE, getSessionUser } from '@/lib/auth'
+import { ok, serverError, logActivity } from '@/lib/api-helpers'
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,11 +24,31 @@ export async function POST(req: NextRequest) {
         // no body — fine
       }
     }
+    // Audit trail: logouts were invisible — log who signed out BEFORE the
+    // session row is destroyed (best-effort: unknown user is skipped).
+    let who: Awaited<ReturnType<typeof getSessionUser>> = null
+    try {
+      who = await getSessionUser()
+    } catch {
+      who = null
+    }
     if (token) {
       try {
         await destroySession(token)
       } catch {
         // clearing the cookie below is enough even if the row is already gone
+      }
+    }
+    if (who) {
+      try {
+        await logActivity({
+          user: who,
+          action: 'logout',
+          module: 'user',
+          description: `${who.name} signed out`,
+        })
+      } catch {
+        // logging must never block the logout itself
       }
     }
     const res = ok({ success: true })

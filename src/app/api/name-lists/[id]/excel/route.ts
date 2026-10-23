@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { db } from '@/lib/db'
-import { notFound, serverError, requirePermission, isResponse } from '@/lib/api-helpers'
+import { notFound, serverError, requirePermission, isResponse, logActivity } from '@/lib/api-helpers'
 import {
   defaultColumnsFor,
   formatSaudiMobile,
@@ -186,6 +186,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, sheet, 'Name List')
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+
+    // Audit trail: bulk exports were invisible — log who pulled what.
+    await logActivity({
+      user: auth,
+      action: 'export',
+      module: 'namelist',
+      description: `Excel export: ${list.listNo}`,
+    })
 
     return new NextResponse(new Uint8Array(buf), {
       status: 200,

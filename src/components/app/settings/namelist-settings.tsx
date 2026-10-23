@@ -137,7 +137,11 @@ export function NameListSettingsSection() {
                 {s.name}
               </span>
               <Badge variant="outline" className="text-[10px]">
-                {s.kind === 'interview' ? 'Interview workflow' : 'Mobilization workflow'}
+                {s.kind === 'interview'
+                  ? 'Interview workflow'
+                  : s.kind === 'demobilization'
+                    ? 'Demobilization workflow'
+                    : 'Mobilization workflow'}
               </Badge>
               {s.isSystem ? (
                 <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
@@ -217,6 +221,9 @@ export function NameListSettingsSection() {
                   </SelectItem>
                   <SelectItem value="mobilization">
                     Mobilization — site assignment, passport &amp; blood print
+                  </SelectItem>
+                  <SelectItem value="demobilization">
+                    Demobilization — release from site, workers return to Available
                   </SelectItem>
                 </SelectContent>
               </Select>

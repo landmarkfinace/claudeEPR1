@@ -67,8 +67,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     const staffIds = list.workers.map((w) => w.staffId)
 
     // ── Mobilization completed → Deployed + site assignment ──
-    if (next === 'completed' && list.subject.kind === 'mobilization') {
-      const isDemob = list.subject.name.toLowerCase().startsWith('demob')
+    if (next === 'completed' && (list.subject.kind === 'mobilization' || list.subject.kind === 'demobilization')) {
+      // Discriminator is the subject KIND, never its name — renaming a subject
+      // used to silently flip the completed-list action (deploy vs release).
+      const isDemob = list.subject.kind === 'demobilization'
 
       if (isDemob) {
         // Demobilization: site assignment ends, worker back to Available.
@@ -157,8 +159,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
     })
 
     const label =
-      next === 'completed' && list.subject.kind === 'mobilization'
-        ? list.subject.name.toLowerCase().startsWith('demob')
+      next === 'completed' && (list.subject.kind === 'mobilization' || list.subject.kind === 'demobilization')
+        ? list.subject.kind === 'demobilization'
           ? 'workers released (Available)'
           : 'workers deployed & assigned to the site'
         : undefined

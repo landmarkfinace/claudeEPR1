@@ -12,12 +12,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 import { db } from '@/lib/db'
-import {
-  notFound,
-  serverError,
-  requirePermission,
-  isResponse,
-} from '@/lib/api-helpers'
+import { notFound, serverError, requirePermission, isResponse, logActivity } from '@/lib/api-helpers'
 import {
   agreementFullInclude,
   mapAgreement,
@@ -141,6 +136,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const filename = pdfFileName(mapped.agreementNo, mapped.otherPartyNameEn || mapped.otherPartyNameAr)
     const asciiFallback = filename.replace(/[^\x20-\x7E]+/g, '_').replace(/"/g, '')
     const bytes = new Uint8Array(await res.arrayBuffer())
+    // Audit trail: bulk exports were invisible — log who pulled what.
+    await logActivity({
+      user: auth,
+      action: 'export',
+      module: 'agreement',
+      description: `PDF export: ${mapped.agreementNo}`,
+    })
+
     return new Response(bytes, {
       headers: {
         'content-type': 'application/pdf',

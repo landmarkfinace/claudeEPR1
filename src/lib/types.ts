@@ -1398,7 +1398,7 @@ export type GlossaryTermRow = {
 }
 
 // ── Name List module (worker deployment lists) ─────────────────────────────
-export type NameListSubjectKind = 'interview' | 'mobilization'
+export type NameListSubjectKind = 'interview' | 'mobilization' | 'demobilization'
 export type NameListWorkerResult = 'selected' | 'rejected' | 'absent' | 'onhold'
 export type NameListStatus = 'draft' | 'sent' | 'completed' | 'cancelled'
 

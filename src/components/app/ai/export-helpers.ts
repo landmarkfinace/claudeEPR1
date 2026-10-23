@@ -165,7 +165,10 @@ export function printAnswer(title: string, markdown: string): boolean {
 <html><head><meta charset="utf-8"><title>${title.replace(/</g, '&lt;')}</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: #1c2434; margin: 0; padding: 28px 32px; }
+  /* Arabic webfont + per-paragraph direction — the popup previously fell
+     back to OS fonts and forced LTR, breaking Arabic answers. */
+  body { font-family: 'Segoe UI', 'Cairo', system-ui, -apple-system, sans-serif; color: #1c2434; margin: 0; padding: 28px 32px; }
+  p, td, li, h1, h2, h3, h4, .foot { unicode-bidi: plaintext; }
   .brand { display:flex; align-items:center; gap:10px; border-bottom:3px solid #D4AF37; padding-bottom:10px; margin-bottom:6px; }
   .brand .mark { width:34px;height:34px;border-radius:8px;background:#16243d;color:#D4AF37;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px; }
   .brand .co { font-weight:700; font-size:15px; color:#16243d; }
@@ -174,7 +177,7 @@ export function printAnswer(title: string, markdown: string): boolean {
   h2,h3,h4 { font-size:14px; margin:12px 0 6px; }
   p { margin:6px 0; line-height:1.55; font-size:12.5px; }
   table { border-collapse:collapse; width:100%; margin:10px 0; font-size:11.5px; }
-  th { background:#16243d; color:#fff; text-align:left; padding:6px 8px; }
+  th { background:#16243d; color:#fff; text-align:start; padding:6px 8px; }
   td { border-bottom:1px solid #e4e7ee; padding:5px 8px; vertical-align:top; }
   tr:nth-child(even) td { background:#f6f7f9; }
   code { background:#f0f1f4; border-radius:4px; padding:1px 5px; font-size:11px; }
