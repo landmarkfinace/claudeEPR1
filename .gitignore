@@ -74,3 +74,6 @@ Caddyfile
 
 # print render daemon runtime log
 print-daemon.log
+
+# local DB snapshots (NEVER commit — they carry password hashes, session tokens, ZATCA keys)
+backups/
