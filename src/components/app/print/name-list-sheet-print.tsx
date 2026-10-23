@@ -69,109 +69,55 @@ import {
   printNameFontTier,
   rememberColumnDefaults,
 } from '@/lib/name-list-utils'
+import { toast } from 'sonner'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  NAME_LIST_TEMPLATES,
+  normalizeNameListTemplate,
+  resolveNameListTemplate,
+  type NameListTemplateId,
+} from '@/lib/name-list-templates'
+import {
+  BAND_GAP_BOTTOM_MM,
+  BLOOD_BG,
+  BLOOD_FG,
+  BORDER,
+  CREAM,
+  DARK_NAVY,
+  DOC_FONT,
+  FOOTER_MM,
+  GAP_SIG_NOTE_MM,
+  GOLD,
+  GoldDiamond,
+  LIGHT_GOLD,
+  MUTED,
+  NAVY,
+  NOTE_MM,
+  PAGE_H_MM,
+  PAGE_W_MM,
+  ROW_SEP,
+  SIDE_PAD_MM,
+  SPACER_MIN_MM,
+  STRIPE_A,
+  STRIPE_CAPTION,
+  COL_W,
+  DEFAULT_LETTERHEAD,
+  geometryFor,
+  rowHeightMm,
+  NoteLine,
+  StatusStamp,
+  planNlPages,
+  tradeCounts,
+} from './name-list-print-shared'
+import { NLHeritageDocument } from './name-list-print-heritage'
+import { NLFolderDocument } from './name-list-print-folder'
+import { NLSidebarDocument } from './name-list-print-sidebar'
 
-// ── Brand palette (the boss's specified values) ──────────────────────────────
-const NAVY = '#132A4A'
-const DARK_NAVY = '#0C1D33'
-const GOLD = '#C0934C'
-const LIGHT_GOLD = '#E1B169'
-const CREAM = '#FAF7F1'
-const BORDER = '#E6E1D6'
-const MUTED = '#6B7488'
-const ROW_SEP = '#EFEAE0'
-const STRIPE_A = '#F3F5F8'
-const STRIPE_CAPTION = '#9AA5B5'
-const BLOOD_BG = '#FBE9E7'
-const BLOOD_FG = '#B03A2E'
-
-const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
-
-// ── A4 pagination geometry ──────────────────────────────────────────────────
-const PAGE_W_MM = 210
-const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (Chrome blank-page fix)
-const SIDE_PAD_MM = 8
-/** LEGACY bottom budget kept ONLY inside the pagination formulas so the row
- *  chunking (rows per page) stays byte-identical to the previous layout. */
-const FOOTER_MM = 4
-/** real render gap between the note line and the letterhead footer band */
-const BAND_GAP_BOTTOM_MM = 1
-/** signature cards bottom edge → note line: the boss's 3mm */
-const GAP_SIG_NOTE_MM = 3
-/** note line height estimate (7.5pt leading-snug ≈ 3.6mm real) */
-const NOTE_MM = 3
-/** minimum breathing room kept between the trade summary and the cards */
-const SPACER_MIN_MM = 2.4
-
-const DEFAULT_LETTERHEAD: LetterheadConfig = {
-  mode: 'none',
-  headerImage: null,
-  footerImage: null,
-  fullPageImage: null,
-  showCompanyDetails: true,
-  headerHeightMm: 30,
-  footerHeightMm: 18,
-}
-
-function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: number } {
-  const hasFull = letterhead.mode === 'full' && letterhead.fullPageImage
-  const hasHeader =
-    (letterhead.mode === 'header' || letterhead.mode === 'header_footer') && letterhead.headerImage
-  const hasFooter = letterhead.mode === 'header_footer' && letterhead.footerImage
-  if (hasFull) {
-    return {
-      topMm: letterhead.headerHeightMm + 4,
-      bottomMm: Math.max(letterhead.footerHeightMm + 4, 12),
-    }
-  }
-  if (hasHeader && hasFooter) {
-    return { topMm: letterhead.headerHeightMm + 3, bottomMm: letterhead.footerHeightMm + 3 }
-  }
-  if (hasHeader) return { topMm: letterhead.headerHeightMm + 3, bottomMm: 12 }
-  // 'none' — the boss's mockup: striped zones, top 35mm / bottom 22mm
-  return { topMm: 35, bottomMm: 22 }
-}
-
-/** Small solid gold diamond — the template's recurring ornament. */
-function GoldDiamond({ size = 5 }: { size?: number }) {
-  return (
-    <span
-      aria-hidden
-      className="inline-block shrink-0 rotate-45"
-      style={{ width: `${size}px`, height: `${size}px`, background: GOLD }}
-    />
-  )
-}
-
-// ── Column geometry ──────────────────────────────────────────────────────────
-/** Preferred mm widths per column (name gets the remainder). */
-const COL_W: Record<NameListColumnKey, number> = {
-  trade: 17,
-  experience: 9,
-  nationality: 15,
-  iqama: 20,
-  passport: 17,
-  mobile: 19,
-  blood: 11,
-  iqamaExpiry: 18,
-  employeeId: 26,
-  result: 26,
-  remarks: 24,
-}
-
-// ── Row height estimation for pagination ─────────────────────────────────────
-function estLines(text: string, charsPerLine: number): number {
-  if (!text) return 1
-  const lines = Math.ceil(text.length / charsPerLine)
-  return Math.max(1, Math.min(4, lines))
-}
-
-function rowHeightMm(w: NameListWorkerRow, hasResultBoxes: boolean, remarksShown: boolean): number {
-  let h = 9.8 // base row (name + padding) — raised with the 7pt-floor print fonts
-  if (hasResultBoxes) h = 12.0 // tick-box triple needs more room
-  if (remarksShown) h += Math.max(0, estLines(w.remarks ?? '', 14) - 1) * 2.6
-  h += Math.max(0, estLines(w.staff.fullName, 22) - 1) * 2.6
-  return h
-}
+// ── Brand palette, A4 geometry, letterhead resolution, row-height model,
+//    page furniture and the pagination planner now live in
+//    name-list-print-shared.tsx — moved VERBATIM out of this file (same
+//    constants, same math, same markup) so every template renders from the
+//    exact same model. Classic keeps its own render code below.
 
 // ── The print dialog ─────────────────────────────────────────────────────────
 
@@ -211,6 +157,16 @@ export function NameListSheetPrintDialog({
   const first = lists[0]
   const totalWorkers = lists.reduce((s, l) => s + l.workers.length, 0)
 
+  // print template — the list's saved choice, else the module default from
+  // Settings (Classic until changed). Switching it only changes the layout;
+  // for a single list the choice is PATCHed onto the list (works on every
+  // status — completed/cancelled included, it is purely cosmetic).
+  const [tpl, setTpl] = useState<NameListTemplateId>('classic')
+  useEffect(() => {
+    if (!open || lists.length === 0) return
+    setTpl(resolveNameListTemplate(lists[0].template ?? null, settings.nameListDefaultTemplate))
+  }, [open, lists, settings.nameListDefaultTemplate])
+
   async function setColumns(list: NameListDetail, next: NameListColumns) {
     setColsByList((p) => ({ ...p, [list.id]: next }))
     // persist instantly so the server-side Excel export matches the print
@@ -220,6 +176,22 @@ export function NameListSheetPrintDialog({
       onColumnsSaved?.(list.id, next)
     } catch {
       /* keep local print working even if the save fails */
+    }
+  }
+
+  /** Switch the print template — re-renders instantly. Saved lists keep the
+   *  choice (PATCHed; any status — layout only). Multi-list day prints apply
+   *  it to the whole job without writing to the lists. */
+  async function chooseTemplate(v: string) {
+    const t = normalizeNameListTemplate(v) ?? 'classic'
+    setTpl(t)
+    if (lists.length === 1 && first) {
+      try {
+        const { api } = await import('@/lib/api-client')
+        await api.patch(`/api/name-lists/${first.id}`, { template: t })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not save the template choice')
+      }
     }
   }
 
@@ -245,11 +217,27 @@ export function NameListSheetPrintDialog({
                 : `${lists.length} name lists · ${totalWorkers} workers`}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              A4 · Mirror template · {lists.length === 1 ? first.subjectName : 'multi-list day print'}
+              A4 · {NAME_LIST_TEMPLATES.find((t) => t.id === tpl)?.label ?? 'Classic'} template ·{' '}
+              {lists.length === 1 ? first.subjectName : 'multi-list day print'}
               {lists.length === 1 ? ` · ${first.clientName}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="hidden text-xs text-muted-foreground sm:inline">Template</span>
+              <Select value={tpl} onValueChange={(v) => void chooseTemplate(v)}>
+                <SelectTrigger className="h-8 w-[118px] text-xs" aria-label="Print template">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {NAME_LIST_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {lists.length === 1 ? (
               <>
                 <Popover>
@@ -339,8 +327,9 @@ export function NameListSheetPrintDialog({
             style={{ fontFamily: DOC_FONT }}
           >
             {lists.map((l) => (
-              <NameListSheetDocument
+              <NameListTemplateDocument
                 key={l.id}
+                template={tpl}
                 list={l}
                 columns={resolved[l.id]}
                 letterhead={letterhead ?? DEFAULT_LETTERHEAD}
@@ -376,7 +365,7 @@ export function NameListSheetDocument({
   const hasResultCol = cols.some((c) => c.key === 'result')
   const hasRemarks = cols.some((c) => c.key === 'remarks')
 
-  // ── pagination (flow-fill lite) ──
+  // ── pagination (flow-fill lite — the shared planner; same math as before) ──
   const headerMm = 12.5 // title row
   const ruleMm = 3.2 // gold rule
   const infoBarMm = 13.5 // cream info bar
@@ -397,45 +386,13 @@ export function NameListSheetDocument({
   const availFirst = PAGE_H_MM - geo.topMm - (geo.bottomMm + FOOTER_MM) - page1FixedMm
   const availRest = PAGE_H_MM - geo.topMm - (geo.bottomMm + FOOTER_MM) - contHeaderMm
 
-  // chunk workers
-  const chunks: number[][] = []
-  let cur: number[] = []
-  let used = 0
-  let limit = availFirst
-  for (let i = 0; i < list.workers.length; i++) {
-    const h = rowsMm[i]
-    if (used + h > limit && cur.length > 0) {
-      chunks.push(cur)
-      cur = []
-      used = 0
-      limit = availRest
-    }
-    cur.push(i)
-    used += h
-  }
-  chunks.push(cur)
+  // chunk workers + fit the tail (shared planner — Classic's exact algorithm)
+  const planned = planNlPages({ availFirst, availRest, rowsMm, tailMm })
+  const pages = planned.pages
+  const totalPages = planned.totalPages
 
-  // tail (trade summary + signature cards) stays on the last items page only
-  // when the whole bottom stack fits; otherwise it continues on a fresh page
-  const lastChunkUsed = used
-  const cap = chunks.length === 1 ? availFirst : availRest
-  let tailOnLastItemsPage = lastChunkUsed + tailMm <= cap
-  const pages: { rows: number[]; hasTail: boolean }[] = chunks.map((rows, i) => ({
-    rows,
-    hasTail: i === chunks.length - 1 && tailOnLastItemsPage,
-  }))
-  if (!tailOnLastItemsPage) {
-    pages.push({ rows: [], hasTail: true })
-    tailOnLastItemsPage = true
-  }
-  const totalPages = pages.length
-
-  // trade summary chips
-  const trades = new Map<string, number>()
-  for (const w of list.workers) {
-    const t = w.staff.categoryName ?? w.staff.position ?? 'Uncategorized'
-    trades.set(t, (trades.get(t) ?? 0) + 1)
-  }
+  // trade summary chips (shared computation — same numbers as ever)
+  const trades = tradeCounts(list.workers)
 
   const th = 'px-1 py-[3px] text-center align-middle text-[9.4px] font-bold uppercase tracking-[0.3pt] text-white'
   const rowFont = fontTier
@@ -523,33 +480,9 @@ export function NameListSheetDocument({
               </>
             )}
 
-            {/* status stamp over the letterhead zone (page 1) */}
-            {pageIdx === 0 && list.status !== 'draft' ? (
-              <div
-                className="pointer-events-none absolute z-20"
-                style={{ top: `${Math.max(geo.topMm - 7, 2)}mm`, right: `${SIDE_PAD_MM}mm` }}
-              >
-                <span
-                  className="inline-block rounded border-[2.5px] bg-white/95 px-2 py-px text-[8.5pt] font-black uppercase tracking-[0.3pt]"
-                  style={{
-                    borderColor:
-                      list.status === 'sent'
-                        ? '#d97706'
-                        : list.status === 'completed'
-                          ? '#059669'
-                          : '#737373',
-                    color:
-                      list.status === 'sent'
-                        ? '#b45309'
-                        : list.status === 'completed'
-                          ? '#047857'
-                          : '#525252',
-                    transform: 'rotate(-3deg)',
-                  }}
-                >
-                  {list.status}
-                </span>
-              </div>
+            {/* status stamp over the letterhead zone (page 1) — shared markup */}
+            {pageIdx === 0 ? (
+              <StatusStamp status={list.status} topMm={geo.topMm} rightMm={SIDE_PAD_MM} />
             ) : null}
 
             {/* content */}
@@ -792,23 +725,44 @@ export function NameListSheetDocument({
 
               {/* note line — the page footer, at the bottom of the content
                   column on EVERY page (1mm above the letterhead footer band) */}
-              <p
-                className="break-words text-center text-[7.5pt] font-semibold leading-snug tracking-[0.3pt] uppercase"
-                style={{ color: MUTED }}
-                data-nl-note
-              >
-                Page {pageIdx + 1} of {totalPages}
-                <span className="mx-1.5 opacity-50">|</span>
-                <span lang="ar" dir="rtl" className="tracking-normal">
-                  صفحة {pageIdx + 1} من {totalPages}
-                </span>
-              </p>
+              <NoteLine pageIdx={pageIdx} totalPages={totalPages} />
             </div>
           </div>
         )
       })}
     </>
   )
+}
+
+// ── Dispatcher — renders one list in the selected print template. The SAME
+// data (list number, client, project, dates, every worker's name, Iqama,
+// mobile, results, trade summary, total) flows to whichever template is
+// chosen; only the layout changes. Used by the print dialog, the list form
+// preview and the Settings template previews.
+export function NameListTemplateDocument({
+  template,
+  list,
+  columns,
+  letterhead,
+  settings,
+}: {
+  template?: string | null
+  list: NameListDetail
+  columns: NameListColumns
+  letterhead: LetterheadConfig
+  settings: AppSettings
+}) {
+  const tpl = normalizeNameListTemplate(template) ?? 'classic'
+  if (tpl === 'heritage') {
+    return <NLHeritageDocument list={list} columns={columns} letterhead={letterhead} settings={settings} />
+  }
+  if (tpl === 'folder') {
+    return <NLFolderDocument list={list} columns={columns} letterhead={letterhead} settings={settings} />
+  }
+  if (tpl === 'sidebar') {
+    return <NLSidebarDocument list={list} columns={columns} letterhead={letterhead} settings={settings} />
+  }
+  return <NameListSheetDocument list={list} columns={columns} letterhead={letterhead} settings={settings} />
 }
 
 function InfoField({ label, value }: { label: string; value: string }) {

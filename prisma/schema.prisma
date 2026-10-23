@@ -585,6 +585,10 @@ model NameList {
   status         String   @default("draft") // draft | sent | completed | cancelled
   // JSON snapshot of the visible-columns setting for this list
   columns        String?
+  // print template override for this list (null = module default; classic
+  // until changed) — purely cosmetic: never affects list data, workers,
+  // results, statuses or numbering
+  template       String?
   // uploaded signed/stamped client copy (scan or photo)
   signedCopyExt  String?
   signedCopyName String?

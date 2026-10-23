@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { SectionCard } from '@/components/app/shared/page-header'
+import { NameListTemplatesSettingsSection } from '@/components/app/settings/name-list-templates-settings'
 import { api } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
 import type { NameListSubjectRow } from '@/lib/types'
@@ -109,6 +110,7 @@ export function NameListSettingsSection() {
   }
 
   return (
+    <>
     <SectionCard className="p-6">
       <h2 className="flex items-center gap-2 text-base font-semibold">
         <ClipboardList className="h-4 w-4" /> Name List
@@ -256,5 +258,8 @@ export function NameListSettingsSection() {
         </DialogContent>
       </Dialog>
     </SectionCard>
+    {/* print templates — default chooser + in-memory previews */}
+    <NameListTemplatesSettingsSection />
+    </>
   )
 }

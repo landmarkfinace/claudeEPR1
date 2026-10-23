@@ -46,6 +46,7 @@ type ListWithMeta = {
   notes: string | null
   status: string
   columns: string | null
+  template: string | null
   signedCopyName: string | null
   createdByName: string | null
   createdAt: Date
@@ -104,6 +105,7 @@ export function mapListRow(l: ListWithMeta): NameListRow {
     refPoNo: l.refPoNo,
     notes: l.notes,
     status: l.status as NameListStatus,
+    template: l.template ?? null,
     workerCount: l.workers ? l.workers.length : (l._count?.workers ?? 0),
     resultCounts: counts,
     signedCopyName: l.signedCopyName,

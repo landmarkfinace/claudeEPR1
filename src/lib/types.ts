@@ -599,6 +599,8 @@ export type AppSettings = {
   quotationDefaultTemplate: string
   /** Default print template for the E-Invoice module ('classic' by default) */
   eInvoiceDefaultTemplate: string
+  // Default print template for the Name List module (classic until changed)
+  nameListDefaultTemplate: string
 }
 
 export type ActivityRow = {
@@ -1467,6 +1469,8 @@ export type NameListRow = {
   refPoNo: string | null
   notes: string | null
   status: NameListStatus
+  /** print template override (null = module default; classic until changed) */
+  template: string | null
   workerCount: number
   resultCounts: { selected: number; rejected: number; absent: number; onhold: number; pending: number }
   signedCopyName: string | null

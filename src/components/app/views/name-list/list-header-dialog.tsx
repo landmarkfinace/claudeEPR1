@@ -9,6 +9,12 @@ import { UserPlus } from 'lucide-react'
 import { api, qs } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import { nlDateInput } from '@/lib/name-list-utils'
+import {
+  NAME_LIST_TEMPLATES,
+  resolveNameListTemplate,
+  type NameListTemplateId,
+} from '@/lib/name-list-templates'
+import { useAppStore } from '@/lib/store'
 import type { NameListDetail, NameListSubjectRow, Paginated } from '@/lib/types'
 
 import { Button } from '@/components/ui/button'
@@ -64,7 +70,9 @@ export function ListHeaderDialog({
   onSaved: (createdId?: string) => void | Promise<void>
 }) {
   const isEdit = list !== null
+  const settings = useAppStore((s) => s.settings)
   const [form, setForm] = useState({ ...EMPTY })
+  const [template, setTemplate] = useState<NameListTemplateId>('classic')
   const [positions, setPositions] = useState<string[]>([])
   const [workers, setWorkers] = useState<string[]>([])
   const [subjects, setSubjects] = useState<NameListSubjectRow[]>([])
@@ -88,6 +96,11 @@ export function ListHeaderDialog({
   useEffect(() => {
     if (!open) return
     void load().catch(() => toast.error('Failed to load form data'))
+    // print template — the list's saved choice, else the module default
+    // from Settings (Classic until changed). Cosmetic only.
+    setTemplate(
+      resolveNameListTemplate(list ? list.template : null, settings.nameListDefaultTemplate)
+    )
     if (list) {
       const c = clients.find((x) => x.id === list.clientId)
       setForm({
@@ -170,6 +183,7 @@ export function ListHeaderDialog({
         transport: form.transport || null,
         refPoNo: form.refPoNo || null,
         notes: form.notes || null,
+        template,
       }
       if (isEdit) {
         await api.put(`/api/name-lists/${list.id}`, payload)
@@ -256,6 +270,25 @@ export function ListHeaderDialog({
                 value={form.time}
                 onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
               />
+            </div>
+            <div className="grid gap-1.5 sm:col-span-2">
+              <Label>Print template</Label>
+              <Select value={template} onValueChange={(v) => setTemplate(v as NameListTemplateId)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {NAME_LIST_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11pt] text-muted-foreground">
+                Saved with this list. Switching it never changes list data, workers, results or
+                statuses — only the print look.
+              </p>
             </div>
 
             {isMob ? (

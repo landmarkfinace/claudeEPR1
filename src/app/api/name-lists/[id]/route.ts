@@ -10,6 +10,7 @@ import {
   recomputeWorkerStatus,
   applyResultStatus,
 } from '@/lib/name-list-server'
+import { NAME_LIST_TEMPLATE_IDS } from '@/lib/name-list-templates'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -34,6 +35,7 @@ const updateSchema = z.object({
   refPoNo: z.string().max(60).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   columns: z.record(z.string(), z.boolean()).nullable().optional(),
+  template: z.enum(NAME_LIST_TEMPLATE_IDS).nullable().optional(),
   workers: z.array(workerSchema).max(500).optional(),
 })
 
@@ -113,12 +115,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     } catch {
       return badRequest('Invalid JSON body')
     }
-    // Columns-only updates (print preference from the print dialog) stay
-    // allowed on read-only lists — hiding data for client copies must always
-    // work, including reprints of completed lists.
+    // Columns-only and template-only updates (print preferences from the
+    // print dialog / template chooser) stay allowed on read-only lists —
+    // hiding data for client copies and changing the print layout must
+    // always work, including reprints of completed lists.
     const rawKeys = Object.keys((raw ?? {}) as Record<string, unknown>)
-    const columnsOnly = rawKeys.length === 1 && rawKeys[0] === 'columns'
-    if ((list.status === 'completed' || list.status === 'cancelled') && !columnsOnly) {
+    const cosmeticOnly =
+      rawKeys.length > 0 && rawKeys.every((k) => k === 'columns' || k === 'template')
+    if ((list.status === 'completed' || list.status === 'cancelled') && !cosmeticOnly) {
       return badRequest(`A ${list.status} list is read-only.`)
     }
     const parsed = updateSchema.safeParse(raw)
@@ -167,6 +171,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           ...(body.columns !== undefined
             ? { columns: body.columns ? JSON.stringify(body.columns) : null }
             : {}),
+          ...(body.template !== undefined ? { template: body.template } : {}),
         },
       })
 
@@ -291,6 +296,52 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return badRequest('Duplicate workers in the list')
     }
     return serverError()
+  }
+}
+
+// PATCH — switch the print template of a saved name list WITHOUT touching
+// anything else. Works on EVERY status (completed/cancelled included): the
+// template is purely cosmetic — list data, workers, results, statuses and
+// numbering are never affected, only the layout.
+const templatePatchSchema = z.object({
+  template: z.enum(NAME_LIST_TEMPLATE_IDS).nullable(),
+})
+
+export async function PATCH(req: NextRequest, { params }: Params) {
+  try {
+    const auth = await requirePermission('namelist.edit')
+    if (isResponse(auth)) return auth
+
+    const { id } = await params
+    const list = await db.nameList.findUnique({ where: { id }, select: { id: true, listNo: true } })
+    if (!list) return notFound('Name list not found')
+
+    let raw: unknown
+    try {
+      raw = await req.json()
+    } catch {
+      return badRequest('Invalid JSON body')
+    }
+    const parsed = templatePatchSchema.safeParse(raw)
+    if (!parsed.success) {
+      return badRequest(
+        'template must be one of: classic, heritage, folder, sidebar (or null)'
+      )
+    }
+
+    const updated = await db.nameList.update({
+      where: { id },
+      data: { template: parsed.data.template ?? null },
+      select: { id: true, listNo: true, template: true },
+    })
+    return ok({
+      id: updated.id,
+      listNo: updated.listNo,
+      template: updated.template,
+    })
+  } catch (err) {
+    console.error('[api/name-lists/[id] PATCH]', err)
+    return serverError('Failed to update the template')
   }
 }
 

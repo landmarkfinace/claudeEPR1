@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { ok, badRequest, serverError, requirePermission, isResponse, parsePagination, paginatedResponse, logActivity, parseDate } from '@/lib/api-helpers'
 import { LIST_INCLUDE, mapListRow, nextListNo, findWorkerConflicts } from '@/lib/name-list-server'
+import { NAME_LIST_TEMPLATE_IDS } from '@/lib/name-list-templates'
 
 const createSchema = z.object({
   date: z.string().min(1, 'Date is required'),
@@ -23,6 +24,7 @@ const createSchema = z.object({
   refPoNo: z.string().max(60).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   columns: z.record(z.string(), z.boolean()).nullable().optional(),
+  template: z.enum(NAME_LIST_TEMPLATE_IDS).nullable().optional(),
   workers: z.array(z.string()).max(500).optional(),
 })
 
@@ -170,6 +172,7 @@ export async function POST(req: NextRequest) {
           refPoNo: body.refPoNo?.trim() || null,
           notes: body.notes?.trim() || null,
           columns: body.columns ? JSON.stringify(body.columns) : null,
+          template: body.template ?? null,
           createdById: auth.id,
           createdByName: auth.name,
           workers: {
