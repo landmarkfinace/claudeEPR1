@@ -49,31 +49,37 @@ import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { api } from '@/lib/api-client'
 import { useAppStore } from '@/lib/store'
 import { parseTerms, type TermItem } from '@/lib/quotation-terms'
-import type {
-  AppSettings,
-  DocItemRow,
-  LetterheadConfig,
-  QuotationRow,
-} from '@/lib/types'
+import type { AppSettings, DocItemRow, LetterheadConfig } from '@/lib/types'
+import { toast } from 'sonner'
 
-/** Full quotation as returned by GET /api/quotations/[id] (items + client + assets). */
-export type QuotationDetail = QuotationRow & {
-  itemCount?: number
-  client?: {
-    id: string
-    name: string
-    contactPerson: string | null
-    phone: string | null
-    email: string | null
-    address: string | null
-    city: string | null
-    crNumber: string | null
-    vatNumber: string | null
-  } | null
-}
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  QUOTATION_TEMPLATES,
+  normalizeQuotationTemplate,
+  quotationTemplateLabel,
+  type QuotationTemplateId,
+} from '@/lib/quotation-templates'
+import {
+  CURRENCY_AR,
+  DOC_FONT,
+  PAGE_H_MM,
+  PAGE_W_MM,
+  TRADE_AR,
+  fmtDate,
+  geometryFor,
+  type ApprovedBy,
+  type QuotationDetail,
+} from './quotation-print-shared'
+import { SidebarCreamQuotationDocument } from './quotation-print-sidebar-cream'
+import { SidebarNavyQuotationDocument } from './quotation-print-sidebar-navy'
 
-/** Approved-by signatory printed from Settings › Signatories. */
-export type ApprovedBy = { name: string; designation: string } | null
+export type { ApprovedBy, QuotationDetail }
 
 const DEFAULT_LETTERHEAD: LetterheadConfig = {
   mode: 'none',
@@ -106,11 +112,7 @@ const CREAM = '#FBF9F3'
 const STRIPE_A = '#F3F5F8'
 const STRIPE_CAPTION = '#6B7488'
 
-const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
-
 // ── A4 pagination geometry ──────────────────────────────────────────────────
-const PAGE_W_MM = 210
-const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see header comment)
 const SIDE_PAD_MM = 14
 // reserved at the foot of every page for the note line + its ≥3mm gaps
 const FOOTER_MM = 4
@@ -119,62 +121,6 @@ const CONT_HEADER_MM = 8
 // buffer before a tail block may join the current page
 const PLACE_BUFFER_MM = 3
 
-/** Arabic names for the currency cell of the info bar. */
-const CURRENCY_AR: Record<string, string> = {
-  SAR: 'ريال سعودي',
-  USD: 'دولار أمريكي',
-  EUR: 'يورو',
-  GBP: 'جنيه إسترليني',
-  AED: 'درهم إماراتي',
-}
-
-/** Inline Arabic trade names for the items table (best-effort, exact match). */
-const TRADE_AR: Record<string, string> = {
-  HELPER: 'مساعد',
-  'HELPER 1': 'مساعد',
-  CARPENTER: 'نجار',
-  WELDER: 'لحام',
-  ELECTRICIAN: 'كهربائي',
-  PLUMBER: 'سباك',
-  PAINTER: 'دهان',
-  MASON: 'بناء',
-  'STEEL FIXER': 'حداد مسلح',
-  'STEEL FIXERS': 'حداد مسلح',
-  DRIVER: 'سائق',
-  FOREMAN: 'مراقب',
-  SURVEYOR: 'مساح',
-  LABOURER: 'عامل',
-  LABORER: 'عامل',
-  CLEANER: 'عامل نظافة',
-  MECHANIC: 'ميكانيكي',
-  TECHNICIAN: 'فني',
-  OPERATOR: 'مشغل',
-  RIGGER: 'عامل رفع',
-  SCAFFOLDER: 'عامل سقالات',
-  'STORE KEEPER': 'أمين مستودع',
-  'SAFETY OFFICER': 'ضابط سلامة',
-  ACCOUNTANT: 'محاسب',
-  'ADMIN CLERK': 'كاتب إداري',
-  'QA/QC': 'مراقب جودة',
-}
-
-/** DD / MM / YYYY — the template's date format. */
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return '—'
-  const date = new Date(d)
-  if (isNaN(date.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(date.getDate())} / ${pad(date.getMonth() + 1)} / ${date.getFullYear()}`
-}
-
-/** Wrapped line count for a text block at ~charsPerLine characters per line. */
-function estLines(text: string | null | undefined, charsPerLine: number): number {
-  if (!text) return 0
-  return text
-    .split('\n')
-    .reduce((n, line) => n + Math.max(1, Math.ceil(line.trim().length / charsPerLine)), 0)
-}
-
 /**
  * Conservative table-row height estimate in mm (calibrated against real
  * Chrome A4 renders). Rows are exactly as tall as their text: ~7.5mm pitch
@@ -182,7 +128,7 @@ function estLines(text: string | null | undefined, charsPerLine: number): number
  * description / sub-text lines add their share.
  */
 function rowHeightMm(it: DocItemRow): number {
-  const lines = Math.max(1, Math.ceil(it.description.length / 38))
+  const lines = Math.max(1, Math.ceil(it.description.length / 34))
   const subLines = it.subText ? Math.max(1, Math.ceil(it.subText.length / 48)) : 0
   return 7.5 + 4.4 * (lines - 1) + 3.8 * subLines
 }
@@ -341,31 +287,6 @@ function planPages(
   return pages
 }
 
-// ── Letterhead geometry ─────────────────────────────────────────────────────
-// 'none' (default) renders the striped placeholder zones at the full
-// 35/22mm; artwork modes honour the configured heights instead.
-function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: number } {
-  const hasFull = letterhead.mode === 'full' && letterhead.fullPageImage
-  const hasHeader =
-    (letterhead.mode === 'header' || letterhead.mode === 'header_footer') &&
-    letterhead.headerImage
-  const hasFooter = letterhead.mode === 'header_footer' && letterhead.footerImage
-  if (hasFull) {
-    return {
-      topMm: letterhead.headerHeightMm + 4,
-      bottomMm: Math.max(letterhead.footerHeightMm + 4, 12),
-    }
-  }
-  if (hasHeader && hasFooter) {
-    return { topMm: letterhead.headerHeightMm + 3, bottomMm: letterhead.footerHeightMm + 3 }
-  }
-  if (hasHeader) {
-    return { topMm: letterhead.headerHeightMm + 3, bottomMm: 12 }
-  }
-  // 'none' — striped zones: top 35mm / bottom 22mm
-  return { topMm: 35, bottomMm: 22 }
-}
-
 /**
  * Full-screen dialog rendering the paginated A4 quotation. Purely
  * presentational apart from fetching the letterhead-approved signatory.
@@ -375,11 +296,16 @@ function geometryFor(letterhead: LetterheadConfig): { topMm: number; bottomMm: n
 export function QuotationPrintDialog({
   quotation,
   letterhead,
+  template,
+  onTemplateChange,
   open,
   onOpenChange,
 }: {
   quotation: QuotationDetail | null
   letterhead?: LetterheadConfig | null
+  /** Effective print template (controlled — owned by the caller). */
+  template: QuotationTemplateId
+  onTemplateChange: (t: QuotationTemplateId) => void
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -413,6 +339,19 @@ export function QuotationPrintDialog({
 
   const isDraft = !quotation || quotation.id === 'draft'
 
+  /** Switch the print template — re-renders instantly. Saved quotations
+   *  persist the choice via a cosmetic-only PATCH (never touches data,
+   *  numbers, rates, status or terms). */
+  function chooseTemplate(v: string) {
+    const t = normalizeQuotationTemplate(v) ?? 'classic'
+    onTemplateChange(t)
+    if (!isDraft && quotation?.id) {
+      api.patch(`/api/quotations/${quotation.id}`, { template: t }).catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : 'Could not save the template choice')
+      })
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -436,11 +375,28 @@ export function QuotationPrintDialog({
               ) : null}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              A4 · Compact one-page layout · EN/AR labels
+              A4 · {quotationTemplateLabel(template)} template · EN/AR labels
               {quotation ? ` · ${quotation.clientName}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
+                Template
+              </span>
+              <Select value={template} onValueChange={chooseTemplate}>
+                <SelectTrigger className="h-8 w-[150px] text-xs" aria-label="Print template">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUOTATION_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {!isDraft ? (
               <Button variant="outline" size="sm" asChild>
                 <a href={`/api/quotations/${quotation?.id}/excel`} download>
@@ -482,6 +438,7 @@ export function QuotationPrintDialog({
               letterhead={letterhead ?? DEFAULT_LETTERHEAD}
               settings={settings}
               approvedBy={approvedBy}
+              template={template}
             />
           ) : (
             <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-neutral-400">
@@ -496,7 +453,7 @@ export function QuotationPrintDialog({
 
 // ── The document ────────────────────────────────────────────────────────────
 
-export function QuotationDocument({
+function ClassicQuotationDocument({
   quotation,
   letterhead,
   settings,
@@ -955,12 +912,16 @@ export function QuotationDocument({
                 >
                   <table className="w-full table-fixed border-collapse" style={{ tableLayout: 'fixed' }}>
                     <colgroup>
-                      <col style={{ width: '56%' }} />
-                      <col style={{ width: '18%' }} />
-                      <col style={{ width: '26%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '48%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '24%' }} />
                     </colgroup>
                     <thead style={{ display: 'table-header-group', background: DARK_NAVY }}>
                       <tr>
+                        <th className={`${th} font-mono`}>
+                          <p className="text-[8pt] font-bold text-white">#</p>
+                        </th>
                         <th className={`${th} text-left`}>
                           <p className="text-[8pt] font-bold text-white">Trade / Category</p>
                           <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
@@ -976,7 +937,7 @@ export function QuotationDocument({
                         <th className={th}>
                           <p className="text-[8pt] font-bold text-white">Hourly Rate (SAR)</p>
                           <p lang="ar" dir="rtl" className="text-[8pt] font-semibold" style={{ color: LIGHT_GOLD }}>
-                            السعر بالساعة
+                            السعر بالساعة (ريال)
                           </p>
                         </th>
                       </tr>
@@ -986,7 +947,7 @@ export function QuotationDocument({
                         <tr>
                           <td
                             className={`${td} border-b py-2 text-center text-[#4A5468]`}
-                            colSpan={3}
+                            colSpan={4}
                             style={{ borderColor: ROW_SEP }}
                           >
                             No line items yet
@@ -1001,6 +962,9 @@ export function QuotationDocument({
                               className="break-inside-avoid"
                               style={{ borderBottom: `0.3mm solid ${ROW_SEP}` }}
                             >
+                              <td className={`${td} text-center font-mono font-bold`} style={{ color: GOLD }}>
+                                {String(it.sr).padStart(2, '0')}
+                              </td>
                               <td className={td}>
                                 <p className="break-words text-[9pt] font-bold leading-[1.15]" style={{ color: INK }}>
                                   {it.description}
@@ -1246,3 +1210,22 @@ export function QuotationDocument({
   )
 }
 
+// ── Template router ─────────────────────────────────────────────────────────
+
+/** Renders the quotation in the selected print template — the SAME data,
+ *  only the layout differs. 'classic' (default) keeps the original
+ *  approved design untouched. */
+export function QuotationDocument(props: {
+  quotation: QuotationDetail
+  letterhead: LetterheadConfig
+  settings: AppSettings
+  /** Default signatory from Settings › Signatories (null → empty name line). */
+  approvedBy?: ApprovedBy
+  /** 'classic' | 'sidebar-cream' | 'sidebar-navy' (null → classic) */
+  template?: string | null
+}) {
+  const tpl = normalizeQuotationTemplate(props.template) ?? 'classic'
+  if (tpl === 'sidebar-cream') return <SidebarCreamQuotationDocument {...props} />
+  if (tpl === 'sidebar-navy') return <SidebarNavyQuotationDocument {...props} />
+  return <ClassicQuotationDocument {...props} />
+}

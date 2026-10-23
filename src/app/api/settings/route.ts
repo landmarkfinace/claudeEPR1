@@ -15,6 +15,7 @@ import {
   logActivity,
 } from '@/lib/api-helpers'
 import { validateImageDataUrl } from '@/lib/image-data-url'
+import { QUOTATION_TEMPLATE_IDS } from '@/lib/quotation-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +52,12 @@ function buildSettings(map: Record<string, string>) {
     bankAddress: map.bankAddress ?? '',
     // VAT rate for the VAT Return Expense module — stored as a PERCENT string ("15")
     vatRate: clampVatPercent(parseFloat(map.vatRate ?? '')),
+    // Default print template for the Quotations module (classic until changed)
+    quotationDefaultTemplate: (QUOTATION_TEMPLATE_IDS as readonly string[]).includes(
+      map.quotationDefaultTemplate ?? ''
+    )
+      ? (map.quotationDefaultTemplate as string)
+      : 'classic',
   }
 }
 
@@ -115,6 +122,8 @@ const settingsSchema = z.object({
   bankAddress: z.string().max(240).optional(),
   // VAT percent 0–100 (15 = Saudi standard); stored under the `vatRate` key
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(100, 'VAT rate cannot exceed 100').optional(),
+  // Default print template for the Quotations module
+  quotationDefaultTemplate: z.enum(QUOTATION_TEMPLATE_IDS).optional(),
 })
 
 export async function GET() {
@@ -207,6 +216,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.vatRate !== undefined) {
       entries.push(['vatRate', String(clampVatPercent(body.vatRate))])
+    }
+    if (body.quotationDefaultTemplate !== undefined) {
+      entries.push(['quotationDefaultTemplate', body.quotationDefaultTemplate])
     }
 
     for (const [key, value] of entries) {

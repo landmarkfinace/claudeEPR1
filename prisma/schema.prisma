@@ -438,6 +438,10 @@ model Quotation {
   inclusions      String? // newline-separated bullet list (INCLUDED box)
   exclusions      String? // newline-separated bullet list (EXCLUDED box)
   createdByName String?
+  // Print template id ('classic' | 'sidebar-cream' | 'sidebar-navy').
+  // NULL = inherit the module default from Settings (legacy rows → Classic).
+  // Purely cosmetic — never affects numbers, rates, status or terms.
+  template     String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 

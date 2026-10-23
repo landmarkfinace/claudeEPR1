@@ -595,6 +595,8 @@ export type AppSettings = {
   bankAddress: string
   /** VAT rate in PERCENT for the VAT Return Expense module (15 = 15% Saudi standard) */
   vatRate: number
+  /** Default print template for the Quotations module ('classic' by default) */
+  quotationDefaultTemplate: string
 }
 
 export type ActivityRow = {
@@ -1131,6 +1133,8 @@ export type QuotationRow = {
   /** Newline-separated bullet lists (INCLUDED / EXCLUDED boxes). */
   inclusions: string | null
   exclusions: string | null
+  /** Print template id ('classic' | 'sidebar-cream' | 'sidebar-navy'); null = module default. Cosmetic only. */
+  template: string | null
   createdByName: string | null
   createdAt: string
   items?: DocItemRow[]

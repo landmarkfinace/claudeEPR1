@@ -32,6 +32,7 @@ import {
   normalizeItems,
   computeTotals,
   nextQuoteNumber,
+  templateSchema,
 } from './mappers'
 
 const quotationSchema = z.object({
@@ -68,6 +69,8 @@ const quotationSchema = z.object({
   mobilization: z.string().max(120, 'Mobilization text is too long').nullable().optional(),
   inclusions: z.string().max(4000, 'Inclusions text is too long').nullable().optional(),
   exclusions: z.string().max(4000, 'Exclusions text is too long').nullable().optional(),
+  // print layout only — never affects numbers, rates, status or terms
+  template: templateSchema,
   items: z.array(itemSchema).min(1, 'At least one line item is required').max(200, 'Too many line items'),
   assets: z.array(assetSchema).max(4, 'Too many assets').optional(),
 })
@@ -253,6 +256,7 @@ export async function POST(req: NextRequest) {
           mobilization: body.mobilization?.trim() || null,
           inclusions: body.inclusions?.trim() || null,
           exclusions: body.exclusions?.trim() || null,
+          template: body.template ?? null,
           createdByName: auth.name,
           items: { create: items },
           assets: assets.length ? { create: assets } : undefined,

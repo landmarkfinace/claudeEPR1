@@ -27,6 +27,7 @@ import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
 import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
 import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
+import { QuotationTemplatesSettingsSection } from '@/components/app/settings/quotation-templates-settings'
 import { PrayerTimesSettingsSection } from '@/components/app/settings/prayer-times-settings'
 import { EILetterheadSettingsSection } from '@/components/app/settings/ei-letterhead-settings'
 import { Button } from '@/components/ui/button'
@@ -781,6 +782,9 @@ export function SettingsView() {
 
         {/* ---- Quotation default Terms & Conditions ---- */}
         <QuotationTermsSettingsSection canEdit={canEdit} />
+
+        {/* ---- Quotation print templates (default layout) ---- */}
+        <QuotationTemplatesSettingsSection canEdit={canEdit} />
 
         {/* ---- E-Invoice print template + translation provider ---- */}
         <EInvoiceSettingsSection />

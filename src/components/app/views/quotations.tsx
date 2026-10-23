@@ -85,6 +85,11 @@ import { FilterBar, FilterSelect, SearchInput } from '../shared/filter-select'
 import { PageHeader, SectionCard, MobileFab } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
 import { QuotationPrintDialog, DEFAULT_LETTERHEAD } from '../print/quotation-print'
+import {
+  QUOTATION_TEMPLATES,
+  resolveQuotationTemplate,
+  type QuotationTemplateId,
+} from '@/lib/quotation-templates'
 import type { QuotationDetail } from '../print/quotation-print'
 import { AssetPlacer } from '../quotations/asset-placer'
 import { LetterheadDialog } from '../quotations/letterhead-dialog'
@@ -181,6 +186,8 @@ type QuotationForm = {
   issueDate: string
   validityDate: string
   status: string
+  /** print layout only — saved with the quotation, defaults from Settings */
+  template: string
   numberPrefix: string
   discount: string
   vatPercent: string
@@ -211,7 +218,7 @@ function newItemForm(): ItemForm {
   }
 }
 
-function emptyForm(vatPercent: number): QuotationForm {
+function emptyForm(vatPercent: number, defaultTemplate?: string): QuotationForm {
   const today = new Date()
   const validity = new Date(today.getTime() + 30 * 86_400_000)
   return {
@@ -222,6 +229,7 @@ function emptyForm(vatPercent: number): QuotationForm {
     issueDate: toDateInputValue(today),
     validityDate: toDateInputValue(validity),
     status: 'draft',
+    template: resolveQuotationTemplate(null, defaultTemplate),
     numberPrefix: 'QTN',
     discount: '',
     vatPercent: String(vatPercent),
@@ -467,6 +475,8 @@ export function QuotationsView() {
   // ---- print / preview ----
   const [printOpen, setPrintOpen] = useState(false)
   const [printQuotation, setPrintQuotation] = useState<QuotationDetail | null>(null)
+  // effective print template for the open print dialog (controlled prop)
+  const [printTemplate, setPrintTemplate] = useState<QuotationTemplateId>('classic')
   const [printLoading, setPrintLoading] = useState(false)
   // draft preview (unsaved form state rendered by the same print component)
   const [draftPreview, setDraftPreview] = useState<QuotationDetail | null>(null)
@@ -607,7 +617,7 @@ export function QuotationsView() {
     setEditing(null)
     // auto-fill Terms & Conditions from the saved default (if any)
     const terms = await getDefaultTerms()
-    const f = emptyForm(defaultVatPercent)
+    const f = emptyForm(defaultVatPercent, settings.quotationDefaultTemplate)
     if (terms) {
       const items = parseTerms(terms)
       if (items.length > 0) {
@@ -642,6 +652,7 @@ export function QuotationsView() {
         issueDate: toDateInputValue(full.issueDate),
         validityDate: full.validityDate ? toDateInputValue(full.validityDate) : '',
         status: full.status,
+        template: resolveQuotationTemplate(full.template, settings.quotationDefaultTemplate),
         numberPrefix: 'QTN',
         discount: full.discount ? String(full.discount) : '',
         vatPercent: String(Math.round(full.vatRate * 100)),
@@ -810,6 +821,7 @@ export function QuotationsView() {
       issueDate: form.issueDate,
       validityDate: form.validityDate || null,
       status: form.status,
+      template: form.template,
       discount: round2(rawDiscount),
       vatRate: calc.vatRate,
       notes: form.notes.trim() || null,
@@ -927,6 +939,7 @@ export function QuotationsView() {
       issueDate: form.issueDate ? new Date(`${form.issueDate}T00:00:00`).toISOString() : new Date().toISOString(),
       validityDate: form.validityDate ? new Date(`${form.validityDate}T00:00:00`).toISOString() : null,
       status: form.status,
+      template: form.template,
       subtotal: calc.subtotal,
       discount: calc.discount,
       vatRate: calc.vatRate,
@@ -958,6 +971,7 @@ export function QuotationsView() {
         ? {
             id: selected.id,
             name: selected.name,
+            nameAr: selected.nameAr ?? null,
             contactPerson: selected.contactPerson ?? null,
             phone: selected.phone ?? null,
             email: selected.email ?? null,
@@ -984,6 +998,7 @@ export function QuotationsView() {
       })
     }
     setDraftPreview(detail)
+    setPrintTemplate(resolveQuotationTemplate(form.template, settings.quotationDefaultTemplate))
     setPrintOpen(true)
   }
 
@@ -1064,6 +1079,7 @@ export function QuotationsView() {
       const full = await api.get<QuotationDetail>(`/api/quotations/${row.id}`)
       setDraftPreview(null)
       setPrintQuotation(full)
+      setPrintTemplate(resolveQuotationTemplate(full.template, settings.quotationDefaultTemplate))
       setPrintOpen(true)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not prepare the quotation document')
@@ -1644,6 +1660,24 @@ export function QuotationsView() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="quote-template">Template</Label>
+              <Select value={form.template} onValueChange={(v) => setField('template', v)}>
+                <SelectTrigger id="quote-template" className="w-full" aria-label="Print template">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUOTATION_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Printed layout only — the module default lives in Settings.
+              </p>
+            </div>
           </div>
 
           {/* ---- Line items editor ---- */}
@@ -1963,6 +1997,8 @@ export function QuotationsView() {
       <QuotationPrintDialog
         quotation={printQuotation ?? draftPreview}
         letterhead={letterhead}
+        template={printTemplate}
+        onTemplateChange={setPrintTemplate}
         open={printOpen}
         onOpenChange={(v) => {
           setPrintOpen(v)

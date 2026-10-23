@@ -71,6 +71,8 @@ export async function POST(_req: NextRequest, { params }: Params) {
           mobilization: source.mobilization,
           inclusions: source.inclusions,
           exclusions: source.exclusions,
+          // keep the print layout of the source (cosmetic only)
+          template: source.template,
           createdByName: auth.name,
           items: {
             create: [...source.items]

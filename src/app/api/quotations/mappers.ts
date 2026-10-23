@@ -6,12 +6,14 @@ import { z } from 'zod'
 import { round2 } from '@/lib/format'
 import { validateImageDataUrl } from '@/lib/image-data-url'
 import type { DocItemRow, QuotationAssetRow, QuotationRow } from '@/lib/types'
+import { QUOTATION_TEMPLATE_IDS } from '@/lib/quotation-templates'
 
 export const quoteInclude = {
   client: {
     select: {
       id: true,
       name: true,
+      nameAr: true,
       contactPerson: true,
       phone: true,
       email: true,
@@ -28,6 +30,7 @@ export const quoteInclude = {
 export type ClientBrief = {
   id: string
   name: string
+  nameAr: string | null
   contactPerson: string | null
   phone: string | null
   email: string | null
@@ -123,6 +126,7 @@ export function mapQuotation(
     mobilization: q.mobilization ?? null,
     inclusions: q.inclusions ?? null,
     exclusions: q.exclusions ?? null,
+    template: q.template ?? null,
     createdByName: q.createdByName,
     createdAt: q.createdAt.toISOString(),
     itemCount: q._count.items,
@@ -138,6 +142,12 @@ export function mapQuotation(
 // ── Shared request schemas ─────────────────────────────────────────────────
 
 export const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'expired'] as const
+
+/** Print template ids accepted on write (cosmetic-only field). */
+export const templateSchema = z
+  .enum(QUOTATION_TEMPLATE_IDS)
+  .nullable()
+  .optional()
 
 export const itemSchema = z.object({
   description: z.string().min(1, 'Item description is required').max(500, 'Item description is too long'),

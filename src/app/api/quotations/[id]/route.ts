@@ -28,6 +28,7 @@ import {
   normalizeAssets,
   normalizeItems,
   computeTotals,
+  templateSchema,
 } from '../mappers'
 
 const quotationUpdateSchema = z.object({
@@ -59,6 +60,8 @@ const quotationUpdateSchema = z.object({
   mobilization: z.string().max(120, 'Mobilization text is too long').nullable().optional(),
   inclusions: z.string().max(4000, 'Inclusions text is too long').nullable().optional(),
   exclusions: z.string().max(4000, 'Exclusions text is too long').nullable().optional(),
+  // print layout only — never affects numbers, rates, status or terms
+  template: templateSchema,
   items: z.array(itemSchema).min(1, 'At least one line item is required').max(200, 'Too many line items'),
   assets: z.array(assetSchema).max(4, 'Too many assets').optional(),
 })
@@ -178,6 +181,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
           mobilization: body.mobilization?.trim() || null,
           inclusions: body.inclusions?.trim() || null,
           exclusions: body.exclusions?.trim() || null,
+          template: body.template ?? null,
           items: { create: items },
           assets: assets.length ? { create: assets } : undefined,
         },
@@ -198,6 +202,44 @@ export async function PUT(req: NextRequest, { params }: Params) {
       return conflict('Quote number already exists — quote numbers must be unique')
     }
     console.error('[api/quotations/[id] PUT]', e)
+    return serverError()
+  }
+}
+
+// PATCH — switch the print template of a saved quotation WITHOUT touching
+// anything else. The print preview's Template dropdown uses this so the
+// choice is stored on the quotation; by construction it can never change
+// numbers, rates, status, terms or items. Not activity-logged (cosmetic).
+const templatePatchSchema = z.object({ template: templateSchema })
+
+export async function PATCH(req: NextRequest, { params }: Params) {
+  try {
+    const auth = await requirePermission('quotations.edit')
+    if (isResponse(auth)) return auth
+    const { id } = await params
+
+    let raw: unknown
+    try {
+      raw = await req.json()
+    } catch {
+      return badRequest('Invalid JSON body')
+    }
+    const parsed = templatePatchSchema.safeParse(raw)
+    if (!parsed.success) {
+      return badRequest('template must be one of: classic, sidebar-cream, sidebar-navy (or null)')
+    }
+
+    const existing = await db.quotation.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) return notFound('Quotation not found')
+
+    const updated = await db.quotation.update({
+      where: { id },
+      data: { template: parsed.data.template ?? null },
+      select: { id: true, quoteNumber: true, template: true },
+    })
+    return ok({ id: updated.id, quoteNumber: updated.quoteNumber, template: updated.template })
+  } catch (err) {
+    console.error('[api/quotations/[id] PATCH]', err)
     return serverError()
   }
 }
