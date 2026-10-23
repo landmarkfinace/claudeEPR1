@@ -379,14 +379,21 @@ function RateCell({
           }
         }}
         className={cn(
-          'h-7 px-2 py-0 text-right tabular-nums',
+          'h-7 px-2 py-0 text-right tabular-nums print:hidden',
           compact ? 'w-[68px] text-xs' : 'w-20 text-xs'
         )}
       />
+      {/* Print twin — the formal document shows the value, never a form control */}
+      <span
+        className="hidden tabular-nums print:inline"
+        title={`${formatNumber(value)} ${currency} per hour`}
+      >
+        {formatNumber(value)}
+      </span>
       {state === 'saving' ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground print:hidden" aria-hidden />
       ) : state === 'saved' ? (
-        <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-label="Rate saved" />
+        <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 print:hidden" aria-label="Rate saved" />
       ) : null}
     </span>
   )
@@ -1607,7 +1614,7 @@ export function ClientSalarySummaryView() {
 
         {/* How this report works — hours synced from payroll, rates entered here */}
         {!loading && view && groups.length > 0 ? (
-          <div className="space-y-1.5 rounded-xl border border-dashed bg-muted/30 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground print:px-2">
+          <div className="space-y-1.5 rounded-xl border border-dashed bg-muted/30 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground print:hidden">
             <p className="flex items-start gap-2">
               <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               <span>
@@ -1641,7 +1648,7 @@ export function ClientSalarySummaryView() {
 
         {/* Bench + multi-client context notes */}
         {!loading && cards && (cards.benchWorkers > 0 || cards.multiClientWorkers > 0) ? (
-          <div className="space-y-1.5 rounded-xl border border-dashed bg-muted/30 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground print:px-2">
+          <div className="space-y-1.5 rounded-xl border border-dashed bg-muted/30 px-4 py-2.5 text-xs leading-relaxed text-muted-foreground print:hidden">
             {cards.benchWorkers > 0 && (
               <p className="flex items-start gap-2">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />

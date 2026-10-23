@@ -835,6 +835,10 @@ function ContinuationHeader({
         {dedicatedPageNo ? null : (
           <p className="shrink-0 text-[7.5pt] tabular-nums" style={{ color: MUTED }}>
             Page {page} of {of}
+            <span className="mx-1.5 text-[#6B7488]">/</span>
+            <span lang="ar" dir="rtl" className="tracking-normal">
+              صفحة {page} من {of}
+            </span>
           </p>
         )}
       </div>
@@ -1334,6 +1338,10 @@ function NoteLine({
       {dedicatedPageNo ? null : (
         <>
           {' '}· Page {page} of {of}
+          <span className="mx-1.5 text-[#6B7488]">/</span>
+          <span lang="ar" dir="rtl" className="tracking-normal">
+            صفحة {page} من {of}
+          </span>
         </>
       )}
       {' '}· Printed {fmtDate(m.printedAt.toISOString())}

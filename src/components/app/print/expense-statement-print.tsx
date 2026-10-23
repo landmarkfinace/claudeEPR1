@@ -75,7 +75,7 @@ export function ExpenseStatementPrintDialog({
   const isSingle = Boolean(spenderId)
 
   // Portrait for a single worker's statement; landscape for the year matrix
-  usePageRule(open, isSingle ? 'size: A4 portrait; margin: 12mm;' : 'size: A4 landscape; margin: 10mm;')
+  usePageRule(open, isSingle ? 'size: A4 portrait; margin: 10mm;' : 'size: A4 landscape; margin: 8mm;')
 
   if (!statement) return null
   const money = (n: number) => formatMoney(n, settings.currency)

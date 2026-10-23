@@ -374,6 +374,17 @@
   }
 }
 
+/* Live charts (Recharts) serialize at SCREEN pixel width — the explicit
+   width="1440" attributes survive into the print/PDF DOM and get clipped at
+   the A4 content edge. In print the SVG scales to the content box instead
+   (viewBox preserves the aspect ratio), so the whole chart fits the page. */
+@media print {
+  .print-area .recharts-surface {
+    width: 100% !important;
+    height: auto !important;
+  }
+}
+
 /* Dense cell padding for wide tables that must fit A4 landscape in print
    (e.g. the client salary summary's 7-column roll-up) */
 @media print {

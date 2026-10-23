@@ -65,7 +65,68 @@ function resolveStaticDir() {
   }
   return null
 }
-const STATIC_DIR = resolveStaticDir()
+let STATIC_DIR = resolveStaticDir()
+
+/**
+ * Concatenate every compiled stylesheet under the current static dir and run
+ * the media-URL + --font-* rewrites. Returns '' when the build is missing or
+ * broken (callers decide what to do).
+ */
+function buildPrintCss() {
+  if (!STATIC_DIR) return ''
+  try {
+    // Turbopack emits CSS under chunks/, webpack under css/ — take both.
+    const dirs = ['css', 'chunks']
+      .map((d) => path.join(STATIC_DIR, d))
+      .filter((d) => fs.existsSync(d))
+    let css = ''
+    for (const dir of dirs) {
+      for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.css')).sort()) {
+        css += fs.readFileSync(path.join(dir, f), 'utf8') + '\n'
+      }
+    }
+    // The compiled @font-face rules use url(../media/…) (Turbopack dev
+    // emits them QUOTED: url("../media/…")) relative to the css/chunks
+    // dir — rewrite to this daemon's absolute static path so the webfonts
+    // (Inter + Cairo subsets) actually load in the render page.
+    css = css.replace(/url\((["']?)\.\.\/media\//g, 'url($1/_next/static/media/')
+    css = css.replace(/url\((["']?)\.\.\/chunks\//g, 'url($1/_next/static/chunks/')
+    // next/font defines --font-inter / --font-cairo on generated
+    // `.__variable_*` classes applied to the app <body>. A serialized print
+    // fragment doesn't carry them — hoist every --font-* custom property
+    // onto :root so font-family:var(--font-…) chains resolve in the render.
+    {
+      const fontVars = new Set()
+      for (const m of css.matchAll(/\.[^{]{0,120}__variable\s*\{([^}]+)\}/g)) {
+        for (const decl of m[1].split(';')) {
+          const t = decl.trim()
+          if (t.startsWith('--font-')) fontVars.add(t)
+        }
+      }
+      if (fontVars.size > 0) {
+        css = `:root{${[...fontVars].join(';')}}\n` + css
+      }
+    }
+    return css
+  } catch {
+    return ''
+  }
+}
+
+/** Cheap readiness probe: at least one compiled .css > 1 KB under the static dir. */
+function cssReadyQuick() {
+  if (!STATIC_DIR) return false
+  try {
+    for (const d of ['css', 'chunks']) {
+      const dir = path.join(STATIC_DIR, d)
+      if (!fs.existsSync(dir)) continue
+      for (const n of fs.readdirSync(dir).filter((x) => x.endsWith('.css'))) {
+        if (fs.statSync(path.join(dir, n)).size > 1024) return true
+      }
+    }
+  } catch {}
+  return false
+}
 
 // ── Chromium executable: explicit env, then the browsers cached on this host
 function resolveChrome() {
@@ -219,54 +280,38 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, SELF_ORIGIN)
 
   if (url.pathname === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, chrome: browser?.connected === true, pid: process.pid }))
+    // /health must not say ok while the print pipeline is broken (the old
+    // daemon answered 200-ok even while serving an EMPTY print.css after
+    // .next was wiped). css readiness is part of ok now; chrome stays
+    // informational only (it relaunches lazily on the next render).
+    const cssOk = cssReadyQuick()
+    const body = JSON.stringify({
+      ok: cssOk,
+      chrome: browser?.connected === true,
+      css: cssOk,
+      pid: process.pid,
+    })
+    res.writeHead(cssOk ? 200 : 503, { 'content-type': 'application/json' })
+    res.end(body)
     return
   }
 
   if (url.pathname === '/_next/css/print.css') {
-    if (!STATIC_DIR) {
-      res.writeHead(500).end('no static dir')
+    let css = buildPrintCss()
+    if (css.length < 1024) {
+      // .next was wiped/rebuilt under us — re-resolve the static dir once
+      // and rebuild before giving up (the old daemon served a 200 with an
+      // EMPTY body here, producing unstyled garbage PDFs while /health
+      // still said ok).
+      STATIC_DIR = resolveStaticDir()
+      css = buildPrintCss()
+    }
+    if (css.length < 1024) {
+      res.writeHead(503).end('print css unavailable — .next rebuilt?')
       return
     }
-    try {
-      // Turbopack emits CSS under chunks/, webpack under css/ — take both.
-      const dirs = ['css', 'chunks']
-        .map((d) => path.join(STATIC_DIR, d))
-        .filter((d) => fs.existsSync(d))
-      let css = ''
-      for (const dir of dirs) {
-        for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.css')).sort()) {
-          css += fs.readFileSync(path.join(dir, f), 'utf8') + '\n'
-        }
-      }
-      // The compiled @font-face rules use url(../media/…) (Turbopack dev
-      // emits them QUOTED: url("../media/…")) relative to the css/chunks
-      // dir — rewrite to this daemon's absolute static path so the webfonts
-      // (Inter + Cairo subsets) actually load in the render page.
-      css = css.replace(/url\((["']?)\.\.\/media\//g, 'url($1/_next/static/media/')
-      css = css.replace(/url\((["']?)\.\.\/chunks\//g, 'url($1/_next/static/chunks/')
-      // next/font defines --font-inter / --font-cairo on generated
-      // `.__variable_*` classes applied to the app <body>. A serialized print
-      // fragment doesn't carry them — hoist every --font-* custom property
-      // onto :root so font-family:var(--font-…) chains resolve in the render.
-      {
-        const fontVars = new Set()
-        for (const m of css.matchAll(/\.[^{]{0,120}__variable\s*\{([^}]+)\}/g)) {
-          for (const decl of m[1].split(';')) {
-            const t = decl.trim()
-            if (t.startsWith('--font-')) fontVars.add(t)
-          }
-        }
-        if (fontVars.size > 0) {
-          css = `:root{${[...fontVars].join(';')}}\n` + css
-        }
-      }
-      res.writeHead(200, { 'content-type': 'text/css; charset=utf-8' })
-      res.end(css)
-    } catch (e) {
-      res.writeHead(500).end(String(e))
-    }
+    res.writeHead(200, { 'content-type': 'text/css; charset=utf-8' })
+    res.end(css)
     return
   }
 
@@ -367,12 +412,30 @@ const server = http.createServer((req, res) => {
                   setTimeout(resolve, 3000) // safety
                 })
             )
+            // Flow-mode documents get a bilingual page-number footer via
+            // Chrome's displayHeaderFooter (drawn inside the page margin,
+            // no DOM/geometry change). Sheet-mode docs draw their own
+            // measured bilingual page-number line in the DOM.
+            const flowFooter = pageMode === 'flow'
             const pdf = await page.pdf({
               format: 'A4',
               printBackground: true,
-              margin: { top: 0, right: 0, bottom: 0, left: 0 },
+              margin: flowFooter
+                ? { top: 0, right: 0, bottom: '10mm', left: 0 }
+                : { top: 0, right: 0, bottom: 0, left: 0 },
               scale: 1,
               preferCSSPageSize: true,
+              ...(flowFooter
+                ? {
+                    displayHeaderFooter: true,
+                    headerTemplate: '<span></span>',
+                    footerTemplate:
+                      '<div style="width:100%;text-align:center;font-size:7px;color:#6b7280;font-family:system-ui,sans-serif;">' +
+                      'Page <span class="pageNumber"></span> of <span class="totalPages"></span>' +
+                      ' &nbsp;|&nbsp; صفحة <span class="pageNumber"></span> من <span class="totalPages"></span>' +
+                      '</div>',
+                  }
+                : {}),
             })
             res.writeHead(200, {
               'content-type': 'application/pdf',

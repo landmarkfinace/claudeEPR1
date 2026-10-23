@@ -38,7 +38,7 @@ export function VatReturnPrintDialog({
   quarter: number
 }) {
   const settings = useAppStore((s) => s.settings)
-  usePageRule(open, 'size: A4 portrait; margin: 12mm;')
+  usePageRule(open, 'size: A4 portrait; margin: 10mm;')
 
   if (!open) return null
   const money = (n: number) => formatMoney(n, settings.currency)
@@ -237,7 +237,12 @@ export function VatReturnPrintDialog({
                   <div className="w-full border-t border-neutral-800" />
                 </div>
                 <p className="mt-1.5 text-[10pt] font-bold uppercase tracking-[0.3pt] text-neutral-900">
-                  {settings.signatoryTitle || 'Authorized Signatory'}
+                  {/* tracking/uppercase on the wrapper would break Arabic
+                      letter joining if the boss sets an Arabic title — the
+                      dynamic value neutralizes both (Latin keeps the style) */}
+                  <span className="tracking-normal normal-case">
+                    {settings.signatoryTitle || 'Authorized Signatory'}
+                  </span>
                 </p>
                 <p className="text-[10pt] text-[#1D2433]">
                   {settings.authorizedSignatory || settings.companyName}

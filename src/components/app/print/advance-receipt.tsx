@@ -69,7 +69,7 @@ export function AdvanceReceiptDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const settings = useAppStore((s) => s.settings)
-  usePageRule(open, 'size: A4 portrait; margin: 12mm;')
+  usePageRule(open, 'size: A4 portrait; margin: 10mm;')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

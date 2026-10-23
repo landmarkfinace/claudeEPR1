@@ -72,7 +72,7 @@ export function ClientSummaryPrintDialog({
   const settings = useAppStore((s) => s.settings)
 
   // Force A4 portrait for this statement
-  usePageRule(open, 'size: A4 portrait; margin: 12mm;')
+  usePageRule(open, 'size: A4 portrait; margin: 10mm;')
 
   const money = (n: number) => formatMoney(n, settings.currency)
   const vatPercent = Math.round(vatRate * 100)
