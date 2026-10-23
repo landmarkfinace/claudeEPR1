@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   quotationDefaultTemplate: 'classic',
   eInvoiceDefaultTemplate: 'classic',
   nameListDefaultTemplate: 'classic',
+  agreementDefaultTemplate: 'classic',
 }
 
 export type ViewIntentPayload = {

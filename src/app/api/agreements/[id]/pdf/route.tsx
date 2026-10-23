@@ -6,6 +6,11 @@
 // @page { size: A4; margin: 12mm 12mm 14mm }) and rendered by the shared print
 // daemon (pageMode 'flow' + preferCSSPageSize) — real selectable text, correct
 // Arabic joining and RTL, images at original resolution.
+// PRINT TEMPLATES: the row's saved template (else the module default from
+// Settings) picks the layout — 'classic' renders the flow fragment above
+// UNCHANGED; 'bilingual-cards' / 'official-form' / 'key-terms' render the
+// same components the dialog shows (fixed A4 sheets, pageMode 'sheets',
+// letterhead artwork from Settings) from the SAME data.
 // File name: AgreementNo_OtherPartyName.pdf
 import { NextRequest } from 'next/server'
 import { spawn } from 'node:child_process'
@@ -18,6 +23,10 @@ import {
   mapAgreement,
 } from '@/lib/agreement-server'
 import { buildDaemonFragment, toTemplateAgreement } from '@/lib/agreement-template'
+import { resolveAgreementPrintTemplate } from '@/lib/agreement-print-templates'
+import { renderAgreementPrintTemplate } from '@/lib/agreement-pdf-render'
+import type { LetterheadConfig } from '@/lib/types'
+import { DEFAULT_LETTERHEAD } from '@/components/app/print/agreement-print-shared'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -109,6 +118,32 @@ function pdfFileName(agreementNo: string, partyName: string): string {
 
 type Params = { params: Promise<{ id: string }> }
 
+/** Prisma CompanyLetterhead row → LetterheadConfig (same field mapping as
+ *  GET /api/letterhead's readConfig). */
+function toLetterheadConfig(row: {
+  mode: string
+  headerImage: string | null
+  footerImage: string | null
+  fullPageImage: string | null
+  showCompanyDetails: boolean
+  headerHeightMm: number
+  footerHeightMm: number
+} | null): LetterheadConfig {
+  if (!row) return DEFAULT_LETTERHEAD
+  const modes = ['none', 'header', 'header_footer', 'full'] as const
+  return {
+    mode: (modes as readonly string[]).includes(row.mode)
+      ? (row.mode as LetterheadConfig['mode'])
+      : 'none',
+    headerImage: row.headerImage,
+    footerImage: row.footerImage,
+    fullPageImage: row.fullPageImage,
+    showCompanyDetails: row.showCompanyDetails,
+    headerHeightMm: row.headerHeightMm,
+    footerHeightMm: row.footerHeightMm,
+  }
+}
+
 export async function GET(_req: NextRequest, { params }: Params) {
   try {
     const auth = await requirePermission('agreements.view')
@@ -119,13 +154,41 @@ export async function GET(_req: NextRequest, { params }: Params) {
     if (!row) return notFound('Agreement not found')
 
     const mapped = mapAgreement(row)
-    const html = buildDaemonFragment(toTemplateAgreement(mapped))
+
+    // print-layout template: the row's saved choice, else the module
+    // default from Settings (classic until changed). Purely cosmetic — the
+    // same data flows to whichever layout is chosen.
+    const defaultSetting = await db.setting.findUnique({
+      where: { key: 'agreementDefaultTemplate' },
+    })
+    const template = resolveAgreementPrintTemplate(
+      mapped.template,
+      defaultSetting?.value ?? null
+    )
+
+    let html: string
+    let pageMode: 'flow' | 'sheets' = 'flow'
+    if (template === 'classic') {
+      html = buildDaemonFragment(toTemplateAgreement(mapped))
+    } else {
+      // the 3 new layouts are fixed A4 sheets rendered from the SAME data —
+      // server-rendered with the same components the dialog shows, plus the
+      // shared letterhead artwork from Settings (react-dom/server behind
+      // dynamic imports — Next forbids it in the route module graph)
+      const lhRow = await db.companyLetterhead.findFirst()
+      html = await renderAgreementPrintTemplate(
+        template,
+        toTemplateAgreement(mapped),
+        toLetterheadConfig(lhRow)
+      )
+      pageMode = 'sheets'
+    }
 
     if (!(await ensureDaemon())) return serverError()
     const res = await fetch(`${DAEMON_ORIGIN}/pdf`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ html, orientation: 'portrait', pageMode: 'flow' }),
+      body: JSON.stringify({ html, orientation: 'portrait', pageMode }),
     })
     if (!res.ok) {
       const text = await res.text().catch(() => '')

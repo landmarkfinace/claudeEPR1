@@ -56,13 +56,14 @@ export async function GET() {
   try {
     const user = await getSessionUser()
     if (!user) return unauthorized()
-    // The company letterhead powers the printed Quotation, Supplier P.O. and
-    // E-Invoice documents — any of those modules' view permission grants read
-    // access.
+    // The company letterhead powers the printed Quotation, Supplier P.O.,
+    // E-Invoice and Agreement documents — any of those modules' view
+    // permission grants read access.
     if (
       !hasPermission(user, 'quotations.view') &&
       !hasPermission(user, 'supplierpo.view') &&
-      !hasPermission(user, 'einvoices.view')
+      !hasPermission(user, 'einvoices.view') &&
+      !hasPermission(user, 'agreements.view')
     ) {
       return forbidden()
     }

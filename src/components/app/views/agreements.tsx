@@ -63,6 +63,7 @@ import { StatCard } from '@/components/app/shared/stat-card'
 import {
   AgreementPrintDialog,
   AgreementSheet,
+  AgreementTemplateDocument,
 } from '@/components/app/print/agreement-print'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
@@ -75,8 +76,13 @@ import {
   type AgreementPartyRow,
   type AgreementRow,
   type AgreementTemplateRow,
+  type LetterheadConfig,
   type Paginated,
 } from '@/lib/types'
+import {
+  AGREEMENT_PRINT_TEMPLATES,
+  resolveAgreementPrintTemplate,
+} from '@/lib/agreement-print-templates'
 import { cn } from '@/lib/utils'
 import {
   DEFAULT_PRICE,
@@ -380,7 +386,15 @@ function TranslatableField({
 }
 
 /** Right pane of the editor: the exact template, auto-scaled to fit. */
-function ScaledSheetPreview({ tpl }: { tpl: TemplateAgreement }) {
+function ScaledSheetPreview({
+  tpl,
+  template,
+  letterhead,
+}: {
+  tpl: TemplateAgreement
+  template: string | null
+  letterhead: LetterheadConfig | null
+}) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.45)
   useEffect(() => {
@@ -399,9 +413,17 @@ function ScaledSheetPreview({ tpl }: { tpl: TemplateAgreement }) {
     <div ref={wrapRef} className="nice-scrollbar h-full overflow-auto bg-neutral-100 p-3">
       <div
         style={{ transform: `scale(${scale})`, transformOrigin: 'top center', width: 794 }}
-        className="agr-desk mx-auto"
+        className="mx-auto"
       >
-        <AgreementSheet agreement={tpl} />
+        {template && template !== 'classic' ? (
+          <div className="flex flex-col items-center gap-4">
+            <AgreementTemplateDocument template={template} agreement={tpl} letterhead={letterhead} />
+          </div>
+        ) : (
+          <div className="agr-desk">
+            <AgreementSheet agreement={tpl} />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -805,6 +827,8 @@ type FormState = {
   priceAr: string
   priceManual: boolean
   showLetterheadSpace: boolean
+  /** Print-layout template (null = inherit the module default) — cosmetic only */
+  template: string | null
 }
 
 let clauseKeySeq = 0
@@ -845,6 +869,7 @@ function formFromRow(editing: AgreementRow): FormState {
     priceAr: editing.priceAr,
     priceManual: false,
     showLetterheadSpace: editing.showLetterheadSpace,
+    template: editing.template ?? null,
   }
 }
 
@@ -885,6 +910,7 @@ function freshForm(
     priceAr: DEFAULT_PRICE.ar,
     priceManual: false,
     showLetterheadSpace: true,
+    template: null,
   }
 }
 
@@ -909,6 +935,24 @@ function AgreementEditorDialog({
       ? formFromRow(editing)
       : freshForm(initialTemplate, settings, toDateInputValue(new Date()))
   )
+  // letterhead artwork for the live preview when a non-Classic print
+  // template is selected (Classic keeps its own dashed letterhead space)
+  const [previewLetterhead, setPreviewLetterhead] = useState<LetterheadConfig | null>(null)
+  useEffect(() => {
+    if (!open || !form.template || form.template === 'classic' || previewLetterhead) return
+    let alive = true
+    api
+      .get<LetterheadConfig>('/api/letterhead')
+      .then((lh) => {
+        if (alive) setPreviewLetterhead(lh)
+      })
+      .catch(() => {
+        /* preview without artwork */
+      })
+    return () => {
+      alive = false
+    }
+  }, [open, form.template, previewLetterhead])
   const [parties, setParties] = useState<AgreementPartyRow[]>([])
   const [busy, setBusy] = useState<'draft' | 'save' | 'download' | null>(null)
   const [tplSaveOpen, setTplSaveOpen] = useState(false)
@@ -1036,6 +1080,7 @@ function AgreementEditorDialog({
       priceEn: f.priceEn.trim(),
       priceAr: f.priceAr.trim(),
       showLetterheadSpace: f.showLetterheadSpace,
+      template: f.template,
       status,
       clauses,
     }
@@ -1121,6 +1166,7 @@ function AgreementEditorDialog({
       priceEn: form.priceEn,
       priceAr: form.priceAr,
       showLetterheadSpace: form.showLetterheadSpace,
+      template: form.template,
       status: 'draft',
       lastEditedBy: null,
       lastEditedAt: null,
@@ -1277,6 +1323,30 @@ function AgreementEditorDialog({
                     </span>
                   </label>
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="agr-print-template" className="text-xs font-medium">
+                  Print template
+                </Label>
+                <Select
+                  value={resolveAgreementPrintTemplate(f.template, settings.agreementDefaultTemplate)}
+                  onValueChange={(v) => patchForm({ template: v })}
+                >
+                  <SelectTrigger id="agr-print-template" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AGREEMENT_PRINT_TEMPLATES.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Layout only — never changes the agreement text, parties, dates or signatories.
+                  Saved with this agreement; the default comes from Settings.
+                </p>
               </div>
             </section>
 
@@ -1594,7 +1664,13 @@ function AgreementEditorDialog({
 
           {/* Live preview (≥ lg) */}
           <div className="hidden min-h-0 border-l lg:block">
-            {tpl ? <ScaledSheetPreview tpl={tpl} /> : null}
+            {tpl ? (
+              <ScaledSheetPreview
+                tpl={tpl}
+                template={form.template}
+                letterhead={previewLetterhead}
+              />
+            ) : null}
           </div>
         </div>
 

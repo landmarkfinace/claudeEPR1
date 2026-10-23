@@ -26,6 +26,7 @@ import { EInvoiceTemplatesSettingsSection } from '@/components/app/settings/e-in
 import { AiSettingsSection } from '@/components/app/settings/ai-settings'
 import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
+import { AgreementTemplatesSettingsSection } from '@/components/app/settings/agreement-templates-settings'
 import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
 import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
 import { QuotationTemplatesSettingsSection } from '@/components/app/settings/quotation-templates-settings'
@@ -798,6 +799,9 @@ export function SettingsView() {
 
         {/* ---- Name List subjects ---- */}
         <NameListSettingsSection />
+
+        {/* ---- Agreement print templates (default layout) ---- */}
+        <AgreementTemplatesSettingsSection />
 
         {/* ---- Prayer times (dashboard widget) ---- */}
         <PrayerTimesSettingsSection canEdit={canEdit} />

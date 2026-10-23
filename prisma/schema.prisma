@@ -730,6 +730,10 @@ model Agreement {
   priceEn       String   @default("As per the PO")
   priceAr       String   @default("حسب أمر الشراء")
   showLetterheadSpace Boolean @default(true)
+  // Print-layout template (classic | bilingual-cards | official-form |
+  // key-terms; null = inherit the module default from Settings). Purely
+  // cosmetic — never affects any agreement field, clause or status.
+  template      String?
   status        String   @default("draft") // draft | signed (expired = derived: signed && periodTo passed)
   lastEditedBy  String?
   lastEditedAt  DateTime?

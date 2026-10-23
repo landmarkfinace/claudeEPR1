@@ -185,6 +185,8 @@ export async function POST(req: NextRequest) {
             priceEn: body.priceEn,
             priceAr: body.priceAr,
             showLetterheadSpace: body.showLetterheadSpace,
+            // print-layout template — cosmetic only (null = module default)
+            template: body.template ?? null,
             status: body.status,
             lastEditedBy: auth.name,
             lastEditedAt: now,

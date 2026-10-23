@@ -601,6 +601,8 @@ export type AppSettings = {
   eInvoiceDefaultTemplate: string
   // Default print template for the Name List module (classic until changed)
   nameListDefaultTemplate: string
+  // Default print template for the Agreement module (classic until changed)
+  agreementDefaultTemplate: string
 }
 
 export type ActivityRow = {
@@ -1227,6 +1229,9 @@ export type AgreementRow = {
   id: string
   agreementNo: string
   date: string // ISO date (yyyy-mm-dd)
+  /** Print-layout template (classic | bilingual-cards | official-form | key-terms;
+   *  null = inherit the module default) — purely cosmetic */
+  template: string | null
   titleEn: string
   titleAr: string
   ourCompanyIs: 'first' | 'second'

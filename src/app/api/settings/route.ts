@@ -18,6 +18,7 @@ import { validateImageDataUrl } from '@/lib/image-data-url'
 import { QUOTATION_TEMPLATE_IDS } from '@/lib/quotation-templates'
 import { EINVOICE_TEMPLATE_IDS } from '@/lib/e-invoice-templates'
 import { NAME_LIST_TEMPLATE_IDS } from '@/lib/name-list-templates'
+import { AGREEMENT_PRINT_TEMPLATE_IDS } from '@/lib/agreement-print-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +72,12 @@ function buildSettings(map: Record<string, string>) {
       map.nameListDefaultTemplate ?? ''
     )
       ? (map.nameListDefaultTemplate as string)
+      : 'classic',
+    // Default print template for the Agreement module (classic until changed)
+    agreementDefaultTemplate: (AGREEMENT_PRINT_TEMPLATE_IDS as readonly string[]).includes(
+      map.agreementDefaultTemplate ?? ''
+    )
+      ? (map.agreementDefaultTemplate as string)
       : 'classic',
   }
 }
@@ -142,6 +149,8 @@ const settingsSchema = z.object({
   eInvoiceDefaultTemplate: z.enum(EINVOICE_TEMPLATE_IDS).optional(),
   // Default print template for the Name List module
   nameListDefaultTemplate: z.enum(NAME_LIST_TEMPLATE_IDS).optional(),
+  // Default print template for the Agreement module
+  agreementDefaultTemplate: z.enum(AGREEMENT_PRINT_TEMPLATE_IDS).optional(),
 })
 
 export async function GET() {
@@ -243,6 +252,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.nameListDefaultTemplate !== undefined) {
       entries.push(['nameListDefaultTemplate', body.nameListDefaultTemplate])
+    }
+    if (body.agreementDefaultTemplate !== undefined) {
+      entries.push(['agreementDefaultTemplate', body.agreementDefaultTemplate])
     }
 
     for (const [key, value] of entries) {

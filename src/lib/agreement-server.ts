@@ -9,6 +9,10 @@ import { parseDate } from '@/lib/api-helpers'
 import { validateImageDataUrl } from '@/lib/image-data-url'
 import type { AgreementRow, AgreementPartyRow } from '@/lib/types'
 import {
+  AGREEMENT_PRINT_TEMPLATE_IDS,
+  normalizeAgreementPrintTemplate,
+} from './agreement-print-templates'
+import {
   emptyParty,
   type TemplateParty,
 } from './agreement-template'
@@ -65,6 +69,9 @@ export const agreementBodySchema = z.object({
   priceEn: z.string().trim().min(1, 'Contract price (English) is required').max(400),
   priceAr: z.string().trim().min(1, 'Contract price (Arabic) is required').max(400),
   showLetterheadSpace: z.boolean(),
+  /** Print-layout template (classic | bilingual-cards | official-form |
+   *  key-terms; null/omitted = inherit the module default) — cosmetic only */
+  template: z.enum(AGREEMENT_PRINT_TEMPLATE_IDS).nullable().optional(),
   /** draft | signed — 'expired' is always derived, never stored */
   status: z.enum(['draft', 'signed']),
   clauses: z
@@ -234,6 +241,7 @@ export function mapAgreement(a: AgreementFull | AgreementLean): AgreementRow {
     id: a.id,
     agreementNo: a.agreementNo,
     date: isoDateOnly(a.date),
+    template: normalizeAgreementPrintTemplate(a.template),
     titleEn: a.titleEn,
     titleAr: a.titleAr,
     ourCompanyIs: a.ourCompanyIs === 'second' ? 'second' : 'first',

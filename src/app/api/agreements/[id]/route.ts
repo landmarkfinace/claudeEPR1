@@ -1,8 +1,9 @@
-// Agreement API — GET / PUT / DELETE a single agreement.
+// Agreement API — GET / PUT / PATCH / DELETE a single agreement.
 // GET returns the row with clauses ordered by `order` and both party JSON
 // snapshots parsed. PUT performs a FULL REPLACE of the clauses inside one
-// transaction and stamps lastEditedBy / lastEditedAt. DELETE cascades to the
-// clauses (schema-level onDelete: Cascade).
+// transaction and stamps lastEditedBy / lastEditedAt. PATCH switches ONLY
+// the print-layout template (cosmetic — allowed on any status). DELETE
+// cascades to the clauses (schema-level onDelete: Cascade).
 import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
@@ -26,6 +27,8 @@ import {
   upsertSavedParty,
   type AgreementFull,
 } from '@/lib/agreement-server'
+import { AGREEMENT_PRINT_TEMPLATE_IDS, normalizeAgreementPrintTemplate } from '@/lib/agreement-print-templates'
+import { z } from 'zod'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -121,6 +124,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
             priceEn: body.priceEn,
             priceAr: body.priceAr,
             showLetterheadSpace: body.showLetterheadSpace,
+            // print-layout template — cosmetic only (null = module default)
+            template: body.template === undefined ? undefined : (body.template ?? null),
             status: body.status,
             lastEditedBy: auth.name,
             lastEditedAt: now,
@@ -146,6 +151,54 @@ export async function PUT(req: NextRequest, { params }: Params) {
   } catch (err) {
     console.error('[api/agreements/[id] PUT]', err)
     return serverError()
+  }
+}
+
+// PATCH — switch the PRINT template of a saved agreement WITHOUT touching
+// anything else. Works on EVERY status (signed/expired included): the
+// template is purely cosmetic — text, parties, dates, numbers, signatories,
+// statuses and clauses are never affected, only the layout.
+export async function PATCH(req: NextRequest, { params }: Params) {
+  try {
+    const auth = await requirePermission('agreements.edit')
+    if (isResponse(auth)) return auth
+    const { id } = await params
+
+    const existing = await db.agreement.findUnique({
+      where: { id },
+      select: { id: true, agreementNo: true },
+    })
+    if (!existing) return notFound('Agreement not found')
+
+    let raw: unknown
+    try {
+      raw = await req.json()
+    } catch {
+      return badRequest('Invalid JSON body')
+    }
+    const templateSchema = z.object({
+      template: z.enum(AGREEMENT_PRINT_TEMPLATE_IDS).nullable(),
+    })
+    const parsed = templateSchema.safeParse(raw)
+    if (!parsed.success) {
+      return badRequest(
+        'template must be one of: classic, bilingual-cards, official-form, key-terms (or null)'
+      )
+    }
+
+    const updated = await db.agreement.update({
+      where: { id },
+      data: { template: parsed.data.template ?? null },
+      select: { id: true, agreementNo: true, template: true },
+    })
+    return ok({
+      id: updated.id,
+      agreementNo: updated.agreementNo,
+      template: normalizeAgreementPrintTemplate(updated.template),
+    })
+  } catch (err) {
+    console.error('[api/agreements/[id] PATCH]', err)
+    return serverError('Failed to update the print template')
   }
 }
 

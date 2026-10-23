@@ -1,0 +1,518 @@
+[
+  {
+    "agreementNo": "AGR-2025-0001",
+    "template": "bilingual-cards",
+    "rows": [
+      {
+        "art": "1",
+        "h": 13.2
+      },
+      {
+        "art": "2",
+        "h": 20.44
+      },
+      {
+        "art": "3",
+        "h": 8.06
+      },
+      {
+        "art": "4",
+        "h": 8.06
+      },
+      {
+        "art": "5",
+        "h": 15.95
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "relative text-center",
+        "h": 15.56,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2",
+        "h": 7.89,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[4mm]",
+        "h": 35.04,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 26.99,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "flex items-center justify-betw",
+        "h": 4.23,
+        "gapBefore": 2
+      },
+      {
+        "tag": "div",
+        "data": "1",
+        "h": 13.2,
+        "gapBefore": 1
+      },
+      {
+        "tag": "div",
+        "data": "2",
+        "h": 20.44,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "3",
+        "h": 8.06,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "4",
+        "h": 8.06,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 58.6
+      }
+    ]
+  },
+  {
+    "agreementNo": "AGR-2025-0001",
+    "template": "official-form",
+    "rows": [
+      {
+        "art": "1",
+        "h": 12.01
+      },
+      {
+        "art": "2",
+        "h": 16.98
+      },
+      {
+        "art": "3",
+        "h": 10.72
+      },
+      {
+        "art": "4",
+        "h": 10.72
+      },
+      {
+        "art": "5",
+        "h": 12.01
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "relative text-center",
+        "h": 17.48,
+        "gapBefore": 0
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 11.95,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 45.86,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 22.22,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 56.59,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 49.96
+      }
+    ]
+  },
+  {
+    "agreementNo": "AGR-2025-0001",
+    "template": "key-terms",
+    "rows": [
+      {
+        "art": "1",
+        "h": 13.59
+      },
+      {
+        "art": "2",
+        "h": 20.84
+      },
+      {
+        "art": "3",
+        "h": 8.23
+      },
+      {
+        "art": "4",
+        "h": 8.23
+      },
+      {
+        "art": "5",
+        "h": 16.34
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "flex items-end justify-between",
+        "h": 10.69,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "grid overflow-hidden",
+        "h": 16.89,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[6mm]",
+        "h": 28.96,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[6mm]",
+        "h": 22.47,
+        "gapBefore": 2.6
+      },
+      {
+        "tag": "div",
+        "data": "flex items-center justify-betw",
+        "h": 5.07,
+        "gapBefore": 2.8
+      },
+      {
+        "tag": "div",
+        "data": "1",
+        "h": 13.59,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "2",
+        "h": 20.84,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "3",
+        "h": 8.23,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "4",
+        "h": 8.23,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 63.69
+      }
+    ]
+  },
+  {
+    "agreementNo": "AGR-2025-0002",
+    "template": "bilingual-cards",
+    "rows": [
+      {
+        "art": "1",
+        "h": 11.45
+      },
+      {
+        "art": "2",
+        "h": 13.2
+      },
+      {
+        "art": "3",
+        "h": 8.06
+      },
+      {
+        "art": "4",
+        "h": 11.45
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "relative text-center",
+        "h": 15.56,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2",
+        "h": 7.89,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[4mm]",
+        "h": 46.26,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 22.5,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "flex items-center justify-betw",
+        "h": 4.23,
+        "gapBefore": 2
+      },
+      {
+        "tag": "div",
+        "data": "1",
+        "h": 11.45,
+        "gapBefore": 1
+      },
+      {
+        "tag": "div",
+        "data": "2",
+        "h": 13.2,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "3",
+        "h": 8.06,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "4",
+        "h": 11.45,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[5mm]",
+        "h": 4.02,
+        "gapBefore": 2
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 10,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 41.45,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 0
+      }
+    ]
+  },
+  {
+    "agreementNo": "AGR-2025-0002",
+    "template": "official-form",
+    "rows": [
+      {
+        "art": "1",
+        "h": 10.72
+      },
+      {
+        "art": "2",
+        "h": 12.01
+      },
+      {
+        "art": "3",
+        "h": 10.72
+      },
+      {
+        "art": "4",
+        "h": 12.01
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "relative text-center",
+        "h": 17.48,
+        "gapBefore": 0
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 11.95,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 64.37,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 17.24,
+        "gapBefore": 2
+      },
+      {
+        "tag": "table",
+        "data": "",
+        "h": 39.61,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 53.4
+      }
+    ]
+  },
+  {
+    "agreementNo": "AGR-2025-0002",
+    "template": "key-terms",
+    "rows": [
+      {
+        "art": "1",
+        "h": 11.85
+      },
+      {
+        "art": "2",
+        "h": 13.59
+      },
+      {
+        "art": "3",
+        "h": 8.23
+      },
+      {
+        "art": "4",
+        "h": 11.85
+      }
+    ],
+    "fixed": [
+      {
+        "tag": "div",
+        "data": "flex items-end justify-between",
+        "h": 10.69,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "grid overflow-hidden",
+        "h": 35.96,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[6mm]",
+        "h": 40.56,
+        "gapBefore": 3
+      },
+      {
+        "tag": "div",
+        "data": "grid grid-cols-2 gap-[6mm]",
+        "h": 17.98,
+        "gapBefore": 2.6
+      },
+      {
+        "tag": "div",
+        "data": "flex items-center justify-betw",
+        "h": 5.07,
+        "gapBefore": 2.8
+      },
+      {
+        "tag": "div",
+        "data": "1",
+        "h": 11.85,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "2",
+        "h": 13.59,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "3",
+        "h": 8.23,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "",
+        "h": 3,
+        "gapBefore": 0
+      },
+      {
+        "tag": "div",
+        "data": "true",
+        "h": 6.46,
+        "gapBefore": 54.73
+      }
+    ]
+  }
+]
