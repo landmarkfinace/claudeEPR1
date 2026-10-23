@@ -68,9 +68,23 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  EINVOICE_TEMPLATES,
+  normalizeEInvoiceTemplate,
+  type EInvoiceTemplateId,
+} from '@/lib/e-invoice-templates'
+import { HeritageEInvoiceDocument } from './e-invoice-print-heritage'
+import { FolderEInvoiceDocument } from './e-invoice-print-folder'
 import { usePageRule } from '@/components/app/print/print-page-rule'
-import { amountInWordsBoth } from '@/lib/arabic-words'
-import { formatNumber, round2 } from '@/lib/format'
+import { api } from '@/lib/api-client'
+import { round2 } from '@/lib/format'
 import { downloadPrintAreaAsPdf, printPrintArea } from '@/lib/print-to-pdf'
 import { useAppStore } from '@/lib/store'
 import type {
@@ -81,98 +95,38 @@ import type {
   EInvoiceRow,
   LetterheadConfig,
 } from '@/lib/types'
+import {
+  BORDER,
+  CREAM,
+  DARK_GOLD,
+  DARK_NAVY,
+  DEFAULT_EI_CONFIG,
+  DOC_FONT,
+  EI_LH_WATERMARK_W_MM,
+  GOLD,
+  LIGHT_BG,
+  LIGHT_GOLD,
+  MUTED,
+  NAVY,
+  PAGE_H_MM,
+  PAGE_W_MM,
+  ROW_SEP,
+  buildModel,
+  fmtDate,
+  fmtQty,
+  planLayout,
+  resolveLetterhead,
+  type DocModel,
+  type Measured,
+  type ResolvedLetterhead,
+} from './e-invoice-print-shared'
 
-// ── Brand palette (exact codes from the boss) ───────────────────────────────
-const NAVY = '#132A4A'
-const DARK_NAVY = '#0C1D33'
-const GOLD = '#C0934C'
-const LIGHT_GOLD = '#E1B169'
-const DARK_GOLD = '#8E6420'
-const LIGHT_BG = '#F2F5FA'
-const BORDER = '#DDE3EC'
-const ROW_SEP = '#E8ECF2'
-const MUTED = '#6B7488'
-// warm cream — the template's soft beige for bars and card headers
-const CREAM = '#FBF9F3'
-
-const DOC_FONT = "var(--font-inter), var(--font-cairo), 'Cairo', 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif"
-
-export const DEFAULT_EI_CONFIG: EInvoiceConfig = {
-  letterhead: '',
-  topMm: 45,
-  bottomMm: 25,
-  signature: '',
-  stamp: '',
-  showReceiverSignature: true,
-  translateProvider: 'builtin',
-  translateApiKeySet: false,
-}
-
-// ── A4 pagination geometry ──────────────────────────────────────────────────
-const PAGE_W_MM = 210
-const PAGE_H_MM = 296.5 // 0.5mm print-pipeline slack (see quotation-print)
-const SIDE_PAD_MM = 8
-/** content width — the width the measure rig renders at */
-const CONTENT_W_MM = PAGE_W_MM - 2 * SIDE_PAD_MM
-/** breathing room between the letterhead band and the content column */
-const BAND_GAP_TOP_MM = 1
-const BAND_GAP_BOTTOM_MM = 1.5
-// ── the E-Invoice letterhead layout (Settings → Company Letterhead — E-Invoice)
-// 45 mm header band + 25 mm footer band, 5 mm gaps (body 50–267 mm),
-// 12 mm side margins, dedicated page number line above the footer ─────────
-const EI_LH_HEADER_MM = 45
-const EI_LH_FOOTER_MM = 25
-const EI_LH_GAP_MM = 5
-const EI_LH_SIDE_MM = 12
-/** watermark print width (mm) — centered in the body area, aspect kept */
-const EI_LH_WATERMARK_W_MM = 120
-/** fixed vertical rhythm (these gaps are included in the measured heights) */
+// ── Classic-only vertical rhythm (gaps are included in the measured heights)
 const GAP_TABLE_CLOSING_MM = 2.5 // items table → closing group
 const GAP_SIG_NOTE_MM = 1.5 // signature row → note line
-/** cross-renderer safety slack when deciding "fits on one page" (mm) */
-const SAFETY_MM = 1
 /** items-table row padding (mm, top+bottom); compact is the last resort
  *  before adding a second page (never smaller, fonts never shrink) */
 type RowPad = 2 | 1.5
-
-const DOC_TITLES: Record<string, { en: string; ar: string }> = {
-  invoice: { en: 'TAX INVOICE', ar: 'فاتورة ضريبية' },
-  credit_note: { en: 'CREDIT NOTE', ar: 'إشعار دائن' },
-  debit_note: { en: 'DEBIT NOTE', ar: 'إشعار مدين' },
-}
-
-/** Arabic names for the currency cell of the date & currency bar. */
-const CURRENCY_AR: Record<string, string> = {
-  SAR: 'ريال سعودي',
-  USD: 'دولار أمريكي',
-  EUR: 'يورو',
-  GBP: 'جنيه إسترليني',
-  AED: 'درهم إماراتي',
-}
-
-/** DD / MM / YYYY — the e-invoice document date format. */
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return '—'
-  const date = new Date(d)
-  if (isNaN(date.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(date.getDate())} / ${pad(date.getMonth() + 1)} / ${date.getFullYear()}`
-}
-
-/** Quantity: integers stay clean, fractions keep 2 decimals. */
-function fmtQty(n: number): string {
-  return Number.isInteger(n) ? n.toLocaleString('en-US') : formatNumber(n)
-}
-
-/** Short brand name for the note line — "Landmark Inter Gulf Co. LLC" →
- *  "Landmark Inter Gulf" (the full legal name still prints in the supplier
- *  box; the note line uses the compact form). */
-function shortCompanyName(name: string): string {
-  const stripped = name
-    .replace(/\s*(Co\.?\s*LLC|L\.L\.C\.?|LLC|Co\.,?\s*Ltd\.?|Ltd\.?)\s*$/i, '')
-    .trim()
-  return stripped || name
-}
 
 /** Bilingual label: EN + '|' + AR on one line; wraps the Arabic onto a
  *  second line in narrow cells — never clipped. */
@@ -223,314 +177,8 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
   )
 }
 
-// ── Letterhead resolution ───────────────────────────────────────────────────
-// Priority: the E-Invoice module's OWN letterhead (Settings → Company
-// Letterhead — E-Invoice — ANY uploaded slot of header / footer / enabled
-// watermark activates the letterhead layout) → the module's full-page upload
-// (Settings → E-Invoice) → the SHARED company letterhead → completely empty
-// reserved bands. Without artwork the 45 mm / 25 mm zones print NOTHING.
-//
-// The watermark is resolved INDEPENDENTLY of the band source — it layers on
-// every path (centered in that path's body area).
-//
-// "Print with letterhead" (withLetterhead) only gates the ARTWORK — every
-// geometry value (bands, gaps, side margins, page-number line) stays exactly
-// the same, so unchecking it is safe for pre-printed letterhead paper.
-type ResolvedLetterhead = {
-  kind: 'full' | 'bands' | 'empty'
-  fullImg: string | null
-  headerImg: string | null
-  footerImg: string | null
-  /** artwork band heights (mm) — the zones reserved on every page */
-  topBandMm: number
-  bottomBandMm: number
-  /** content column insets (mm) — band + breathing gap */
-  topPadMm: number
-  bottomPadMm: number
-  /** content column side margins (mm) */
-  sidePadMm: number
-  /** content width (mm) — the width the measure rig renders at */
-  contentWMm: number
-  /** dedicated bilingual page-number line just above the footer band */
-  dedicatedPageNo: boolean
-  /** watermark layer (already gated by withLetterhead + the Settings toggle) */
-  watermarkImg: string | null
-  watermarkOpacityPct: number
-}
 
-function resolveLetterhead(
-  config: EInvoiceConfig,
-  lh?: LetterheadConfig | null,
-  eiLh?: EInvoiceLetterheadConfig | null,
-  withLetterhead = true
-): ResolvedLetterhead {
-  // watermark layer — independent of the band source; hidden with the
-  // letterhead checkbox or the Settings on/off toggle
-  const wmImg =
-    withLetterhead && eiLh?.watermark && eiLh.watermarkEnabled ? eiLh.watermark : null
-  const wmOpacity = eiLh?.watermarkOpacity ?? 100
 
-  const headerH = lh?.headerHeightMm || 45
-  const footerH = lh?.footerHeightMm || 25
-
-  // 1) the E-Invoice's own letterhead — any uploaded slot activates the
-  //    letterhead layout (45/25 mm bands, 5 mm gaps, 12 mm sides, dedicated
-  //    page number above the footer). Slots not uploaded stay EMPTY.
-  if (eiLh && (eiLh.header || eiLh.footer || (eiLh.watermark && eiLh.watermarkEnabled))) {
-    return {
-      kind: 'bands',
-      fullImg: null,
-      headerImg: withLetterhead ? eiLh.header || null : null,
-      footerImg: withLetterhead ? eiLh.footer || null : null,
-      topBandMm: EI_LH_HEADER_MM,
-      bottomBandMm: EI_LH_FOOTER_MM,
-      topPadMm: EI_LH_HEADER_MM + EI_LH_GAP_MM, // body starts 50 mm from the top
-      bottomPadMm: EI_LH_FOOTER_MM + EI_LH_GAP_MM, // body ends 30 mm from the bottom
-      sidePadMm: EI_LH_SIDE_MM,
-      contentWMm: PAGE_W_MM - 2 * EI_LH_SIDE_MM,
-      dedicatedPageNo: true,
-      watermarkImg: wmImg,
-      watermarkOpacityPct: wmOpacity,
-    }
-  }
-  // 2) module-specific full-page upload (legacy path — geometry unchanged)
-  if (config.letterhead) {
-    return {
-      kind: 'full',
-      fullImg: withLetterhead ? config.letterhead : null,
-      headerImg: null,
-      footerImg: null,
-      topBandMm: config.topMm,
-      bottomBandMm: config.bottomMm,
-      topPadMm: config.topMm + BAND_GAP_TOP_MM,
-      bottomPadMm: config.bottomMm + BAND_GAP_BOTTOM_MM,
-      sidePadMm: SIDE_PAD_MM,
-      contentWMm: CONTENT_W_MM,
-      dedicatedPageNo: false,
-      watermarkImg: wmImg,
-      watermarkOpacityPct: wmOpacity,
-    }
-  }
-  // 3) shared company letterhead (legacy path — geometry unchanged)
-  if (lh?.mode === 'full' && lh.fullPageImage) {
-    return {
-      kind: 'full',
-      fullImg: withLetterhead ? lh.fullPageImage : null,
-      headerImg: null,
-      footerImg: null,
-      topBandMm: headerH,
-      bottomBandMm: footerH,
-      topPadMm: headerH + 3,
-      bottomPadMm: footerH + 3,
-      sidePadMm: SIDE_PAD_MM,
-      contentWMm: CONTENT_W_MM,
-      dedicatedPageNo: false,
-      watermarkImg: wmImg,
-      watermarkOpacityPct: wmOpacity,
-    }
-  }
-  const headerImg =
-    lh?.mode === 'header' || lh?.mode === 'header_footer' ? lh.headerImage : null
-  const footerImg = lh?.mode === 'header_footer' ? lh.footerImage : null
-  return {
-    kind: headerImg || footerImg ? 'bands' : 'empty',
-    fullImg: null,
-    headerImg: withLetterhead ? headerImg : null,
-    footerImg: withLetterhead ? footerImg : null,
-    topBandMm: headerH,
-    bottomBandMm: footerH,
-    topPadMm: headerH + BAND_GAP_TOP_MM,
-    bottomPadMm: footerH + BAND_GAP_BOTTOM_MM,
-    sidePadMm: SIDE_PAD_MM,
-    contentWMm: CONTENT_W_MM,
-    dedicatedPageNo: false,
-    watermarkImg: wmImg,
-    watermarkOpacityPct: wmOpacity,
-  }
-}
-
-// ── Measured pagination ─────────────────────────────────────────────────────
-/** Real DOM heights (mm) of every block, read from the measure rig. */
-type Measured = {
-  /** A–D incl. the spacing between D and the items table */
-  headMm: number
-  /** continuation header incl. its spacing */
-  contMm: number
-  /** items table fixed overhead (border box + thead) */
-  tableMm: number
-  /** one height per item row, measured at 2mm padding */
-  rowsMm: number[]
-  /** gap + closing group F */
-  closingMm: number
-  /** signature row G */
-  sigMm: number
-  /** note line H */
-  noteMm: number
-}
-
-/** The decided page layout: item indexes per page (last page also carries
- *  F + G + H) and whether rows use the compact 1.5mm padding. */
-type LayoutPlan = {
-  pages: number[][]
-  compact: boolean
-}
-
-/**
- * Pure planner over the measured heights:
- *   1. ONE page if A–H fit (first at 2mm row padding, then squeezed to
- *      1.5mm — the last resort before a second page);
- *   2. else page 1 = A–D + thead + as many WHOLE rows as fit; later pages =
- *      continuation header + thead + more rows; F + G live on the LAST page;
- *      when the rows all fit on page 1 but F + G don't, at least the last
- *      row moves with them (never a totals-only page opener).
- */
-function planLayout(m: Measured, columnH: number): LayoutPlan {
-  const budget = columnH - m.noteMm - GAP_SIG_NOTE_MM - SAFETY_MM
-  const tail = m.closingMm + m.sigMm
-  const rows = m.rowsMm
-  const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0)
-  const all = rows.map((_, i) => i)
-
-  // 1) everything on ONE page at the normal 2mm row padding
-  if (m.headMm + m.tableMm + sum(rows) + tail <= budget) {
-    return { pages: [all], compact: false }
-  }
-  // 2) squeeze rows to 1.5mm padding (each row −1mm) before adding a page
-  const compactRows = rows.map((h) => Math.max(h - 1, 4))
-  if (rows.length > 0 && m.headMm + m.tableMm + sum(compactRows) + tail <= budget) {
-    return { pages: [all], compact: true }
-  }
-  // 3) multi-page — rows back at the normal padding
-  const cap1 = budget - m.headMm - m.tableMm
-  const capN = budget - m.contMm - m.tableMm
-  const chunks: number[][] = []
-  let cur: number[] = []
-  let used = 0
-  let cap = cap1
-  for (let i = 0; i < rows.length; i++) {
-    if (cur.length > 0 && used + rows[i] > cap) {
-      chunks.push(cur)
-      cur = []
-      used = 0
-      cap = capN
-    }
-    cur.push(i)
-    used += rows[i]
-  }
-  if (cur.length > 0 || chunks.length === 0) chunks.push(cur)
-
-  // F + G must share the final items page — otherwise they get a fresh page
-  const last = chunks[chunks.length - 1]
-  const lastCap = chunks.length === 1 ? cap1 : capN
-  if (sum(last.map((i) => rows[i])) + tail > lastCap) {
-    // pull AT LEAST the last item row forward so the new page never opens
-    // with only totals (skipped only in the degenerate case where even one
-    // row + F + G cannot fit)
-    const moved: number[] = []
-    const i = last[last.length - 1]
-    if (i !== undefined && rows[i] <= capN - tail) {
-      last.pop()
-      moved.unshift(i)
-    }
-    chunks.push(moved)
-  }
-  return { pages: chunks, compact: false }
-}
-
-// ── Document model (shared by every block + the measure rig) ────────────────
-type DocModel = {
-  inv: EInvoiceRow
-  items: EInvoiceItemRow[]
-  title: { en: string; ar: string }
-  currency: string
-  currencyAr: string
-  settings: AppSettings
-  supplier: {
-    nameEn: string
-    nameAr: string
-    vat: string
-    cr: string
-    addressEn: string
-    addressAr: string
-  }
-  buyerAddr: string
-  vatLabel: string
-  rates: number[]
-  words: { en: string; ar: string }
-  balanceDue: number
-  money: (n: number) => string
-  config: EInvoiceConfig
-  qrDataUrl: string | null
-  zatcaNotice: string | null
-  /** compact brand name for the note line */
-  noteCompany: string
-  printedAt: Date
-}
-
-function buildModel(
-  invoice: EInvoiceRow,
-  config: EInvoiceConfig,
-  settings: AppSettings,
-  qrDataUrl: string | null
-): DocModel {
-  const inv = invoice
-  const items = inv.items ?? []
-  const currency = settings.currency || 'SAR'
-  const title =
-    inv.invoiceKind === 'simplified' && inv.docType === 'invoice'
-      ? { en: 'SIMPLIFIED TAX INVOICE', ar: 'فاتورة ضريبية مبسطة' }
-      : (DOC_TITLES[inv.docType] ?? DOC_TITLES.invoice)
-  // Phase 2 standard invoices are only valid for the client after ZATCA clearance
-  const zatcaNotice =
-    inv.status === 'draft'
-      ? null
-      : inv.zatcaStatus === 'local_only' || inv.zatcaSubmissionMode === 'local'
-        ? 'LOCAL TEST — not valid with ZATCA'
-        : inv.hasSignedXml && inv.invoiceKind !== 'simplified' && inv.zatcaStatus !== 'cleared'
-          ? 'Not yet cleared by ZATCA — do not give to the client'
-          : null
-  // Buyer national address (structured) when entered, else the free-text address
-  const buyerNational = [
-    [inv.buyerBuildingNo, inv.buyerStreet].filter(Boolean).join(' '),
-    inv.buyerDistrict,
-    [inv.buyerCity, inv.buyerPostalCode].filter(Boolean).join(' '),
-    inv.buyerCountry && inv.buyerCountry !== 'SA' ? inv.buyerCountry : '',
-  ]
-    .filter(Boolean)
-    .join(', ')
-  const companyName = settings.companyName || 'Landmark Inter Gulf'
-
-  return {
-    inv,
-    items,
-    title,
-    currency,
-    currencyAr: CURRENCY_AR[currency] ?? '',
-    settings,
-    supplier: {
-      nameEn: companyName,
-      nameAr: settings.companyNameAr || '',
-      vat: settings.vatNumber || '',
-      cr: settings.crNumber || '',
-      addressEn: settings.address || '',
-      addressAr: settings.addressAr || '',
-    },
-    buyerAddr: buyerNational || inv.clientAddressEn || '',
-    vatLabel:
-      [...new Set(items.map((it) => Math.round(it.vatPercent)))].length === 1
-        ? `${Math.round(items[0]?.vatPercent ?? 15)}%`
-        : '',
-    rates: [...new Set(items.map((it) => Math.round(it.vatPercent)))],
-    words: amountInWordsBoth(inv.totalDue, currency),
-    balanceDue: round2(inv.totalDue - inv.paidAmount),
-    money: (n: number) => formatNumber(n),
-    config,
-    qrDataUrl,
-    zatcaNotice,
-    noteCompany: shortCompanyName(companyName),
-    printedAt: new Date(),
-  }
-}
 
 // ── Block A–D: title row + dates bar + party boxes + references bar ─────────
 function InvoiceHead({ m }: { m: DocModel }) {
@@ -1489,7 +1137,32 @@ function MeasureRig({
 
 // ── The document ────────────────────────────────────────────────────────────
 
-export function EInvoiceDocument({
+/** Renders the e-invoice in the selected print template — the SAME data
+ *  (model, letterhead, pagination planner), only the layout differs.
+ *  'classic' (default) keeps the original approved design untouched. */
+export function EInvoiceDocument(
+  props: {
+    invoice: EInvoiceRow
+    config: EInvoiceConfig
+    settings: AppSettings
+    qrDataUrl: string | null
+    /** shared company letterhead (Settings → the letterhead manager) */
+    letterhead?: LetterheadConfig | null
+    /** the E-Invoice module's own letterhead (header / footer / watermark) */
+    eiLetterhead?: EInvoiceLetterheadConfig | null
+    /** "Print with letterhead" — false hides the artwork, keeps the margins */
+    withLetterhead?: boolean
+    /** 'classic' | 'heritage' | 'folder' (null → classic) */
+    template?: string | null
+  }
+) {
+  const tpl = normalizeEInvoiceTemplate(props.template) ?? 'classic'
+  if (tpl === 'heritage') return <HeritageEInvoiceDocument {...props} />
+  if (tpl === 'folder') return <FolderEInvoiceDocument {...props} />
+  return <ClassicEInvoiceDocument {...props} />
+}
+
+function ClassicEInvoiceDocument({
   invoice,
   config,
   settings,
@@ -1751,6 +1424,8 @@ export function EInvoicePrintDialog({
   letterhead,
   eiLetterhead,
   qrDataUrl,
+  template,
+  onTemplateChange,
   open,
   onOpenChange,
 }: {
@@ -1759,6 +1434,9 @@ export function EInvoicePrintDialog({
   letterhead?: LetterheadConfig | null
   eiLetterhead?: EInvoiceLetterheadConfig | null
   qrDataUrl: string | null
+  /** Effective print template (controlled — owned by the caller). */
+  template: EInvoiceTemplateId
+  onTemplateChange: (t: EInvoiceTemplateId) => void
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -1778,6 +1456,20 @@ export function EInvoicePrintDialog({
   usePageRule(open, 'size: A4 portrait; margin: 0;')
 
   const isDraft = !invoice || invoice.id === 'draft'
+
+  /** Switch the print template — re-renders instantly. Saved invoices
+   *  persist the choice via a cosmetic-only PATCH (works on issued/locked
+   *  invoices too — it can never change data, amounts, totals, numbering,
+   *  status or the ZATCA QR). */
+  function chooseTemplate(v: string) {
+    const t = normalizeEInvoiceTemplate(v) ?? 'classic'
+    onTemplateChange(t)
+    if (!isDraft && invoice?.id) {
+      api.patch(`/api/e-invoices/${invoice.id}`, { template: t }).catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : 'Could not save the template choice')
+      })
+    }
+  }
 
   function handlePrint(anchor?: HTMLElement | null) {
     void printPrintArea(anchor ?? null)
@@ -1811,7 +1503,8 @@ export function EInvoicePrintDialog({
               ) : null}
             </p>
             <p className="truncate text-xs text-muted-foreground">
-              A4 · Bilingual EN/AR · ZATCA QR
+              A4 · {EINVOICE_TEMPLATES.find((t) => t.id === template)?.label ?? 'Classic'}{' '}
+              template · Bilingual EN/AR · ZATCA QR
               {invoice ? ` · ${invoice.clientNameEn}` : ''}
               {invoice?.zatcaStatus
                 ? ` · ZATCA ${invoice.zatcaStatus}${
@@ -1838,6 +1531,23 @@ export function EInvoicePrintDialog({
             </label>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
+                Template
+              </span>
+              <Select value={template} onValueChange={chooseTemplate}>
+                <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Print template">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EINVOICE_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {invoice?.signedCopyImage ? (
               <Button variant="outline" size="sm" onClick={() => setSignedOpen(true)}>
                 <Paperclip className="h-4 w-4" />
@@ -1880,6 +1590,7 @@ export function EInvoicePrintDialog({
               letterhead={letterhead}
               eiLetterhead={eiLetterhead}
               withLetterhead={withLetterhead}
+              template={template}
             />
           ) : (
             <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">

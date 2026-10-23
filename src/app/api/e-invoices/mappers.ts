@@ -6,11 +6,15 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { round2 } from '@/lib/format'
 import { computeItemTotals, isEInvoiceOverdue } from '@/lib/e-invoice'
+import { EINVOICE_TEMPLATE_IDS } from '@/lib/e-invoice-templates'
 import type { EInvoiceItemRow, EInvoicePaymentRow, EInvoiceRow } from '@/lib/types'
 
 export const EINVOICE_DOC_TYPES = ['invoice', 'credit_note', 'debit_note'] as const
 export const EINVOICE_STATUSES = ['draft', 'issued', 'partially_paid', 'paid'] as const
 export const EINVOICE_FILTER_STATUSES = [...EINVOICE_STATUSES, 'overdue'] as const
+
+/** Print template ids accepted on write (cosmetic-only field). */
+export const templateSchema = z.enum(EINVOICE_TEMPLATE_IDS).nullable().optional()
 
 /** Prisma include for list rows (item count + related invoice number). */
 export const eInvoiceListInclude = {
@@ -173,6 +177,7 @@ export function mapEInvoice(
     issuedAt: inv.issuedAt ? inv.issuedAt.toISOString() : null,
     issuedByName: inv.issuedByName,
     signedCopyImage: inv.signedCopyImage,
+    template: inv.template ?? null,
     createdAt: inv.createdAt.toISOString(),
     updatedAt: inv.updatedAt.toISOString(),
     overdue: isEInvoiceOverdue(inv),
@@ -275,6 +280,8 @@ export const eInvoiceSchema = z.object({
     .array(eItemSchema)
     .min(1, 'At least one line item is required')
     .max(200, 'Too many line items'),
+  // print layout only — never affects amounts, VAT, totals, numbering, status or the QR
+  template: templateSchema,
 })
 
 export type EInvoiceBody = z.infer<typeof eInvoiceSchema>

@@ -22,6 +22,7 @@ import {
   EInvoiceSettingsSection,
   GlossarySettingsSection,
 } from '@/components/app/settings/e-invoice-settings'
+import { EInvoiceTemplatesSettingsSection } from '@/components/app/settings/e-invoice-templates-settings'
 import { AiSettingsSection } from '@/components/app/settings/ai-settings'
 import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
@@ -788,6 +789,9 @@ export function SettingsView() {
 
         {/* ---- E-Invoice print template + translation provider ---- */}
         <EInvoiceSettingsSection />
+
+        {/* ---- E-Invoice print templates (default layout) ---- */}
+        <EInvoiceTemplatesSettingsSection canEdit={canEdit} />
 
         {/* ---- AI Assistant provider + usage + logs ---- */}
         <AiSettingsSection />

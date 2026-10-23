@@ -101,6 +101,8 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
             source.docType === 'credit_note' || source.docType === 'debit_note'
               ? source.relatedInvoiceId
               : null,
+          // keep the print layout of the source (cosmetic only)
+          template: source.template,
           items: { create: items },
         },
         include: eInvoiceDetailInclude,

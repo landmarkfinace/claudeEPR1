@@ -877,6 +877,11 @@ model EInvoice {
   issuedByName  String?
   // Scanned signed copy uploaded after issuing (proof of delivery) — does NOT unlock editing
   signedCopyImage String?
+  // Print layout template ('classic' | 'heritage' | 'folder') — COSMETIC ONLY.
+  // null = follow the module default (Settings → E-Invoice → Templates, itself
+  // defaulting to classic). Never affects invoice data, totals, numbering,
+  // status, ZATCA QR payload or hashes — existing rows stay NULL (= Classic).
+  template       String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

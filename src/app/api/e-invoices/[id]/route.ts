@@ -5,6 +5,7 @@
 // and keeps the invoiceNumber unchanged; every money figure is recomputed.
 import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
+import { z } from 'zod'
 import { db } from '@/lib/db'
 import {
   ok,
@@ -24,6 +25,7 @@ import {
   eInvoiceSchema,
   normalizeEItems,
   backfillClientArabic,
+  templateSchema,
 } from '../mappers'
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -159,6 +161,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
           ...(body.zatcaPhase ? { zatcaPhase: body.zatcaPhase } : {}),
           relatedInvoiceId,
           ...zatcaHeaderData(body),
+          // print layout only — never affects amounts, VAT, totals or numbering
+          template: body.template ?? null,
           items: { create: items },
         },
         include: eInvoiceDetailInclude,
@@ -182,6 +186,50 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return badRequest('Invoice number already exists — invoice numbers must be unique')
     }
     console.error('[api/e-invoices/[id] PUT]', e)
+    return serverError()
+  }
+}
+
+// PATCH — switch the print template of a saved e-invoice WITHOUT touching
+// anything else. The print preview's Template dropdown uses this so the
+// choice is stored on the invoice. Works on ISSUED (locked) invoices too:
+// by construction it can never change amounts, VAT, totals, numbering,
+// status, the ZATCA QR payload or any hash — only the layout. Not
+// activity-logged (cosmetic).
+const templatePatchSchema = z.object({ template: templateSchema })
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  try {
+    const auth = await requirePermission('einvoices.edit')
+    if (isResponse(auth)) return auth
+    const { id } = await ctx.params
+
+    let raw: unknown
+    try {
+      raw = await req.json()
+    } catch {
+      return badRequest('Invalid JSON body')
+    }
+    const parsed = templatePatchSchema.safeParse(raw)
+    if (!parsed.success) {
+      return badRequest('template must be one of: classic, heritage, folder (or null)')
+    }
+
+    const existing = await db.eInvoice.findUnique({ where: { id }, select: { id: true } })
+    if (!existing) return notFound('E-Invoice not found')
+
+    const updated = await db.eInvoice.update({
+      where: { id },
+      data: { template: parsed.data.template ?? null },
+      select: { id: true, invoiceNumber: true, template: true },
+    })
+    return ok({
+      id: updated.id,
+      invoiceNumber: updated.invoiceNumber,
+      template: updated.template,
+    })
+  } catch (err) {
+    console.error('[api/e-invoices/[id] PATCH]', err)
     return serverError()
   }
 }

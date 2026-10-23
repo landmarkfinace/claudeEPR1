@@ -118,6 +118,11 @@ import { MobileFab, PageHeader, SectionCard } from '../shared/page-header'
 import { StatCard } from '../shared/stat-card'
 import { EInvoicePrintDialog } from '../print/e-invoice-print'
 import {
+  EINVOICE_TEMPLATES,
+  resolveEInvoiceTemplate,
+  type EInvoiceTemplateId,
+} from '@/lib/e-invoice-templates'
+import {
   EInvoiceZatcaSubmitDialog,
   downloadEInvoiceUbl,
 } from './e-invoice-zatca-submit'
@@ -285,6 +290,8 @@ type EIForm = {
   docType: 'invoice' | 'credit_note' | 'debit_note'
   zatcaPhase: 1 | 2
   invoiceKind: 'standard' | 'simplified'
+  /** print layout only — saved with the invoice, defaults from Settings */
+  template: string
   noteReason: string
   paymentMeansCode: string
   buyerStreet: string
@@ -412,13 +419,14 @@ function newItemForm(): EItemForm {
   }
 }
 
-function emptyForm(showReceiverSignature: boolean): EIForm {
+function emptyForm(showReceiverSignature: boolean, defaultTemplate?: string): EIForm {
   const today = new Date()
   const due = new Date(today.getTime() + 30 * 86_400_000)
   return {
     docType: 'invoice',
     zatcaPhase: 1,
     invoiceKind: 'standard',
+    template: resolveEInvoiceTemplate(null, defaultTemplate),
     noteReason: '',
     paymentMeansCode: '30',
     buyerStreet: '',
@@ -709,6 +717,8 @@ export function EInvoicesView() {
   const [printOpen, setPrintOpen] = useState(false)
   const [printLoading, setPrintLoading] = useState(false)
   const [printInvoice, setPrintInvoice] = useState<EInvoiceRow | null>(null)
+  // effective print template for the open print dialog (controlled prop)
+  const [printTemplate, setPrintTemplate] = useState<EInvoiceTemplateId>('classic')
   const [draftPreview, setDraftPreview] = useState<EInvoiceRow | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [eiConfig, setEiConfig] = useState<EInvoiceConfig | null>(null)
@@ -913,7 +923,7 @@ export function EInvoicesView() {
     setEditing(null)
     setTranslateError(null)
     setNextNumber('')
-    setForm(emptyForm(configRef.current?.showReceiverSignature ?? true))
+    setForm(emptyForm(configRef.current?.showReceiverSignature ?? true, settings.eInvoiceDefaultTemplate))
     setDialogOpen(true)
     void loadClients()
     void loadIssuedInvoices()
@@ -950,6 +960,7 @@ export function EInvoicesView() {
           : 'invoice',
         zatcaPhase: full.zatcaPhase === 2 ? 2 : 1,
         invoiceKind: full.invoiceKind === 'simplified' ? 'simplified' : 'standard',
+        template: resolveEInvoiceTemplate(full.template, settings.eInvoiceDefaultTemplate),
         noteReason: full.noteReason ?? '',
         paymentMeansCode: full.paymentMeansCode || '30',
         buyerStreet: full.buyerStreet ?? '',
@@ -1407,6 +1418,7 @@ export function EInvoicesView() {
     const body = {
       docType: form.docType,
       invoiceKind: form.invoiceKind,
+      template: form.template,
       noteReason: form.docType !== 'invoice' ? form.noteReason.trim() || null : null,
       paymentMeansCode: form.paymentMeansCode,
       buyerStreet: form.buyerStreet.trim() || null,
@@ -1784,6 +1796,7 @@ export function EInvoicesView() {
       issuedAt: null,
       issuedByName: null,
       signedCopyImage: null,
+      template: form.template,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       overdue: false,
@@ -1821,6 +1834,7 @@ export function EInvoicesView() {
     setQrDataUrl(null) // QR available after save
     setPrintInvoice(null)
     setDraftPreview(buildDraftRow())
+    setPrintTemplate(resolveEInvoiceTemplate(form.template, settings.eInvoiceDefaultTemplate))
     setPrintOpen(true)
   }
 
@@ -1838,6 +1852,7 @@ export function EInvoicesView() {
       setDraftPreview(null)
       setQrDataUrl(qr.qrDataUrl)
       setPrintInvoice(full)
+      setPrintTemplate(resolveEInvoiceTemplate(full.template, settings.eInvoiceDefaultTemplate))
       setPrintOpen(true)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not prepare the e-invoice document')
@@ -2700,6 +2715,29 @@ export function EInvoicesView() {
                   issued now follows it.
                 </span>
               </p>
+            </div>
+
+            {/* Print layout — cosmetic only, never affects amounts, VAT, totals,
+                numbering, status or the ZATCA QR */}
+            <div className="space-y-2">
+              <Label htmlFor="ei-template">Print Template</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={form.template} onValueChange={(v) => setField('template', v)}>
+                  <SelectTrigger id="ei-template" className="w-[220px]" aria-label="Print template">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EINVOICE_TEMPLATES.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Layout only — the module default lives in Settings → E-Invoice → Templates.
+                </p>
+              </div>
             </div>
 
             {form.docType !== 'invoice' ? (
@@ -3713,6 +3751,8 @@ export function EInvoicesView() {
         letterhead={letterhead}
         eiLetterhead={eiLetterhead}
         qrDataUrl={qrDataUrl}
+        template={printTemplate}
+        onTemplateChange={setPrintTemplate}
         open={printOpen}
         onOpenChange={(v) => {
           setPrintOpen(v)

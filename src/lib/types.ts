@@ -597,6 +597,8 @@ export type AppSettings = {
   vatRate: number
   /** Default print template for the Quotations module ('classic' by default) */
   quotationDefaultTemplate: string
+  /** Default print template for the E-Invoice module ('classic' by default) */
+  eInvoiceDefaultTemplate: string
 }
 
 export type ActivityRow = {
@@ -1373,6 +1375,8 @@ export type EInvoiceRow = {
   issuedAt: string | null
   issuedByName: string | null
   signedCopyImage: string | null
+  /** Print template id ('classic' | 'heritage' | 'folder'); null = module default. Cosmetic only. */
+  template: string | null
   createdAt: string
   updatedAt: string
   // derived

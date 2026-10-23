@@ -16,6 +16,7 @@ import {
 } from '@/lib/api-helpers'
 import { validateImageDataUrl } from '@/lib/image-data-url'
 import { QUOTATION_TEMPLATE_IDS } from '@/lib/quotation-templates'
+import { EINVOICE_TEMPLATE_IDS } from '@/lib/e-invoice-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,12 @@ function buildSettings(map: Record<string, string>) {
       map.quotationDefaultTemplate ?? ''
     )
       ? (map.quotationDefaultTemplate as string)
+      : 'classic',
+    // Default print template for the E-Invoice module (classic until changed)
+    eInvoiceDefaultTemplate: (EINVOICE_TEMPLATE_IDS as readonly string[]).includes(
+      map.eInvoiceDefaultTemplate ?? ''
+    )
+      ? (map.eInvoiceDefaultTemplate as string)
       : 'classic',
   }
 }
@@ -124,6 +131,8 @@ const settingsSchema = z.object({
   vatRate: z.coerce.number().min(0, 'VAT rate cannot be negative').max(100, 'VAT rate cannot exceed 100').optional(),
   // Default print template for the Quotations module
   quotationDefaultTemplate: z.enum(QUOTATION_TEMPLATE_IDS).optional(),
+  // Default print template for the E-Invoice module
+  eInvoiceDefaultTemplate: z.enum(EINVOICE_TEMPLATE_IDS).optional(),
 })
 
 export async function GET() {
@@ -219,6 +228,9 @@ export async function PUT(req: NextRequest) {
     }
     if (body.quotationDefaultTemplate !== undefined) {
       entries.push(['quotationDefaultTemplate', body.quotationDefaultTemplate])
+    }
+    if (body.eInvoiceDefaultTemplate !== undefined) {
+      entries.push(['eInvoiceDefaultTemplate', body.eInvoiceDefaultTemplate])
     }
 
     for (const [key, value] of entries) {

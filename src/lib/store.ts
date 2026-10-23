@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   bankAddress: '',
   vatRate: 15, // percent — Saudi standard VAT for the VAT Return Expense module
   quotationDefaultTemplate: 'classic',
+  eInvoiceDefaultTemplate: 'classic',
 }
 
 export type ViewIntentPayload = {

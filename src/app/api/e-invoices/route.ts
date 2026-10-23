@@ -295,6 +295,8 @@ export async function POST(req: NextRequest) {
           zatcaPhase: body.zatcaPhase ?? 1,
           relatedInvoiceId,
           ...zatcaHeaderData(body),
+          // print layout only — never affects amounts, VAT, totals or numbering
+          template: body.template ?? null,
           items: { create: items },
         },
         include: { items: { orderBy: { sr: 'asc' } } },
