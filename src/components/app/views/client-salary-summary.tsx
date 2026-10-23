@@ -16,6 +16,7 @@ import {
   Building2,
   Check,
   ChevronRight,
+  Copy,
   Download,
   FileBarChart,
   FileDown,
@@ -104,6 +105,21 @@ const YEAR_OPTIONS = (() => {
 /** Stable key for a group (null clientId = the "No Client" bucket) */
 function groupKey(g: ClientSalaryGroup): string {
   return g.clientId ?? '_noclient'
+}
+
+/** Result of POST /api/clients/salary-workers/copy (copy last month's workers) */
+type CopyResult = {
+  target: { month: number; year: number }
+  copied: number
+  skippedManual: number
+  skippedPayroll: number
+  sources: {
+    clientId: string
+    clientName: string
+    fromMonth: number
+    fromYear: number
+    copied: number
+  }[]
 }
 
 /** Filesystem-safe client name fragment for download filenames */
@@ -1153,6 +1169,42 @@ export function ClientSalarySummaryView() {
     return Array.from(names).sort()
   }, [view])
 
+  /*
+   * COPY SYSTEM — the workers added once (e.g. 10 in October) keep working
+   * next month: copy them into the viewed month in one click (per client, or
+   * all clients at once). Skips anyone already added / already on payroll,
+   * so a second click is always safe. Afterwards the rows are normal rows of
+   * the target month — add more, remove or edit each one freely.
+   */
+  const copyLastMonth = useCallback(
+    async (clientId?: string) => {
+      try {
+        const res = await api.post<CopyResult>('/api/clients/salary-workers/copy', {
+          toMonth: Number(month),
+          toYear: Number(year),
+          ...(clientId ? { clientId } : {}),
+        })
+        if (res.copied > 0) {
+          const skipped: string[] = []
+          if (res.skippedManual > 0) skipped.push(`${res.skippedManual} already added`)
+          if (res.skippedPayroll > 0) skipped.push(`${res.skippedPayroll} already on payroll`)
+          toast.success(
+            `Copied ${res.copied} worker${res.copied === 1 ? '' : 's'} into ${monthName(Number(month))} ${year}` +
+              (skipped.length ? ` — skipped ${skipped.join(', ')}` : '')
+          )
+          await loadSummary()
+        } else if (res.sources.length === 0) {
+          toast.info('No earlier workers found to copy — add this month\u2019s workers by hand')
+        } else {
+          toast.info(`Every worker is already in ${monthName(Number(month))} ${year} — nothing left to copy`)
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not copy the workers')
+      }
+    },
+    [month, year, loadSummary]
+  )
+
   const toggle = useCallback((key: string) => {
     setExpanded((prev) => (prev === key ? null : key))
   }, [])
@@ -1395,6 +1447,17 @@ export function ClientSalarySummaryView() {
           <Button variant="outline" className="print-hidden" onClick={() => openAddWorkerFor(null)}>
             <UserPlus className="h-4 w-4" />
             Add Worker
+          </Button>
+        ) : null}
+        {canEditRate ? (
+          <Button
+            variant="outline"
+            className="print-hidden"
+            onClick={() => void copyLastMonth()}
+            title="Copy every client's workers from their most recent earlier month into the viewed month (skips anyone already added / on payroll)"
+          >
+            <Copy className="h-4 w-4" />
+            Copy Last Month
           </Button>
         ) : null}
         <Button
@@ -1952,6 +2015,19 @@ export function ClientSalarySummaryView() {
                                     <Button size="sm" variant="secondary" onClick={() => openAddWorkerFor(g)}>
                                       <UserPlus className="h-3.5 w-3.5" />
                                       Add Worker
+                                    </Button>
+                                  ) : null}
+                                  {canEditRate && g.clientId ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      title="Copy this client's workers from their most recent earlier month (skips anyone already added / on payroll)"
+                                      onClick={() => {
+                                        if (g.clientId) void copyLastMonth(g.clientId)
+                                      }}
+                                    >
+                                      <Copy className="h-3.5 w-3.5" />
+                                      Copy Last Month
                                     </Button>
                                   ) : null}
                                   <Button size="sm" variant="outline" onClick={() => setPrintGroup(g)}>

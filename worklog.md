@@ -2313,3 +2313,17 @@ Work Log:
 Stage Summary:
 - Quotation items are now remembered: every trade ever used is auto-offered in the item box of every new quotation (most-used first, with its usual detail line); new trades are typed in freely and join the list once saved.
 - Committed as 0e24a45 (new route + quotations.tsx only; prisma/schema.prisma left unstaged as before).
+
+---
+Task ID: CSS-COPY-LAST-MONTH
+Agent: main (Z.ai Code)
+Task: Boss request (Banglish): workers added to a client in Client Salary Summary (e.g. 10 in October) keep working in November — re-adding them every month is a chore. Build a copy system, and keep it flexible so the next month can grow (new adds) or shrink (removes).
+
+Work Log:
+- New API POST /api/clients/salary-workers/copy (permission payroll.edit): body { toMonth, toYear, clientId?, fromMonth?, fromYear? }. Source discovery: per client, the most recent month BEFORE the target that has manual rows (handles month gaps); or an explicit earlier from-month. Duplicate protection: a worker (same client + iqama) already manually added in the target month is skipped, and so is a worker already billed via a target-month payroll record (project → client) — prevents double billing when payroll starts covering them. Copies carry name, iqama, project, hours and rate; createMany in one shot; logActivity entry; response has per-client sources {clientName, fromMonth/Year, copied} for the toasts.
+- View (client-salary-summary.tsx): toolbar "Copy Last Month" (all clients — this also solves the empty-target-month case where the client's group doesn't even exist yet) + per-group "Copy Last Month" in every expanded client panel (that client only); handler toasts success with skip details ("3 already added, 2 already on payroll"), "No earlier workers found" and the idempotent "Every worker is already in <Month Year> — nothing left to copy"; reloads the summary after a real copy. Post-copy the rows are ordinary target-month rows — existing Add Worker / Edit (Pencil) / Remove (trash) cover grow & shrink.
+- Verification: tsc clean; eslint = same 3 pre-existing convention errors as HEAD. E2E with the exact user story on the live DB: seeded 3 workers for Eastern Province Industrial Services in October (+3 in August, one sharing a real September-payroll staff's iqama); POST copy→September: copied 2, skippedPayroll 1 (double-billing guard proven); copy→November: 3 copied from October, group appears; repeat copy→November: 0 (idempotent); browser QA: November group with 3 workers + Edit/Remove on each, group Copy Last Month toast "Every worker is already in November 2026", removed one (2 workers, subtotal 14,400→9,600), added a new November worker by hand (back to 3). All 11 QA rows then deleted (0 remaining). Screenshots qa/14 + qa/15 (git-ignored like all qa/).
+
+Stage Summary:
+- October's workers now flow into November (or any later month) with one click — per client or all clients at once — with duplicate/payroll guards, and every copied row stays individually editable/removable so the crew list can grow or shrink per month.
+- Committed as 78b44d6 (new copy route + view only; prisma/schema.prisma left unstaged as before).
