@@ -1,5 +1,6 @@
-// Settings API — GET is PUBLIC (login screen needs branding before auth);
-// PUT requires settings.edit. Values are stored as key/value rows.
+// Settings API — GET returns the login-screen branding subset (company
+// names + logo + currency) for anonymous callers; signed-in users get the
+// full object. PUT requires settings.edit. Values are stored as key/value rows.
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
@@ -8,6 +9,7 @@ import {
   ok,
   badRequest,
   serverError,
+  requireAuth,
   requirePermission,
   isResponse,
   logActivity,
@@ -58,6 +60,23 @@ function clampVatPercent(v: number): number {
   return Math.min(100, Math.max(0, v))
 }
 
+/**
+ * Anonymous subset — what the login screen actually needs. Bank details,
+ * signatory identity, signature/stamp artwork and VAT/CR numbers are business
+ * data and never leave the server for unauthenticated callers.
+ */
+function publicSettings(map: Record<string, string>) {
+  return {
+    companyName: map.companyName ?? 'Landmark Inter Gulf',
+    companyNameAr: map.companyNameAr ?? 'لاندمارك انتر جلف',
+    address:
+      map.address ??
+      'Al Suwedhi Business Centre, Office # 103, 1st Floor, P.O.Box 35712, Building 5526, 4th Street, Distt. Al Wahah, Jubail, Kingdom of Saudi Arabia',
+    logo: map.logo ?? '/logo-mark.png',
+    currency: map.currency ?? 'SAR',
+  }
+}
+
 async function readSettingsMap(): Promise<Record<string, string>> {
   const rows = await db.setting.findMany()
   const map: Record<string, string> = {}
@@ -101,6 +120,11 @@ const settingsSchema = z.object({
 export async function GET() {
   try {
     const map = await readSettingsMap()
+    const auth = await requireAuth()
+    if (isResponse(auth)) {
+      // unauthenticated: branding subset only
+      return ok({ settings: publicSettings(map) })
+    }
     return ok({ settings: buildSettings(map) })
   } catch {
     return serverError()

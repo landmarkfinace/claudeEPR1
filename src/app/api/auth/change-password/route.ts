@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { verifyPassword, hashPassword } from '@/lib/auth'
+import { verifyPassword, hashPassword, getCurrentSessionToken } from '@/lib/auth'
 import { ok, badRequest, unauthorized, serverError, logActivity, requireAuth, isResponse } from '@/lib/api-helpers'
 
 const bodySchema = z.object({
@@ -43,6 +43,16 @@ export async function POST(req: NextRequest) {
 
     const hashed = await hashPassword(newPassword)
     await db.user.update({ where: { id: user.id }, data: { password: hashed } })
+
+    // The new password invalidates every OTHER session (a stolen session
+    // otherwise survives the change for up to 30 days). The CURRENT session
+    // stays alive so the user is not logged out mid-request.
+    const keepToken = await getCurrentSessionToken()
+    await db.session.deleteMany({
+      where: keepToken
+        ? { userId: user.id, token: { not: keepToken } }
+        : { userId: user.id },
+    })
 
     await logActivity({
       user: auth,

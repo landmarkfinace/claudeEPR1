@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { db } from '@/lib/db'
-import { hashPassword } from '@/lib/auth'
+import { hashPassword, getCurrentSessionToken } from '@/lib/auth'
 import type { UserRow } from '@/lib/types'
 import {
   ok,
@@ -95,6 +95,12 @@ export async function PUT(
       data.password = await hashPassword(body.password)
     }
 
+    // A password reset must revoke the target's OTHER sessions (a stolen
+    // session otherwise survives the reset for up to 30 days). When the
+    // admin is resetting his own password through this dialog, his CURRENT
+    // session stays alive and the rest are revoked.
+    const revokeSessionsAfter = body.password !== undefined
+
     if (body.roleId !== undefined) {
       if (body.roleId) {
         const role = await db.role.findUnique({ where: { id: body.roleId } })
@@ -105,7 +111,29 @@ export async function PUT(
       }
     }
 
-    if (body.isActive !== undefined) data.isActive = body.isActive
+    if (body.isActive !== undefined) {
+      if (body.isActive === false) {
+        // Lockout guards (mirrored from DELETE): deactivating yourself or the
+        // last active Super Admin bricks the system — no one could sign in.
+        if (id === auth.id) {
+          return conflict('You cannot deactivate your own account.')
+        }
+        const superAdminRole = await db.role.findFirst({
+          where: { name: 'Super Admin' },
+        })
+        if (superAdminRole && existing.roleId === superAdminRole.id) {
+          const activeSuperAdmins = await db.user.count({
+            where: { roleId: superAdminRole.id, isActive: true },
+          })
+          if (activeSuperAdmins <= 1) {
+            return conflict(
+              'Cannot deactivate the last active Super Admin — promote another Super Admin first.'
+            )
+          }
+        }
+      }
+      data.isActive = body.isActive
+    }
     if (body.avatar !== undefined) data.avatar = body.avatar || null
 
     const updated = await db.user.update({
@@ -113,6 +141,15 @@ export async function PUT(
       data,
       include: userInclude,
     })
+    if (revokeSessionsAfter) {
+      const keepToken = id === auth.id ? await getCurrentSessionToken() : null
+      await db.session.deleteMany({
+        where: keepToken
+          ? { userId: id, token: { not: keepToken } }
+          : { userId: id },
+      })
+    }
+
     await logActivity({
       user: auth,
       action: 'updated',

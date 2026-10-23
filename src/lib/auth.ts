@@ -92,28 +92,37 @@ async function lookupSession(token: string): Promise<SessionUser | null> {
 
 export async function getSessionUser(): Promise<SessionUser | null> {
   try {
-    // 1) Primary: session cookie (first-party contexts — direct tab / new tab)
-    const cookieStore = await cookies()
-    const token = cookieStore.get(SESSION_COOKIE)?.value
-    if (token) {
-      const user = await lookupSession(token)
-      if (user) return user
-    }
-
-    // 2) Fallback: Authorization: Bearer <token> header — required when the
-    //    app runs inside the sandbox preview IFRAME, where browsers block
-    //    SameSite=Lax cookies (third-party context). The client stores the
-    //    token in localStorage (same-origin as the iframe) and sends it here.
-    const headerList = await headers()
-    const authHeader = headerList.get('authorization')
-    if (authHeader?.startsWith('Bearer ')) {
-      const bearer = authHeader.slice('Bearer '.length).trim()
-      if (bearer) return lookupSession(bearer)
-    }
-    return null
+    const token = await getCurrentSessionToken()
+    if (!token) return null
+    return lookupSession(token)
   } catch {
     return null
   }
+}
+
+/**
+ * The token of the CURRENT request's session (cookie first, then the
+ * Authorization: Bearer header used inside the sandbox preview iframe).
+ * Lets password-change flows revoke every OTHER session while keeping
+ * the caller's own session alive.
+ */
+export async function getCurrentSessionToken(): Promise<string | null> {
+  // 1) Primary: session cookie (first-party contexts - direct tab / new tab)
+  const cookieStore = await cookies()
+  const fromCookie = cookieStore.get(SESSION_COOKIE)?.value
+  if (fromCookie) return fromCookie
+
+  // 2) Fallback: Authorization: Bearer <token> header - required when the
+  //    app runs inside the sandbox preview IFRAME, where browsers block
+  //    SameSite=Lax cookies (third-party context). The client stores the
+  //    token in localStorage (same-origin as the iframe) and sends it here.
+  const headerList = await headers()
+  const authHeader = headerList.get('authorization')
+  if (authHeader?.startsWith('Bearer ')) {
+    const bearer = authHeader.slice(7).trim()
+    if (bearer) return bearer
+  }
+  return null
 }
 
 export function hasPermission(
