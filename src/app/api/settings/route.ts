@@ -24,6 +24,7 @@ import {
   DEFAULT_PAYSLIP_ACK_TEXT,
   PAYSLIP_ACK_MAX_LENGTH,
 } from '@/lib/payslip-print-templates'
+import { CLIENT_SUMMARY_TEMPLATE_IDS } from '@/lib/client-summary-print-templates'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,6 +95,13 @@ function buildSettings(map: Record<string, string>) {
     // (placeholders {netPay} {period} {method} {project} {client}); Classic
     // keeps its own hard-coded text
     payrollAcknowledgmentText: map.payrollAcknowledgmentText ?? DEFAULT_PAYSLIP_ACK_TEXT,
+    // Default print template for the Client Salary Summary module (classic
+    // until changed) — print option only, no database column
+    clientSummaryDefaultTemplate: (CLIENT_SUMMARY_TEMPLATE_IDS as readonly string[]).includes(
+      map.clientSummaryDefaultTemplate ?? ''
+    )
+      ? (map.clientSummaryDefaultTemplate as string)
+      : 'classic',
   }
 }
 
@@ -174,6 +182,9 @@ const settingsSchema = z.object({
     .string()
     .max(PAYSLIP_ACK_MAX_LENGTH, `Acknowledgment text cannot exceed ${PAYSLIP_ACK_MAX_LENGTH} characters`)
     .optional(),
+  // Default print template for the Client Salary Summary module (print
+  // option only — no database column exists)
+  clientSummaryDefaultTemplate: z.enum(CLIENT_SUMMARY_TEMPLATE_IDS).optional(),
 })
 
 export async function GET() {
@@ -287,6 +298,9 @@ export async function PUT(req: NextRequest) {
         'payrollAcknowledgmentText',
         body.payrollAcknowledgmentText.trim() || DEFAULT_PAYSLIP_ACK_TEXT,
       ])
+    }
+    if (body.clientSummaryDefaultTemplate !== undefined) {
+      entries.push(['clientSummaryDefaultTemplate', body.clientSummaryDefaultTemplate])
     }
 
     for (const [key, value] of entries) {

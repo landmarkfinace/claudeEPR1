@@ -57,14 +57,16 @@ export async function GET() {
     const user = await getSessionUser()
     if (!user) return unauthorized()
     // The company letterhead powers the printed Quotation, Supplier P.O.,
-    // E-Invoice, Agreement and bulk/new-layout Pay slip documents — any of
-    // those modules' view/print permission grants read access.
+    // E-Invoice, Agreement, bulk/new-layout Pay slip and By-Category Client
+    // Salary Summary documents — any of those modules' view/print permission
+    // grants read access.
     if (
       !hasPermission(user, 'quotations.view') &&
       !hasPermission(user, 'supplierpo.view') &&
       !hasPermission(user, 'einvoices.view') &&
       !hasPermission(user, 'agreements.view') &&
-      !hasPermission(user, 'payroll.print')
+      !hasPermission(user, 'payroll.print') &&
+      !hasPermission(user, 'payroll.view')
     ) {
       return forbidden()
     }

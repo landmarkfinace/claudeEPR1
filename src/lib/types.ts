@@ -610,6 +610,9 @@ export type AppSettings = {
   // (placeholders {netPay} {period} {method} {project} {client}); Classic
   // keeps its own hard-coded text
   payrollAcknowledgmentText: string
+  // Default print template for the Client Salary Summary (classic until
+  // changed; print option only — no database column exists)
+  clientSummaryDefaultTemplate: string
 }
 
 export type ActivityRow = {

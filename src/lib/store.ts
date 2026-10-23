@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   agreementDefaultTemplate: 'classic',
   payrollPayslipDefaultTemplate: 'classic',
   payrollAcknowledgmentText: DEFAULT_PAYSLIP_ACK_TEXT,
+  clientSummaryDefaultTemplate: 'classic',
 }
 
 export type ViewIntentPayload = {

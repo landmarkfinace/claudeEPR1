@@ -28,6 +28,7 @@ import { ZatcaSettingsPanel } from '@/components/app/settings/zatca-settings'
 import { NameListSettingsSection } from '@/components/app/settings/namelist-settings'
 import { AgreementTemplatesSettingsSection } from '@/components/app/settings/agreement-templates-settings'
 import { PayslipTemplatesSettingsSection } from '@/components/app/settings/payslip-templates-settings'
+import { ClientSummaryTemplatesSettingsSection } from '@/components/app/settings/client-summary-templates-settings'
 import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
 import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
 import { QuotationTemplatesSettingsSection } from '@/components/app/settings/quotation-templates-settings'
@@ -806,6 +807,9 @@ export function SettingsView() {
 
         {/* ---- Payroll pay slip templates (default layout + ack text) ---- */}
         <PayslipTemplatesSettingsSection />
+
+        {/* ---- Client salary summary print templates (default layout) ---- */}
+        <ClientSummaryTemplatesSettingsSection />
 
         {/* ---- Prayer times (dashboard widget) ---- */}
         <PrayerTimesSettingsSection canEdit={canEdit} />
