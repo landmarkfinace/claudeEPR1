@@ -28,6 +28,7 @@ import { NameListSettingsSection } from '@/components/app/settings/namelist-sett
 import { SignatoriesSettingsSection } from '@/components/app/settings/signatories-settings'
 import { QuotationTermsSettingsSection } from '@/components/app/settings/quotation-terms-settings'
 import { PrayerTimesSettingsSection } from '@/components/app/settings/prayer-times-settings'
+import { EILetterheadSettingsSection } from '@/components/app/settings/ei-letterhead-settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -610,6 +611,9 @@ export function SettingsView() {
             )}
           </div>
         </SectionCard>
+
+        {/* ---- Company Letterhead — E-Invoice (header / footer / watermark) ---- */}
+        <EILetterheadSettingsSection canEdit={canEdit} />
 
         {/* ---- ZATCA e-Invoicing & Connection ---- */}
         <SectionCard className="p-6">

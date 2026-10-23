@@ -1083,6 +1083,27 @@ export type LetterheadConfig = {
   footerHeightMm: number
 }
 
+/**
+ * E-Invoice letterhead configuration (single JSON row in the Setting KV table,
+ * GET/PUT /api/e-invoice-letterhead). The E-Invoice module's own letterhead:
+ * a 45 mm header band + 25 mm footer band (full A4 width) + an optional
+ * watermark centered behind the body. When any slot is uploaded it takes
+ * priority over the shared company letterhead; when all slots are empty the
+ * invoice prints exactly as before (shared letterhead / empty bands).
+ */
+export type EInvoiceLetterheadConfig = {
+  /** PNG data URL — 210 mm wide artwork for the 45 mm header band ('' unset) */
+  header: string
+  /** PNG data URL — 210 mm wide artwork for the 25 mm footer band ('' unset) */
+  footer: string
+  /** PNG data URL — transparent watermark behind the body ('' unset) */
+  watermark: string
+  /** watermark print opacity 10–100 (%); the artwork is expected pre-faded */
+  watermarkOpacity: number
+  /** master on/off for the watermark layer */
+  watermarkEnabled: boolean
+}
+
 export type QuotationRow = {
   id: string
   quoteNumber: string

@@ -49,7 +49,14 @@ import { amountInWordsBoth } from '@/lib/arabic-words'
 import { fileToDataUrl } from '@/lib/image-data-url'
 import { formatDate, formatMoney, formatNumber, round2, toDateInputValue } from '@/lib/format'
 import { can, useAppStore } from '@/lib/store'
-import type { ClientRow, EInvoiceConfig, EInvoiceRow, LetterheadConfig, Paginated } from '@/lib/types'
+import type {
+  ClientRow,
+  EInvoiceConfig,
+  EInvoiceLetterheadConfig,
+  EInvoiceRow,
+  LetterheadConfig,
+  Paginated,
+} from '@/lib/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useViewIntent } from '@/hooks/use-view-intent'
 import { cn } from '@/lib/utils'
@@ -712,6 +719,11 @@ export function EInvoicesView() {
   const [letterhead, setLetterhead] = useState<LetterheadConfig | null>(null)
   const letterheadRef = useRef<LetterheadConfig | null>(null)
   const letterheadLoaded = useRef(false)
+  // the E-Invoice module's OWN letterhead (header / footer / watermark) —
+  // cached the same way and passed to the print dialog
+  const [eiLetterhead, setEiLetterhead] = useState<EInvoiceLetterheadConfig | null>(null)
+  const eiLetterheadRef = useRef<EInvoiceLetterheadConfig | null>(null)
+  const eiLetterheadLoaded = useRef(false)
 
   // guard against out-of-order responses when filters/page change quickly
   const requestId = useRef(0)
@@ -826,6 +838,20 @@ export function EInvoicesView() {
       setLetterhead(res)
     } catch {
       // no letterhead → the print component reserves empty 45/25mm bands
+    }
+  }, [])
+
+  /** E-Invoice letterhead (header / footer / watermark) — cached after the
+   *  first read; re-fetched after the settings section saves it. */
+  const loadEiLetterhead = useCallback(async (force = false) => {
+    if (eiLetterheadLoaded.current && !force) return
+    eiLetterheadLoaded.current = true
+    try {
+      const res = await api.get<EInvoiceLetterheadConfig>('/api/e-invoice-letterhead')
+      eiLetterheadRef.current = res
+      setEiLetterhead(res)
+    } catch {
+      // none configured → the print component falls back to the shared letterhead
     }
   }, [])
 
@@ -1791,6 +1817,7 @@ export function EInvoicesView() {
   function openDraftPreview() {
     void loadConfig()
     void loadLetterhead()
+    void loadEiLetterhead()
     setQrDataUrl(null) // QR available after save
     setPrintInvoice(null)
     setDraftPreview(buildDraftRow())
@@ -1803,6 +1830,7 @@ export function EInvoicesView() {
     try {
       void loadConfig()
       void loadLetterhead()
+      void loadEiLetterhead()
       const [full, qr] = await Promise.all([
         api.get<EInvoiceRow>(`/api/e-invoices/${row.id}`),
         api.get<{ qrPayload: string; qrDataUrl: string }>(`/api/e-invoices/${row.id}/qr`),
@@ -3683,6 +3711,7 @@ export function EInvoicesView() {
         invoice={printInvoice ?? draftPreview}
         config={eiConfig}
         letterhead={letterhead}
+        eiLetterhead={eiLetterhead}
         qrDataUrl={qrDataUrl}
         open={printOpen}
         onOpenChange={(v) => {

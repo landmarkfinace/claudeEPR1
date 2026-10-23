@@ -31,11 +31,24 @@
 // the signature row + note line pinned to the bottom — empty space goes
 // BETWEEN the closing group and the signature row, never below it.
 //
-// Letterhead: the SHARED company letterhead (Settings → the letterhead
-// manager — 45mm header + 25mm footer artwork) prints on EVERY page. An
-// e-invoice-specific full-page upload (Settings → E-Invoice) still overrides
-// it. With NO letterhead the same 45mm / 25mm zones stay COMPLETELY EMPTY —
-// no placeholder text, no stripes, no borders.
+// Letterhead: the E-Invoice module's OWN letterhead (Settings → Company
+// Letterhead — E-Invoice: 45 mm header band + 25 mm footer band artwork + a
+// watermark centered behind the body) prints on EVERY page; any uploaded slot
+// activates the letterhead layout: 45/25 mm full-width bands, 5 mm gaps (body
+// 50–267 mm), 12 mm side margins and a bilingual page number line just above
+// the footer. It takes priority over an e-invoice-specific full-page upload
+// (Settings → E-Invoice) and over the SHARED company letterhead — with all
+// three slots empty the invoice works exactly as it does now (full-page →
+// shared bands → completely empty 45 mm / 25 mm zones: no placeholder text,
+// no stripes, no borders).
+//
+// "Print with letterhead" (checkbox in the print dialog, default checked)
+// hides the header / footer / watermark artwork but keeps the exact same
+// margins — for pre-printed letterhead paper.
+//
+// The watermark layer sits BEHIND all body content (above the letterhead
+// artwork, below the content column), centered in the body area, ≈120 mm
+// wide, aspect ratio kept, opacity 10–100 % (Settings), on/off in Settings.
 //
 // The component is purely presentational: the parent (e-invoices view)
 // fetches the document, the e-invoice print config, the shared letterhead
@@ -48,6 +61,7 @@ import { FileDown, Paperclip, Printer, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -63,6 +77,7 @@ import type {
   AppSettings,
   EInvoiceConfig,
   EInvoiceItemRow,
+  EInvoiceLetterheadConfig,
   EInvoiceRow,
   LetterheadConfig,
 } from '@/lib/types'
@@ -102,6 +117,15 @@ const CONTENT_W_MM = PAGE_W_MM - 2 * SIDE_PAD_MM
 /** breathing room between the letterhead band and the content column */
 const BAND_GAP_TOP_MM = 1
 const BAND_GAP_BOTTOM_MM = 1.5
+// ── the E-Invoice letterhead layout (Settings → Company Letterhead — E-Invoice)
+// 45 mm header band + 25 mm footer band, 5 mm gaps (body 50–267 mm),
+// 12 mm side margins, dedicated page number line above the footer ─────────
+const EI_LH_HEADER_MM = 45
+const EI_LH_FOOTER_MM = 25
+const EI_LH_GAP_MM = 5
+const EI_LH_SIDE_MM = 12
+/** watermark print width (mm) — centered in the body area, aspect kept */
+const EI_LH_WATERMARK_W_MM = 120
 /** fixed vertical rhythm (these gaps are included in the measured heights) */
 const GAP_TABLE_CLOSING_MM = 2.5 // items table → closing group
 const GAP_SIG_NOTE_MM = 1.5 // signature row → note line
@@ -200,10 +224,18 @@ function StatusStamp({ status, overdue }: { status: string; overdue: boolean }) 
 }
 
 // ── Letterhead resolution ───────────────────────────────────────────────────
-// Priority: the e-invoice module's own full-page upload (Settings → E-Invoice)
-// → the SHARED company letterhead (header 45mm + footer 25mm artwork, the
-// same images as Quotation / Supplier P.O. / Name List) → completely empty
-// reserved bands. Without artwork the 45mm / 25mm zones print NOTHING.
+// Priority: the E-Invoice module's OWN letterhead (Settings → Company
+// Letterhead — E-Invoice — ANY uploaded slot of header / footer / enabled
+// watermark activates the letterhead layout) → the module's full-page upload
+// (Settings → E-Invoice) → the SHARED company letterhead → completely empty
+// reserved bands. Without artwork the 45 mm / 25 mm zones print NOTHING.
+//
+// The watermark is resolved INDEPENDENTLY of the band source — it layers on
+// every path (centered in that path's body area).
+//
+// "Print with letterhead" (withLetterhead) only gates the ARTWORK — every
+// geometry value (bands, gaps, side margins, page-number line) stays exactly
+// the same, so unchecking it is safe for pre-printed letterhead paper.
 type ResolvedLetterhead = {
   kind: 'full' | 'bands' | 'empty'
   fullImg: string | null
@@ -215,37 +247,86 @@ type ResolvedLetterhead = {
   /** content column insets (mm) — band + breathing gap */
   topPadMm: number
   bottomPadMm: number
+  /** content column side margins (mm) */
+  sidePadMm: number
+  /** content width (mm) — the width the measure rig renders at */
+  contentWMm: number
+  /** dedicated bilingual page-number line just above the footer band */
+  dedicatedPageNo: boolean
+  /** watermark layer (already gated by withLetterhead + the Settings toggle) */
+  watermarkImg: string | null
+  watermarkOpacityPct: number
 }
 
 function resolveLetterhead(
   config: EInvoiceConfig,
-  lh?: LetterheadConfig | null
+  lh?: LetterheadConfig | null,
+  eiLh?: EInvoiceLetterheadConfig | null,
+  withLetterhead = true
 ): ResolvedLetterhead {
-  // module-specific full-page upload wins
+  // watermark layer — independent of the band source; hidden with the
+  // letterhead checkbox or the Settings on/off toggle
+  const wmImg =
+    withLetterhead && eiLh?.watermark && eiLh.watermarkEnabled ? eiLh.watermark : null
+  const wmOpacity = eiLh?.watermarkOpacity ?? 100
+
+  const headerH = lh?.headerHeightMm || 45
+  const footerH = lh?.footerHeightMm || 25
+
+  // 1) the E-Invoice's own letterhead — any uploaded slot activates the
+  //    letterhead layout (45/25 mm bands, 5 mm gaps, 12 mm sides, dedicated
+  //    page number above the footer). Slots not uploaded stay EMPTY.
+  if (eiLh && (eiLh.header || eiLh.footer || (eiLh.watermark && eiLh.watermarkEnabled))) {
+    return {
+      kind: 'bands',
+      fullImg: null,
+      headerImg: withLetterhead ? eiLh.header || null : null,
+      footerImg: withLetterhead ? eiLh.footer || null : null,
+      topBandMm: EI_LH_HEADER_MM,
+      bottomBandMm: EI_LH_FOOTER_MM,
+      topPadMm: EI_LH_HEADER_MM + EI_LH_GAP_MM, // body starts 50 mm from the top
+      bottomPadMm: EI_LH_FOOTER_MM + EI_LH_GAP_MM, // body ends 30 mm from the bottom
+      sidePadMm: EI_LH_SIDE_MM,
+      contentWMm: PAGE_W_MM - 2 * EI_LH_SIDE_MM,
+      dedicatedPageNo: true,
+      watermarkImg: wmImg,
+      watermarkOpacityPct: wmOpacity,
+    }
+  }
+  // 2) module-specific full-page upload (legacy path — geometry unchanged)
   if (config.letterhead) {
     return {
       kind: 'full',
-      fullImg: config.letterhead,
+      fullImg: withLetterhead ? config.letterhead : null,
       headerImg: null,
       footerImg: null,
       topBandMm: config.topMm,
       bottomBandMm: config.bottomMm,
       topPadMm: config.topMm + BAND_GAP_TOP_MM,
       bottomPadMm: config.bottomMm + BAND_GAP_BOTTOM_MM,
+      sidePadMm: SIDE_PAD_MM,
+      contentWMm: CONTENT_W_MM,
+      dedicatedPageNo: false,
+      watermarkImg: wmImg,
+      watermarkOpacityPct: wmOpacity,
     }
   }
-  const headerH = lh?.headerHeightMm || 45
-  const footerH = lh?.footerHeightMm || 25
+  // 3) shared company letterhead (legacy path — geometry unchanged)
   if (lh?.mode === 'full' && lh.fullPageImage) {
     return {
       kind: 'full',
-      fullImg: lh.fullPageImage,
+      fullImg: withLetterhead ? lh.fullPageImage : null,
       headerImg: null,
       footerImg: null,
       topBandMm: headerH,
       bottomBandMm: footerH,
       topPadMm: headerH + 3,
       bottomPadMm: footerH + 3,
+      sidePadMm: SIDE_PAD_MM,
+      contentWMm: CONTENT_W_MM,
+      dedicatedPageNo: false,
+      watermarkImg: wmImg,
+      watermarkOpacityPct: wmOpacity,
     }
   }
   const headerImg =
@@ -254,12 +335,17 @@ function resolveLetterhead(
   return {
     kind: headerImg || footerImg ? 'bands' : 'empty',
     fullImg: null,
-    headerImg,
-    footerImg,
+    headerImg: withLetterhead ? headerImg : null,
+    footerImg: withLetterhead ? footerImg : null,
     topBandMm: headerH,
     bottomBandMm: footerH,
     topPadMm: headerH + BAND_GAP_TOP_MM,
     bottomPadMm: footerH + BAND_GAP_BOTTOM_MM,
+    sidePadMm: SIDE_PAD_MM,
+    contentWMm: CONTENT_W_MM,
+    dedicatedPageNo: false,
+    watermarkImg: wmImg,
+    watermarkOpacityPct: wmOpacity,
   }
 }
 
@@ -722,10 +808,13 @@ function ContinuationHeader({
   m,
   page,
   of,
+  dedicatedPageNo,
 }: {
   m: DocModel
   page: number
   of: number
+  /** the page number lives on the dedicated line just above the footer */
+  dedicatedPageNo?: boolean
 }) {
   return (
     <>
@@ -743,9 +832,11 @@ function ContinuationHeader({
             · continued · <span lang="ar" dir="rtl">تابع</span>
           </span>
         </p>
-        <p className="shrink-0 text-[7.5pt] tabular-nums" style={{ color: MUTED }}>
-          Page {page} of {of}
-        </p>
+        {dedicatedPageNo ? null : (
+          <p className="shrink-0 text-[7.5pt] tabular-nums" style={{ color: MUTED }}>
+            Page {page} of {of}
+          </p>
+        )}
       </div>
       <div style={{ height: '1.5mm' }} />
     </>
@@ -1222,29 +1313,49 @@ function SignatureRow({ m }: { m: DocModel }) {
 }
 
 // ── Block H: note line — the foot of EVERY page ─────────────────────────────
-function NoteLine({ m, page, of }: { m: DocModel; page: number; of: number }) {
+function NoteLine({
+  m,
+  page,
+  of,
+  dedicatedPageNo,
+}: {
+  m: DocModel
+  page: number
+  of: number
+  /** the page number lives on the dedicated line just above the footer */
+  dedicatedPageNo?: boolean
+}) {
   return (
     <p
       className="break-words text-center text-[7.5pt] leading-snug"
       style={{ color: MUTED }}
     >
-      {m.noteCompany} · <span className="font-mono">{m.inv.invoiceNumber}</span> · Page {page} of {of} · Printed{' '}
-      {fmtDate(m.printedAt.toISOString())}
+      {m.noteCompany} · <span className="font-mono">{m.inv.invoiceNumber}</span>
+      {dedicatedPageNo ? null : (
+        <>
+          {' '}· Page {page} of {of}
+        </>
+      )}
+      {' '}· Printed {fmtDate(m.printedAt.toISOString())}
     </p>
   )
 }
 
 // ── Measure rig ─────────────────────────────────────────────────────────────
-// Renders every block ONCE, hidden, at the exact content width (194mm); the
-// real DOM heights are read back after webfonts + images are ready and handed
-// to the planner. The rig lives OUTSIDE .print-area, so it can never leak
-// into the serialized print DOM.
+// Renders every block ONCE, hidden, at the exact content width of the ACTIVE
+// letterhead path (194 mm legacy / 186 mm E-Invoice letterhead); the real DOM
+// heights are read back after webfonts + images are ready and handed to the
+// planner. The rig lives OUTSIDE .print-area, so it can never leak into the
+// serialized print DOM. Re-measures whenever the model OR the resolved
+// letterhead (→ content width / page-number flags) changes.
 function MeasureRig({
   m,
+  lh,
   onMeasured,
 }: {
   m: DocModel
-  onMeasured: (m: DocModel, value: Measured) => void
+  lh: ResolvedLetterhead
+  onMeasured: (m: DocModel, lh: ResolvedLetterhead, value: Measured) => void
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const calRef = useRef<HTMLDivElement>(null)
@@ -1296,13 +1407,13 @@ function MeasureRig({
         sigMm: mm(sigRef.current),
         noteMm: mm(noteRef.current),
       }
-      onMeasured(m, value)
+      onMeasured(m, lh, value)
     }
     void run()
     return () => {
       cancelled = true
     }
-  }, [m, onMeasured])
+  }, [m, lh, onMeasured])
 
   return (
     <div
@@ -1312,7 +1423,7 @@ function MeasureRig({
       className="pointer-events-none absolute top-0"
       style={{
         left: '-10000px',
-        width: `${CONTENT_W_MM}mm`,
+        width: `${lh.contentWMm}mm`,
         visibility: 'hidden',
         fontFamily: DOC_FONT,
       }}
@@ -1322,7 +1433,7 @@ function MeasureRig({
         <InvoiceHead m={m} />
       </div>
       <div ref={contRef}>
-        <ContinuationHeader m={m} page={2} of={2} />
+        <ContinuationHeader m={m} page={2} of={2} dedicatedPageNo={lh.dedicatedPageNo} />
       </div>
       {/* fixed table overhead: border box + thead */}
       <div ref={tableRef}>
@@ -1346,7 +1457,7 @@ function MeasureRig({
         <SignatureRow m={m} />
       </div>
       <div ref={noteRef}>
-        <NoteLine m={m} page={1} of={1} />
+        <NoteLine m={m} page={1} of={1} dedicatedPageNo={lh.dedicatedPageNo} />
       </div>
     </div>
   )
@@ -1360,31 +1471,46 @@ export function EInvoiceDocument({
   settings,
   qrDataUrl,
   letterhead,
+  eiLetterhead,
+  withLetterhead = true,
 }: {
   invoice: EInvoiceRow
   config: EInvoiceConfig
   settings: AppSettings
   qrDataUrl: string | null
-  /** shared company letterhead (Settings → letterhead manager) */
+  /** shared company letterhead (Settings → the letterhead manager) */
   letterhead?: LetterheadConfig | null
+  /** the E-Invoice module's own letterhead (header / footer / watermark) */
+  eiLetterhead?: EInvoiceLetterheadConfig | null
+  /** "Print with letterhead" — false hides the artwork, keeps the margins */
+  withLetterhead?: boolean
 }) {
-  const lh = useMemo(() => resolveLetterhead(config, letterhead), [config, letterhead])
+  const lh = useMemo(
+    () => resolveLetterhead(config, letterhead, eiLetterhead, withLetterhead),
+    [config, letterhead, eiLetterhead, withLetterhead]
+  )
   const m = useMemo(
     () => buildModel(invoice, config, settings, qrDataUrl),
     [invoice, config, settings, qrDataUrl]
   )
-  // measured heights, keyed by the model they were measured from — a new
-  // model (different invoice/config/QR) invalidates synchronously during
+  // measured heights, keyed by the model AND the resolved letterhead they
+  // were measured at — a new model (different invoice/config/QR) or a new
+  // letterhead (different content width) invalidates synchronously during
   // render, so a stale page plan is never shown
-  const [measured, setMeasured] = useState<{ m: DocModel; value: Measured } | null>(null)
+  const [measured, setMeasured] = useState<{
+    m: DocModel
+    lh: ResolvedLetterhead
+    value: Measured
+  } | null>(null)
 
   const handleMeasured = useCallback(
-    (mm: DocModel, value: Measured) => setMeasured({ m: mm, value }),
+    (mm: DocModel, lhead: ResolvedLetterhead, value: Measured) =>
+      setMeasured({ m: mm, lh: lhead, value }),
     []
   )
 
   const plan = useMemo(() => {
-    if (!measured || measured.m !== m) return null
+    if (!measured || measured.m !== m || measured.lh !== lh) return null
     // itemless invoice (an unsaved draft) always renders one page
     if (m.items.length === 0) return { pages: [[]] as number[][], compact: false }
     return planLayout(measured.value, PAGE_H_MM - lh.topPadMm - lh.bottomPadMm)
@@ -1393,8 +1519,8 @@ export function EInvoiceDocument({
   const columnStyle = {
     paddingTop: `${lh.topPadMm}mm`,
     paddingBottom: `${lh.bottomPadMm}mm`,
-    paddingLeft: `${SIDE_PAD_MM}mm`,
-    paddingRight: `${SIDE_PAD_MM}mm`,
+    paddingLeft: `${lh.sidePadMm}mm`,
+    paddingRight: `${lh.sidePadMm}mm`,
   }
 
   return (
@@ -1423,8 +1549,10 @@ export function EInvoiceDocument({
                   }}
                 >
                   {/* ── letterhead artwork (every page) ──
-                      full-page override → shared bands → nothing at all
-                      (the 45mm / 25mm zones stay completely empty) */}
+                      the E-Invoice's own bands → full-page override → shared
+                      bands → nothing at all (the 45 mm / 25 mm zones stay
+                      completely empty). "Print with letterhead" off → the
+                      artwork is skipped but every margin stays the same. */}
                   {lh.kind === 'full' && lh.fullImg ? (
                     <img
                       src={lh.fullImg}
@@ -1455,6 +1583,35 @@ export function EInvoiceDocument({
                     </>
                   ) : null}
 
+                  {/* ── company watermark (every page) ── centered in the body
+                      area, ≈120 mm wide, aspect ratio kept, BEHIND all body
+                      content (above the letterhead artwork z-0, below the
+                      content column z-10 — never on top of text) */}
+                  {lh.watermarkImg ? (
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute z-[1] flex items-center justify-center"
+                      style={{
+                        top: `${lh.topPadMm}mm`,
+                        bottom: `${lh.bottomPadMm}mm`,
+                        left: 0,
+                        right: 0,
+                      }}
+                    >
+                      <img
+                        src={lh.watermarkImg}
+                        alt=""
+                        className="block"
+                        style={{
+                          width: `${EI_LH_WATERMARK_W_MM}mm`,
+                          maxHeight: '100%',
+                          objectFit: 'contain',
+                          opacity: lh.watermarkOpacityPct / 100,
+                        }}
+                      />
+                    </div>
+                  ) : null}
+
                   {/* ── DRAFT watermark (drafts only — behind the content,
                       never above the QR which sits in the content layer) ── */}
                   {m.inv.status === 'draft' ? (
@@ -1474,6 +1631,24 @@ export function EInvoiceDocument({
                     </div>
                   ) : null}
 
+                  {/* ── page number — just above the footer band on EVERY page
+                      (E-Invoice letterhead layout only; the legacy paths keep
+                      the page number inside the note line / continuation
+                      header exactly as before) ── */}
+                  {lh.dedicatedPageNo ? (
+                    <p
+                      aria-hidden
+                      className="pointer-events-none absolute left-0 right-0 z-[6] text-center text-[7.5pt] leading-snug tabular-nums"
+                      style={{ bottom: `${lh.bottomBandMm + 1}mm`, color: MUTED }}
+                    >
+                      Page {pageIdx + 1} of {plan.pages.length}
+                      <span className="mx-1.5 text-[#6B7488]">/</span>
+                      <span lang="ar" dir="rtl" className="tracking-normal">
+                        صفحة {pageIdx + 1} من {plan.pages.length}
+                      </span>
+                    </p>
+                  ) : null}
+
                   {/* ── content column — a flex column of the full content
                       area: blocks at the top, flexible spacer, signature row
                       + note line pinned to the bottom on the last page ── */}
@@ -1484,7 +1659,12 @@ export function EInvoiceDocument({
                     {pageIdx === 0 ? (
                       <InvoiceHead m={m} />
                     ) : (
-                      <ContinuationHeader m={m} page={pageIdx + 1} of={plan.pages.length} />
+                      <ContinuationHeader
+                        m={m}
+                        page={pageIdx + 1}
+                        of={plan.pages.length}
+                        dedicatedPageNo={lh.dedicatedPageNo}
+                      />
                     )}
 
                     <ItemsTable
@@ -1512,14 +1692,19 @@ export function EInvoiceDocument({
                       </>
                     ) : null}
 
-                    <NoteLine m={m} page={pageIdx + 1} of={plan.pages.length} />
+                    <NoteLine
+                      m={m}
+                      page={pageIdx + 1}
+                      of={plan.pages.length}
+                      dedicatedPageNo={lh.dedicatedPageNo}
+                    />
                   </div>
                 </div>
               )
             })
           : null}
       </div>
-      {!plan ? <MeasureRig m={m} onMeasured={handleMeasured} /> : null}
+      {!plan ? <MeasureRig m={m} lh={lh} onMeasured={handleMeasured} /> : null}
     </>
   )
 }
@@ -1529,14 +1714,18 @@ export function EInvoiceDocument({
 /**
  * Full-screen dialog rendering the paginated A4 e-invoice. Parent supplies:
  * the full EInvoiceRow (items included), the e-invoice print config, the
- * shared letterhead config and the ZATCA QR data URL (null for the
- * unsaved-draft preview → placeholder box). Print button renders the server
- * PDF (vector, headless Chromium) and prints that.
+ * E-Invoice letterhead config, the shared letterhead config and the ZATCA QR
+ * data URL (null for the unsaved-draft preview → placeholder box). Print
+ * button renders the server PDF (vector, headless Chromium) and prints that.
+ * The "Print with letterhead" checkbox (default checked, reset on every
+ * open) hides the header / footer / watermark artwork while keeping the
+ * exact same margins — for pre-printed letterhead paper.
  */
 export function EInvoicePrintDialog({
   invoice,
   config,
   letterhead,
+  eiLetterhead,
   qrDataUrl,
   open,
   onOpenChange,
@@ -1544,12 +1733,23 @@ export function EInvoicePrintDialog({
   invoice: EInvoiceRow | null
   config: EInvoiceConfig | null
   letterhead?: LetterheadConfig | null
+  eiLetterhead?: EInvoiceLetterheadConfig | null
   qrDataUrl: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const settings = useAppStore((s) => s.settings)
   const [signedOpen, setSignedOpen] = useState(false)
+  const [withLetterhead, setWithLetterhead] = useState(true)
+
+  // "Print with letterhead" defaults to CHECKED on every open: the reset
+  // happens on the CLOSE edge (event-handler context — every close path
+  // routes through handleDialogOpenChange), so the next open always starts
+  // checked, no matter how the dialog was closed before.
+  function handleDialogOpenChange(v: boolean) {
+    if (!v) setWithLetterhead(true)
+    onOpenChange(v)
+  }
 
   usePageRule(open, 'size: A4 portrait; margin: 0;')
 
@@ -1560,7 +1760,7 @@ export function EInvoicePrintDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         showCloseButton={false}
         className="flex max-h-[92vh] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[900px] print:static print:max-h-none print:w-full print:max-w-none print:translate-x-0 print:translate-y-0 print:overflow-visible print:rounded-none print:border-0 print:p-0 print:shadow-none"
@@ -1597,6 +1797,21 @@ export function EInvoicePrintDialog({
                   }`
                 : ''}
             </p>
+            {/* "Print with letterhead" — default checked. Unchecked → the
+                header / footer / watermark artwork is hidden on screen AND in
+                every output (browser print / PDF download) while every margin
+                stays the same — for pre-printed letterhead paper. */}
+            <label
+              className="mt-1 inline-flex cursor-pointer select-none items-center gap-2 text-xs font-medium"
+              title="Uncheck for pre-printed letterhead paper — the artwork is hidden but the layout stays identical"
+            >
+              <Checkbox
+                checked={withLetterhead}
+                onCheckedChange={(v) => setWithLetterhead(v === true)}
+                aria-label="Print with letterhead"
+              />
+              Print with letterhead
+            </label>
           </div>
           <div className="flex items-center gap-2">
             {invoice?.signedCopyImage ? (
@@ -1605,7 +1820,7 @@ export function EInvoicePrintDialog({
                 Signed copy
               </Button>
             ) : null}
-            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" size="sm" onClick={() => handleDialogOpenChange(false)}>
               <X className="h-4 w-4" />
               Close
             </Button>
@@ -1639,6 +1854,8 @@ export function EInvoicePrintDialog({
               settings={settings}
               qrDataUrl={qrDataUrl}
               letterhead={letterhead}
+              eiLetterhead={eiLetterhead}
+              withLetterhead={withLetterhead}
             />
           ) : (
             <div className="flex min-h-[300px] items-center justify-center bg-white p-16 text-sm text-[#6B7488]">
