@@ -22,6 +22,7 @@
 // from the STRUCTURED fields exactly like Classic. Letterhead artwork +
 // geometry come from Settings; without artwork the reserved bands stay
 // EMPTY (never placeholder text).
+import { Fragment } from 'react'
 import type { LetterheadConfig } from '@/lib/types'
 import type { TemplateAgreement, TemplateParty } from '@/lib/agreement-template'
 import {
@@ -170,7 +171,16 @@ function PartyBlock({ labelEn, labelAr, p }: { labelEn: string; labelAr: string;
       ) : null}
       {info.length > 0 || p.address.ar ? (
         <div style={{ fontSize: '7.4pt', color: INK_SOFT, lineHeight: 1.45, marginTop: '0.5mm' }}>
-          {info.length > 0 ? <div>{info.reduce<React.ReactNode>((acc, x, i) => (i === 0 ? [x] : [acc, ' · ', x]), null)}</div> : null}
+          {info.length > 0 ? (
+            <div>
+              {info.map((x, i) => (
+                <Fragment key={i}>
+                  {i > 0 ? ' · ' : null}
+                  {x}
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
           {p.address.ar ? (
             <div lang="ar" dir="rtl" style={{ fontFamily: AR_FONT, textAlign: 'right' }}>
               {p.address.ar}
